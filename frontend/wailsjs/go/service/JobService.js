@@ -10,18 +10,10 @@ export function CancelAll() {
   return window['go']['service']['JobService']['CancelAll']();
 }
 
-export function Get(arg1) {
-  return window['go']['service']['JobService']['Get'](arg1);
-}
-
 export function List() {
   return window['go']['service']['JobService']['List']();
 }
 
 export function Logs(arg1, arg2) {
   return window['go']['service']['JobService']['Logs'](arg1, arg2);
-}
-
-export function PruneAsk(arg1) {
-  return window['go']['service']['JobService']['PruneAsk'](arg1);
 }

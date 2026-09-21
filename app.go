@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"runtime"
-	"time"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -31,16 +29,13 @@ type App struct {
 	rt  *service.Runtime
 	log *logging.Logger
 
-	Env         *service.EnvService
-	Mirror      *service.MirrorService
-	Sdk         *service.SdkService
-	Avd         *service.AvdService
-	Emulator    *service.EmulatorService
-	Adb         *service.AdbService
-	Settings    *service.SettingsService
-	Diagnostics *service.DiagnosticsService
-	Jobs        *service.JobService
-	Window      *service.WindowService
+	Env      *service.EnvService
+	Avd      *service.AvdService
+	Emulator *service.EmulatorService
+	Settings *service.SettingsService
+	Logs     *service.LogService
+	Jobs     *service.JobService
+	Window   *service.WindowService
 }
 
 // NewApp 装配应用。
@@ -48,14 +43,13 @@ func NewApp() (*App, error) {
 	appName := AppName
 	version := AppVersion
 
-	appDir := platform.AppDataDir(appName)
-	if err := platform.EnsureDir(appDir); err != nil {
-		return nil, fmt.Errorf("无法创建应用数据目录 %s: %w", appDir, err)
+	// 软件自有目录（sdk / avd / config / logs / cache）
+	if err := platform.EnsureLayout(); err != nil {
+		return nil, fmt.Errorf("无法创建软件目录 %s: %w", platform.Root(), err)
 	}
 
-	// 日志：排序为 环境变量 > 配置（在 settings 加载后修正）> 默认
 	logger, err := logging.New(logging.Options{
-		Dir:      platform.SubDir(appName, "logs"),
+		Dir:      platform.LogDir(),
 		Level:    initialLogLevel(),
 		KeepDays: 7,
 		Stdout:   stdoutIfDev(),
@@ -66,41 +60,37 @@ func NewApp() (*App, error) {
 		logger = logging.Discard()
 	}
 
-	settings := config.NewManager(filepath.Join(appDir, "settings.json"))
+	settings := config.NewManager(platform.SettingsPath())
 	if err := settings.Load(); err != nil {
 		logger.Warn("app", "设置加载失败，已使用默认值: %v", err)
-	} else {
-		// 应用设置中的日志级别与保留天数
-		current := settings.Get()
-		logger.SetLevel(current.LogLevel)
 	}
+	logger.SetLevel(settings.Get().LogLevel)
 
-	rt := service.NewRuntime(appName, version, settings, platform.SubDir(appName, "cache"), logger)
+	rt, err := service.NewRuntime(appName, version, settings, logger)
+	if err != nil {
+		return nil, err
+	}
 	rt.SetEmitter(func(event string, payload any) {
-		// Runtime.Emit 已保证上下文就绪，此处可直接调用
 		wailsruntime.EventsEmit(rt.Context(), event, payload)
 	})
 
-	// 把每条日志实时推送前端（设置页的日志面板按需订阅）
+	// 把每条日志实时推送前端（底部统一日志区域）
 	logger.SetSink(func(entry logging.Entry) {
 		rt.Emit("log:line", entry)
 	})
 
 	app := &App{
-		rt:          rt,
-		log:         logger,
-		Env:         service.NewEnvService(rt),
-		Mirror:      service.NewMirrorService(rt),
-		Sdk:         service.NewSdkService(rt),
-		Avd:         service.NewAvdService(rt),
-		Emulator:    service.NewEmulatorService(rt),
-		Adb:         service.NewAdbService(rt),
-		Settings:    service.NewSettingsService(rt),
-		Diagnostics: service.NewDiagnosticsService(rt),
-		Jobs:        service.NewJobService(rt),
-		Window:      service.NewWindowService(rt),
+		rt:       rt,
+		log:      logger,
+		Env:      service.NewEnvService(rt),
+		Avd:      service.NewAvdService(rt),
+		Emulator: service.NewEmulatorService(rt),
+		Settings: service.NewSettingsService(rt),
+		Logs:     service.NewLogService(rt),
+		Jobs:     service.NewJobService(rt),
+		Window:   service.NewWindowService(rt),
 	}
-	app.log.Info("app", "%s %s 启动中，数据目录 %s", appName, version, appDir)
+	app.log.Info("app", "%s %s 启动中，软件目录 %s", appName, version, platform.Root())
 	return app, nil
 }
 
@@ -110,20 +100,25 @@ func (a *App) startup(ctx context.Context) {
 	a.rt.SetContext(ctx)
 	a.log.Info("app", "窗口已就绪（%s/%s）", runtime.GOOS, runtime.GOARCH)
 
-	// 首帧渲染后推一次环境快照，避免前端白屏等待
+	// 首次运行且软件自带 SDK 尚未初始化时，自动准备环境（进度显示在底部任务区域）
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				a.log.Error("app", "启动自检 panic: %v", r)
 			}
 		}()
-		time.Sleep(300 * time.Millisecond)
-		report, err := a.Env.Detect(service.DetectRequest{Force: true})
+		report, err := a.Env.Check()
 		if err != nil {
 			a.log.Warn("app", "启动自检失败: %v", err)
 			return
 		}
 		a.rt.Emit("env:changed", report)
+		if report.NeedInit {
+			a.log.Info("app", "软件自带 SDK 尚未初始化，开始自动准备")
+			if _, err := a.Env.Prepare(); err != nil {
+				a.log.Error("app", "自动准备 SDK 失败: %v", err)
+			}
+		}
 	}()
 }
 
@@ -160,25 +155,8 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	return false
 }
 
-// GetVersion 返回版本号（前端"关于"页使用）。
+// GetVersion 返回版本号。
 func (a *App) GetVersion() string { return a.rt.Version }
-
-// GetAppInfo 返回应用级信息。
-func (a *App) GetAppInfo() map[string]string {
-	resolved := a.rt.Resolved()
-	return map[string]string{
-		"appName":  a.rt.AppName,
-		"version":  a.rt.Version,
-		"dataDir":  platform.AppDataDir(a.rt.AppName),
-		"logDir":   resolved.LogDir,
-		"cacheDir": resolved.CacheDir,
-	}
-}
-
-// OpenDataDir 打开应用数据目录（诊断用）。
-func (a *App) OpenDataDir() error {
-	return a.Env.OpenInExplorer(platform.AppDataDir(a.rt.AppName))
-}
 
 // Greet 是 Wails 模板遗留方法，保留用于本地连通性自测。
 func (a *App) Greet(name string) string {

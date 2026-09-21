@@ -1,394 +1,401 @@
 package service
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
+	"context"
 	"runtime"
 	"strings"
+	"time"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"AVDDesktop/internal/avd/store"
 	"AVDDesktop/internal/domain"
+	"AVDDesktop/internal/job"
 	"AVDDesktop/internal/platform"
-	"AVDDesktop/internal/sdk/detect"
+	"AVDDesktop/internal/proc"
+	"AVDDesktop/internal/sdk"
 )
 
-// EnvService 提供环境自检与宿主交互。
+// EnvService 提供环境检查与自动准备（全局唯一入口）。
 type EnvService struct{ rt *Runtime }
 
 // NewEnvService 创建 EnvService。
 func NewEnvService(rt *Runtime) *EnvService { return &EnvService{rt: rt} }
 
-// DetectRequest 是自检请求。
-type DetectRequest struct {
-	Force           bool   `json:"force"`
-	SdkRootOverride string `json:"sdkRootOverride,omitempty"`
-}
+// 各类命令的检测超时。
+const (
+	javaTimeout     = 30 * time.Second
+	sdkmanagerProbe = 60 * time.Second
+	adbProbe        = 30 * time.Second
+	emulatorProbe   = 90 * time.Second
+)
 
-// Detect 执行全量环境自检。
-func (s *EnvService) Detect(req DetectRequest) (*domain.EnvReport, error) {
-	if req.Force {
-		s.rt.detector.Invalidate()
-	}
-	settings := s.rt.settings.Get()
-	sdkRoot := req.SdkRootOverride
-	if sdkRoot == "" {
-		sdkRoot = settings.SdkRoot
-	}
-
+// Check 执行唯一的环境检查：确认软件自带的 sdkmanager / avdmanager / emulator / adb 与 JDK 是否可用。
+func (s *EnvService) Check() (*domain.EnvReport, error) {
+	started := time.Now()
 	comp := s.rt.Components()
-	report, err := s.rt.detector.Detect(s.rt.Context(), detect.Options{
-		SdkRootOverride:  sdkRoot,
-		JdkPathOverride:  settings.JdkPath,
-		AvdHomeOverride:  settings.AvdHome,
-		InjectEnv:        settings.InjectEnvForChild,
-		RunningInstances: s.runningInstanceCount(),
-		AvdIssues:        s.avdHealthIssues(comp),
-	})
-	if err != nil {
-		return nil, err
+	tools := comp.Tools
+	env := comp.Env
+	ctx := s.rt.Context()
+
+	report := &domain.EnvReport{
+		AppRoot:  platform.Root(),
+		SdkRoot:  tools.SdkRoot,
+		AvdHome:  platform.AvdHome(),
+		JavaPath: platform.FindJava(),
+		Host: domain.HostInfo{
+			OS:       runtime.GOOS,
+			Arch:     runtime.GOARCH,
+			CPUCores: runtime.NumCPU(),
+		},
+		CheckedAt: platform.NowMs(),
 	}
+
+	javaVersion := ""
+	if report.JavaPath != "" {
+		javaVersion = parseJavaVersion(sdk.ToolVersion(ctx, report.JavaPath, []string{"-version"}, env, javaTimeout))
+	} else {
+		javaVersion = sdk.ToolVersion(ctx, "java", []string{"-version"}, env, javaTimeout)
+	}
+
+	javaOK := report.JavaPath != "" && javaVersion != ""
+	report.Components = append(report.Components, toolStatus(domain.ToolJDK, "JDK", javaOK, javaVersion, report.JavaPath, &domain.ToolFix{
+		Label:   "查看说明",
+		Command: "安装 JDK 17 或更高版本，并设置 JAVA_HOME（sdkmanager 与 avdmanager 依赖 JDK）",
+	}))
+
+	// sdkmanager / avdmanager 由 JDK 驱动：缺 JDK 时它们即使存在也无法运行。
+	sdkmanagerVersion := ""
+	if javaOK {
+		sdkmanagerVersion = sdk.ToolVersion(ctx, tools.Sdkmanager, []string{"--version"}, env, sdkmanagerProbe)
+	}
+	report.Components = append(report.Components, toolStatus(domain.ToolSdkmanager, "sdkmanager", tools.HasSdkmanager() && sdkmanagerVersion != "", sdkmanagerVersion, tools.Sdkmanager, &domain.ToolFix{
+		Kind:  domain.FixPrepare,
+		Label: "自动准备 SDK",
+	}))
+	report.Components = append(report.Components, toolStatus(domain.ToolAvdmanager, "avdmanager", tools.HasAvdmanager() && javaOK, "", tools.Avdmanager, &domain.ToolFix{
+		Kind:  domain.FixPrepare,
+		Label: "自动准备 SDK",
+	}))
+
+	adbVersion := ""
+	if tools.HasAdb() {
+		adbVersion = parseToolVersionLine(sdk.ToolVersion(ctx, tools.Adb, []string{"version"}, env, adbProbe))
+	}
+	report.Components = append(report.Components, toolStatus(domain.ToolAdb, "adb (platform-tools)", tools.HasAdb(), adbVersion, tools.Adb, &domain.ToolFix{
+		Kind:    domain.FixInstall,
+		Label:   "安装 platform-tools",
+		Payload: "platform-tools",
+	}))
+
+	emulatorVersion := ""
+	if tools.HasEmulator() {
+		emulatorVersion = parseEmulatorVersion(sdk.ToolVersion(ctx, tools.Emulator, []string{"-version"}, env, emulatorProbe))
+	}
+	report.Components = append(report.Components, toolStatus(domain.ToolEmulator, "emulator", tools.HasEmulator(), emulatorVersion, tools.Emulator, &domain.ToolFix{
+		Kind:    domain.FixInstall,
+		Label:   "安装 emulator",
+		Payload: "emulator",
+	}))
+
+	// 已安装系统镜像（读官方 sdkmanager 的本地列表，不联网）
+	report.NeedInit = !(tools.HasSdkmanager() && javaOK)
+	if !report.NeedInit {
+		if images, err := sdk.ListImages(ctx, tools, env, true, nil); err == nil {
+			report.Images = len(images)
+		} else {
+			s.rt.Log().Warn("env", "读取已安装系统镜像失败: %v", err)
+		}
+	}
+
+	// 硬件加速（仅在模拟器存在时检测，命令本身较慢）
+	if tools.HasEmulator() {
+		accel := s.checkAcceleration(ctx, tools, env)
+		report.Accel = &accel
+		report.Components = append(report.Components, domain.ToolStatus{
+			ID:      domain.ToolAcceleration,
+			Name:    "硬件加速",
+			State:   domain.StatePresent,
+			Version: accel.Kind,
+			Detail:  accel.Raw,
+		})
+	}
+
+	// 磁盘空间（系统镜像约 1.5-2 GB）
+	report.Disk = platform.DiskSpace(tools.SdkRoot)
+	report.Avds = len(s.avdNames(comp))
+
+	report.Ready = javaOK && tools.HasSdkmanager() && tools.HasAvdmanager() && tools.HasAdb() && tools.HasEmulator()
+	report.Issues = s.buildIssues(report, tools)
+	report.ElapsedMs = time.Since(started).Milliseconds()
 	return report, nil
 }
 
-// runningInstanceCount 统计处于活动状态的实例数。
-func (s *EnvService) runningInstanceCount() int {
-	count := 0
-	for _, inst := range s.rt.Components().Launcher.List() {
-		switch inst.State {
-		case domain.AvdStarting, domain.AvdBooting, domain.AvdRunning, domain.AvdStopping:
-			count++
-		}
-	}
-	return count
-}
-
-// avdHealthIssues 汇总设备配置问题（损坏配置、缺失镜像、.ini 缺失等）。
+// Prepare 自动准备 SDK 环境：下载命令行工具 → 接受许可 → 安装基础组件。
 //
-// 使用 WithSize=false 的快路径：遍历数 GB 的设备数据目录会让自检变慢数秒。
-func (s *EnvService) avdHealthIssues(comp *components) []string {
-	items, err := comp.Store.ListWith(store.ListOptions{WithSize: false})
-	if err != nil || len(items) == 0 {
-		return nil
-	}
-	var issues []string
-	for _, it := range items {
-		if strings.TrimSpace(it.Broken) != "" {
-			issues = append(issues, fmt.Sprintf("%s：%s", it.DisplayName, it.Broken))
-			continue
-		}
-		// 缺少 .ini 的 AVD 在重启后会被工具忽略，属于隐性问题
-		layout := comp.Store.Resolve(it.Name)
-		if layout.Exists && !platform.FileExists(layout.IniPath) {
-			if err := comp.Store.EnsureIni(it.Name); err == nil {
-				s.rt.Log().Warn("avd", "设备 %s 缺少 .ini，已自动补写", it.Name)
-			} else {
-				issues = append(issues, it.DisplayName+"：缺少 .ini 配置文件且无法自动修复")
-			}
-		}
-	}
-	return issues
-}
-
-// EnabledWindowsFeatures 返回 Windows 关键开关（虚拟化/长路径），供加速引导面板使用。
-func (s *EnvService) EnabledWindowsFeatures() (*domain.WindowsInfo, error) {
-	v := platform.VirtualizationInfoCached(s.rt.Context())
-	info := &domain.WindowsInfo{
-		Available:         v.Available,
-		HypervisorPresent: v.HypervisorPresent,
-		VirtFirmware:      v.VirtFirmware,
-		SLAT:              v.SLAT,
-		VMMonitor:         v.VMMonitor,
-		LongPathsEnabled:  v.LongPathsEnabled,
-		HyperVHostService: v.HyperVHostService,
-		VMComputeService:  v.VMComputeService,
-		CPU:               v.CPU,
-		ProductName:       v.ProductName,
-		Caption:           v.Caption,
-		Version:           v.Version,
-		Build:             v.Build,
-		Source:            v.Source,
-		Error:             v.Error,
-	}
-	return info, nil
-}
-
-// DetectSdkRoots 返回候选 SDK 根目录。
-func (s *EnvService) DetectSdkRoots() []domain.SdkRootCandidate {
-	return domain.NonNil(platform.DiscoverSdkRoots(""))
-}
-
-// DetectJava 只检测 JDK。
-func (s *EnvService) DetectJava() (*domain.ToolStatus, error) {
-	settings := s.rt.settings.Get()
-	javaPath := platform.FindJava(settings.JdkPath)
-	env := platform.ChildEnv(settings.SdkRoot, "", settings.InjectEnvForChild)
-	status := detectJavaStatus(s.rt, javaPath, env)
-	return &status, nil
-}
-
-// CheckAcceleration 只检测硬件加速。
-func (s *EnvService) CheckAcceleration() (*domain.AccelInfo, error) {
+// 返回 jobID；进度与日志走统一任务区域。
+func (s *EnvService) Prepare() (string, error) {
 	comp := s.rt.Components()
-	info := detect.CheckAcceleration(s.rt.Context(), comp.Paths.EmulatorExe, comp.Env)
-	// 用 Windows 开关信息补充“为什么不可用”的可操作建议
-	if !info.Available {
-		win := platform.VirtualizationInfoCached(s.rt.Context())
-		if win.Available && win.HypervisorPresent {
-			info.Hints = append(info.Hints,
-				"检测到机器已有 hypervisor 运行：请确认「Windows 虚拟机监控程序平台」已启用",
-				"开启命令：dism /online /enable-feature /featurename:HypervisorPlatform /all /norestart")
-		}
-		if win.Available && !win.HypervisorPresent && !win.VirtFirmware && !win.VMMonitor {
-			info.Hints = append(info.Hints,
-				"未检测到任何 hypervisor，且 CPU 虚拟化能力未上报：请先在 BIOS/UEFI 中开启 VT-x/AMD-V")
-		}
-	}
-	return &info, nil
-}
+	tools := comp.Tools
+	env := comp.Env
 
-// DiskSpace 查询指定路径所在磁盘空间。
-func (s *EnvService) DiskSpace(path string) (*domain.DiskInfo, error) {
-	if strings.TrimSpace(path) == "" {
-		path = s.rt.Components().Paths.SdkRoot
+	unlock, ok := s.rt.locks.TryLock("sdk:" + tools.SdkRoot)
+	if !ok {
+		return "", domain.Err(domain.CodeJobBusy, "已有 SDK 准备/安装任务正在进行").
+			WithHint("请等待当前任务完成，或在底部任务区域取消它")
 	}
-	info := platform.DiskSpace(path)
-	return &info, nil
-}
 
-// ResolveAvdHome 解析 AVD 主目录（含来源说明）。
-func (s *EnvService) ResolveAvdHome() (*domain.AvdHomeInfo, error) {
-	settings := s.rt.settings.Get()
-	res := platform.ResolveAvdHome(settings.AvdHome)
-	info := domain.AvdHomeInfo{
-		Path:     res.Path,
-		Source:   res.Source,
-		Exists:   platform.DirExists(res.Path),
-		Writable: platform.IsWritable(res.Path),
-	}
-	if entries, err := os.ReadDir(res.Path); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() && strings.EqualFold(filepath.Ext(e.Name()), ".ini") {
-				info.Count++
+	j := s.rt.jobs.Start(s.rt.Context(), job.Spec{
+		Kind:  domain.JobBootstrap,
+		Title: "准备软件 SDK 环境",
+	}, func(ctx context.Context, j *job.Job) error {
+		defer unlock()
+		if err := platform.EnsureLayout(); err != nil {
+			return domain.Wrap(domain.CodePermissionDenied, "无法创建软件数据目录", err)
+		}
+
+		// 1. 命令行工具（sdkmanager / avdmanager 的唯一来源）
+		if !tools.HasSdkmanager() {
+			j.SetPhase("下载 Android 命令行工具")
+			j.Logf("info", "sdk", "从官方地址下载命令行工具到 %s", tools.CmdlineTools)
+			started := time.Now()
+			lastBytes := int64(0)
+			lastAt := started
+			err := sdk.Bootstrap(ctx, tools, platform.CacheDir(), func(done, total int64) {
+				speed := int64(0)
+				if elapsed := time.Since(lastAt).Seconds(); elapsed > 0.5 {
+					speed = int64(float64(done-lastBytes) / elapsed)
+					lastBytes, lastAt = done, time.Now()
+				}
+				j.SetBytes(done, total, speed)
+			})
+			if err != nil {
+				return err
+			}
+			j.Logf("info", "sdk", "命令行工具就绪（耗时 %s）", time.Since(started).Round(time.Second))
+		} else {
+			j.Logf("info", "sdk", "已存在命令行工具：%s", tools.Sdkmanager)
+		}
+
+		// 2. 许可（用 y 回答官方提示，不自行维护许可文件）
+		j.SetPhase("接受 SDK 许可")
+		if err := sdk.AcceptLicenses(ctx, tools, env, jobLine(j, "sdkmanager")); err != nil {
+			return err
+		}
+
+		// 3. 基础组件：platform-tools（adb）与 emulator
+		missing := make([]string, 0, 2)
+		if !tools.HasAdb() {
+			missing = append(missing, "platform-tools")
+		}
+		if !tools.HasEmulator() {
+			missing = append(missing, "emulator")
+		}
+		if len(missing) > 0 {
+			j.SetPhase("安装 " + strings.Join(missing, "、"))
+			j.Logf("info", "sdk", "执行：%s", sdk.InstallCommand(tools, missing))
+			if err := sdk.InstallPackages(ctx, tools, env, missing, jobLine(j, "sdkmanager")); err != nil {
+				return err
 			}
 		}
-	}
-	return &info, nil
-}
-
-// ValidateSdkRoot 校验用户手动指定的 SDK 路径。
-func (s *EnvService) ValidateSdkRoot(path string) (*domain.SdkRootValidation, error) {
-	out := &domain.SdkRootValidation{Path: path}
-	if strings.TrimSpace(path) == "" {
-		out.Message = "路径为空"
-		return out, nil
-	}
-	if !platform.DirExists(path) {
-		out.Message = "目录不存在（可以是新目录，安装时会自动创建）"
-		out.Writable = platform.IsWritable(path)
-		out.OK = out.Writable
-		return out, nil
-	}
-	out.Writable = platform.IsWritable(path)
-	checks := []struct {
-		name string
-		dir  string
-	}{
-		{"cmdline-tools", filepath.Join(path, "cmdline-tools")},
-		{"platform-tools", filepath.Join(path, "platform-tools")},
-		{"emulator", filepath.Join(path, "emulator")},
-		{"licenses", filepath.Join(path, "licenses")},
-		{"system-images", filepath.Join(path, "system-images")},
-	}
-	for _, c := range checks {
-		if platform.DirExists(c.dir) {
-			out.Found = append(out.Found, c.name)
-		}
-	}
-	for _, c := range []string{"cmdline-tools", "platform-tools", "emulator"} {
-		if !contains(out.Found, c) {
-			out.Missing = append(out.Missing, c)
-		}
-	}
-	out.OK = out.Writable
-	if !out.Writable {
-		out.Message = "目录不可写，请选择其它位置或使用管理员权限"
-	} else if len(out.Missing) == 0 {
-		out.Message = "看起来是一个完整的 Android SDK 目录"
-	} else {
-		out.Message = "目录可写，但缺少部分组件，可通过安装补齐"
-	}
-	return out, nil
-}
-
-// ResolvedPaths 返回当前解析出的关键路径。
-func (s *EnvService) ResolvedPaths() *ResolvedPaths {
-	out := s.rt.Resolved()
-	return &out
-}
-
-// ---------------------------------------------------------------- 宿主交互
-
-// PickRequest 是文件/目录选择请求。
-type PickRequest struct {
-	Title            string `json:"title"`
-	DefaultDirectory string `json:"defaultDirectory,omitempty"`
-	DefaultFilename  string `json:"defaultFilename,omitempty"`
-	FilterDisplay    string `json:"filterDisplay,omitempty"`
-	FilterPattern    string `json:"filterPattern,omitempty"`
-}
-
-// PickDirectory 打开原生目录选择对话框。
-func (s *EnvService) PickDirectory(req PickRequest) (string, error) {
-	dir, err := wailsruntime.OpenDirectoryDialog(s.rt.Context(), wailsruntime.OpenDialogOptions{
-		Title:            orDefault(req.Title, "选择目录"),
-		DefaultDirectory: req.DefaultDirectory,
+		j.Logf("info", "sdk", "SDK 环境准备完成")
+		s.rt.Emit("env:changed", nil)
+		return nil
 	})
-	if err != nil {
-		return "", domain.Wrap(domain.CodeUnknown, "无法打开目录选择对话框", err)
-	}
-	return dir, nil
+	return j.ID(), nil
 }
 
-// PickFile 打开原生文件选择对话框。
-func (s *EnvService) PickFile(req PickRequest) (string, error) {
-	opts := wailsruntime.OpenDialogOptions{
-		Title:            orDefault(req.Title, "选择文件"),
-		DefaultDirectory: req.DefaultDirectory,
-		DefaultFilename:  req.DefaultFilename,
-	}
-	if req.FilterPattern != "" {
-		opts.Filters = []wailsruntime.FileFilter{{
-			DisplayName: orDefault(req.FilterDisplay, req.FilterPattern),
-			Pattern:     req.FilterPattern,
-		}}
-	}
-	file, err := wailsruntime.OpenFileDialog(s.rt.Context(), opts)
-	if err != nil {
-		return "", domain.Wrap(domain.CodeUnknown, "无法打开文件选择对话框", err)
-	}
-	return file, nil
+// Resolved 返回软件自有目录的解析结果。
+func (s *EnvService) Resolved() *ResolvedPaths {
+	res := s.rt.Resolved()
+	return &res
 }
 
-// SaveFile 打开保存对话框并返回路径。
-func (s *EnvService) SaveFile(req PickRequest) (string, error) {
-	opts := wailsruntime.SaveDialogOptions{
-		Title:           orDefault(req.Title, "保存文件"),
-		DefaultFilename: req.DefaultFilename,
-	}
-	if req.FilterPattern != "" {
-		opts.Filters = []wailsruntime.FileFilter{{
-			DisplayName: orDefault(req.FilterDisplay, req.FilterPattern),
-			Pattern:     req.FilterPattern,
-		}}
-	}
-	path, err := wailsruntime.SaveFileDialog(s.rt.Context(), opts)
-	if err != nil {
-		return "", domain.Wrap(domain.CodeUnknown, "无法打开保存对话框", err)
-	}
-	return path, nil
-}
-
-// OpenInExplorer 在资源管理器中打开路径（Windows）/ 文件管理器中打开（其它平台）。
-//
-// 目录直接打开、文件打开所在目录并选中；路径为空返回 InvalidArgument，
-// 失败原因（例如系统拒绝启动文件管理器）会原样返回给前端展示。
-func (s *EnvService) OpenInExplorer(path string) error {
-	if strings.TrimSpace(path) == "" {
-		return domain.Err(domain.CodeInvalidArgument, "路径为空")
-	}
-	if err := platform.OpenPath(path); err != nil {
-		return domain.Wrap(domain.CodeUnknown, "无法打开目录", err)
-	}
-	return nil
-}
-
-// OpenExternalURL 用系统浏览器打开链接。
-func (s *EnvService) OpenExternalURL(url string) error {
-	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		return domain.Err(domain.CodeInvalidArgument, "只允许打开 http/https 链接")
-	}
-	wailsruntime.BrowserOpenURL(s.rt.Context(), url)
-	return nil
-}
-
-// CopyToClipboard 复制文本到剪贴板。
+// CopyToClipboard 把文本写入系统剪贴板（供界面复制命令/路径）。
 func (s *EnvService) CopyToClipboard(text string) error {
+	if strings.TrimSpace(text) == "" {
+		return domain.Err(domain.CodeInvalidArgument, "复制内容为空")
+	}
+	if !s.rt.ContextReady() {
+		return domain.Err(domain.CodeUnknown, "应用尚未就绪")
+	}
 	wailsruntime.ClipboardSetText(s.rt.Context(), text)
 	return nil
 }
 
-// OpenTerminal 打开终端并切换到指定目录（复制命令供用户粘贴）。
-type TerminalRequest struct {
-	Directory string `json:"directory"`
-	Command   string `json:"command,omitempty"`
-}
+// ---------------------------------------------------------------- 内部辅助
 
-// OpenTerminal 在目标目录打开系统终端；命令会复制到剪贴板。
-func (s *EnvService) OpenTerminal(req TerminalRequest) error {
-	dir := req.Directory
-	if strings.TrimSpace(dir) == "" {
-		dir = s.rt.Components().Paths.SdkRoot
+func (s *EnvService) checkAcceleration(ctx context.Context, tools platform.Tools, env []string) domain.AccelInfo {
+	res, err := proc.Run(ctx, tools.Emulator, []string{"-accel-check"}, proc.Options{Env: env, Timeout: emulatorProbe})
+	raw := strings.TrimSpace(res.Combined())
+	info := domain.AccelInfo{Raw: raw}
+	lower := strings.ToLower(raw)
+	switch {
+	case err == nil && strings.Contains(lower, "is installed and usable"):
+		info.Available = true
+	case strings.Contains(lower, "is not installed"), strings.Contains(lower, "not installed"):
+		info.Hints = append(info.Hints, "未安装可用的硬件加速（Windows 可启用「Windows 虚拟机监控程序平台」或安装 AEHD）")
+	case strings.Contains(lower, "not supported"), strings.Contains(lower, "not enabled"):
+		info.Hints = append(info.Hints, "CPU 虚拟化未开启：请在 BIOS/UEFI 中启用 VT-x / AMD-V")
 	}
-	if strings.TrimSpace(dir) == "" {
-		return domain.Err(domain.CodeInvalidArgument, "目录为空")
-	}
-	if req.Command != "" {
-		wailsruntime.ClipboardSetText(s.rt.Context(), req.Command)
-	}
-	if err := platform.OpenTerminal(dir); err != nil {
-		return domain.Wrap(domain.CodeUnknown, "无法打开终端", err)
-	}
-	return nil
-}
-
-// HostInfo 返回宿主信息摘要（标题栏/诊断用）。
-func (s *EnvService) HostInfo() map[string]string {
-	return map[string]string{
-		"os":      runtime.GOOS,
-		"arch":    runtime.GOARCH,
-		"version": s.rt.Version,
-		"app":     s.rt.AppName,
-	}
-}
-
-func orDefault(v, def string) string {
-	if strings.TrimSpace(v) == "" {
-		return def
-	}
-	return v
-}
-
-func contains(list []string, v string) bool {
-	for _, item := range list {
-		if item == v {
-			return true
+	for _, kind := range []string{"WHPX", "HAXM", "AEHD", "GVM", "KVM"} {
+		if strings.Contains(strings.ToUpper(raw), kind) {
+			info.Kind = strings.ToLower(kind)
+			break
 		}
 	}
-	return false
+	if info.Kind == "" {
+		info.Kind = "none"
+	}
+	if !info.Available {
+		info.Hints = append(info.Hints, "没有硬件加速时模拟器可以启动，但会明显变慢")
+	}
+	return info
 }
 
-// detectJavaStatus 复用探测器里 JDK 那一项的逻辑，避免导出 detect 包内部函数。
-func detectJavaStatus(rt *Runtime, javaPath string, env []string) domain.ToolStatus {
-	report, err := rt.detector.Detect(rt.Context(), rt.detectOptions())
-	if err == nil {
-		for _, c := range report.Components {
-			if c.ID == domain.ToolJDK {
-				return c
+func (s *EnvService) avdNames(comp *components) []string {
+	items, err := comp.Store.ListWith(store.ListOptions{WithSize: false})
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, it.Name)
+	}
+	return out
+}
+
+// buildIssues 汇总可操作的环境问题。
+func (s *EnvService) buildIssues(report *domain.EnvReport, tools platform.Tools) []domain.EnvIssue {
+	var issues []domain.EnvIssue
+
+	if report.JavaPath == "" {
+		issues = append(issues, domain.EnvIssue{
+			ID:       "jdk-missing",
+			Severity: domain.SeverityBlocker,
+			Title:    "未找到 JDK",
+			Detail:   "sdkmanager 与 avdmanager 需要 JDK 17 或更高版本。请安装 JDK 并设置 JAVA_HOME，或把 java 加入 PATH。",
+		})
+	}
+	if report.NeedInit {
+		issues = append(issues, domain.EnvIssue{
+			ID:       "sdk-not-initialized",
+			Severity: domain.SeverityWarning,
+			Title:    "软件自带 SDK 尚未初始化",
+			Detail:   "将下载官方命令行工具到 " + tools.CmdlineTools + "，并安装 platform-tools 与 emulator。",
+			FixKind:  domain.FixPrepare,
+			FixLabel: "立即准备",
+		})
+	} else {
+		for _, comp := range report.Components {
+			if comp.State == domain.StatePresent || comp.Fix == nil {
+				continue
 			}
+			if comp.ID == domain.ToolJDK {
+				continue
+			}
+			detail := "缺少 " + comp.Name
+			if comp.Fix.Kind == domain.FixInstall {
+				detail += "，可通过 sdkmanager 安装：" + comp.Fix.Payload
+			}
+			issues = append(issues, domain.EnvIssue{
+				ID:         "missing-" + string(comp.ID),
+				Severity:   domain.SeverityWarning,
+				Title:      comp.Name + " 不可用",
+				Detail:     detail,
+				FixKind:    comp.Fix.Kind,
+				FixLabel:   comp.Fix.Label,
+				FixPayload: comp.Fix.Payload,
+				FixCommand: comp.Fix.Command,
+			})
 		}
 	}
-	st := domain.ToolStatus{ID: domain.ToolJDK, Name: "Java 运行环境 (JDK)", Path: javaPath}
-	if javaPath == "" {
-		st.State = domain.StateMissing
-		st.Detail = "未找到 java，命令行工具需要 JDK " + detect.MinJDKVersion + "+"
-		st.Fix = &domain.ToolFix{Kind: domain.FixSetJDK, Label: "指定 JDK"}
-		return st
+	if !report.Disk.Sufficient {
+		issues = append(issues, domain.EnvIssue{
+			ID:       "disk-low",
+			Severity: domain.SeverityWarning,
+			Title:    "SDK 所在磁盘空间不足",
+			Detail:   report.Disk.Path + " 剩余 " + platform.HumanSize(report.Disk.FreeGB<<30) + "，建议至少保留 12 GB 用于系统镜像",
+		})
 	}
-	st.State = domain.StateUnknown
-	st.Detail = "检测超时，请重试"
-	_ = env
-	return st
+	if report.Accel != nil && !report.Accel.Available {
+		issues = append(issues, domain.EnvIssue{
+			ID:       "accel-unavailable",
+			Severity: domain.SeverityInfo,
+			Title:    "硬件加速不可用",
+			Detail:   strings.Join(report.Accel.Hints, "；"),
+		})
+	}
+	return domain.NonNil(issues)
+}
+
+// toolStatus 构造组件状态，未就绪时附带修复动作。
+func toolStatus(id domain.ToolID, name string, ok bool, version, path string, fix *domain.ToolFix) domain.ToolStatus {
+	state := domain.StateMissing
+	if ok {
+		state = domain.StatePresent
+		fix = nil
+	}
+	return domain.ToolStatus{ID: id, Name: name, State: state, Version: version, Path: path, Fix: fix}
+}
+
+// jobLine 把命令输出写进任务日志。
+func jobLine(j *job.Job, source string) func(stream, line string) {
+	return func(stream, line string) {
+		level := "info"
+		if stream == "stderr" {
+			level = "warn"
+		}
+		j.Log(level, source, line)
+	}
+}
+
+// parseJavaVersion 从 `java -version` 输出中取版本号（形如 17.0.6 或 1.8.0_392）。
+func parseJavaVersion(out string) string {
+	text := out
+	if i := strings.Index(text, "\""); i >= 0 {
+		if j := strings.Index(text[i+1:], "\""); j >= 0 {
+			text = text[i+1 : i+1+j]
+		}
+	}
+	text = strings.TrimSpace(text)
+	if strings.HasPrefix(text, "1.") {
+		text = strings.TrimPrefix(text, "1.")
+	}
+	if i := strings.IndexAny(text, "-+_"); i > 0 {
+		text = text[:i]
+	}
+	return text
+}
+
+// parseEmulatorVersion 从 `emulator -version` 输出中取版本号。
+func parseEmulatorVersion(out string) string {
+	const marker = "Android emulator version "
+	if i := strings.Index(out, marker); i >= 0 {
+		rest := out[i+len(marker):]
+		if j := strings.IndexAny(rest, " \r\n"); j > 0 {
+			return rest[:j]
+		}
+		return strings.TrimSpace(rest)
+	}
+	return parseToolVersionLine(out)
+}
+
+// parseToolVersionLine 取 "… version 1.2.3" 形式的版本号。
+func parseToolVersionLine(out string) string {
+	fields := strings.Fields(out)
+	for i, f := range fields {
+		if strings.EqualFold(f, "version") && i+1 < len(fields) {
+			return strings.TrimSpace(fields[i+1])
+		}
+	}
+	return firstLineOrEmpty(out)
+}
+
+func firstLineOrEmpty(out string) string {
+	lines := platform.SplitLines(out)
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(lines[0])
 }

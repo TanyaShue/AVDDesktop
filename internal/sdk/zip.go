@@ -1,0 +1,134 @@
+package sdk
+
+import (
+	"archive/zip"
+	"context"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"AVDDesktop/internal/domain"
+)
+
+// ExtractZip 把 zip 解压到 destDir（防目录穿越）。
+//
+// 官方 Android 归档都套了一层与包同名的顶层目录（如 cmdline-tools/bin/…），
+// 而安装后的目录结构不含这一层，因此这里会自动剥离唯一的顶层目录。
+func ExtractZip(ctx context.Context, zipPath, destDir string) error {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return domain.Wrap(domain.CodeArchiveFailed, "无法打开压缩包", err)
+	}
+	defer func() { _ = r.Close() }()
+
+	prefix := singleRootPrefix(r.File)
+	for _, f := range r.File {
+		if err := ctx.Err(); err != nil {
+			return domain.Err(domain.CodeJobCanceled, "解压已取消")
+		}
+		name := stripPrefix(f.Name, prefix)
+		if strings.TrimSpace(name) == "" {
+			continue // 包装目录自身
+		}
+		target, err := safeJoin(destDir, name)
+		if err != nil {
+			return err
+		}
+		if f.FileInfo().IsDir() {
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return domain.Wrap(domain.CodeArchiveFailed, "创建目录失败: "+target, err)
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return domain.Wrap(domain.CodeArchiveFailed, "创建目录失败: "+filepath.Dir(target), err)
+		}
+		if err := extractFile(f, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// singleRootPrefix 返回所有条目共同的顶层目录前缀（形如 "cmdline-tools/"）。
+//
+// 存在任何顶层文件、或顶层目录不唯一时返回空串（表示不剥离）。
+func singleRootPrefix(files []*zip.File) string {
+	prefix := ""
+	for _, f := range files {
+		name := filepath.ToSlash(strings.TrimPrefix(f.Name, "./"))
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		i := strings.IndexByte(name, '/')
+		if i <= 0 {
+			return "" // 有顶层文件 → 不能剥离
+		}
+		top := name[:i+1]
+		if strings.TrimSuffix(top, "/") == "." || strings.TrimSuffix(top, "/") == ".." {
+			return "" // 交给 safeJoin 做越界校验，不能把越界路径“洗白”
+		}
+		if prefix == "" {
+			prefix = top
+			continue
+		}
+		if top != prefix {
+			return ""
+		}
+	}
+	return prefix
+}
+
+func stripPrefix(name, prefix string) string {
+	if prefix == "" {
+		return name
+	}
+	normalized := filepath.ToSlash(strings.TrimPrefix(name, "./"))
+	if normalized == strings.TrimSuffix(prefix, "/") {
+		return ""
+	}
+	if !strings.HasPrefix(normalized, prefix) {
+		return name
+	}
+	return strings.TrimPrefix(normalized, prefix)
+}
+
+func extractFile(f *zip.File, target string) error {
+	rc, err := f.Open()
+	if err != nil {
+		return domain.Wrap(domain.CodeArchiveFailed, "无法读取压缩包条目: "+f.Name, err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	mode := f.Mode()
+	if mode == 0 {
+		mode = 0o644
+	}
+	// 保留可执行位：macOS / Linux 下的 sdkmanager、emulator、adb 需要 +x
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode.Perm())
+	if err != nil {
+		return domain.Wrap(domain.CodeArchiveFailed, "无法写入: "+target, err)
+	}
+	if _, err := io.Copy(out, rc); err != nil {
+		_ = out.Close()
+		return domain.Wrap(domain.CodeArchiveFailed, "解压写入失败: "+target, err)
+	}
+	return out.Close()
+}
+
+// safeJoin 校验 zip 条目路径不会逃出 destDir。
+func safeJoin(destDir, name string) (string, error) {
+	clean := filepath.Clean(filepath.FromSlash(name))
+	if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
+		return "", domain.ErrDetail(domain.CodeArchiveFailed,
+			"压缩包包含非法路径，已中止解压", name)
+	}
+	target := filepath.Join(destDir, clean)
+	rel, err := filepath.Rel(destDir, target)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", domain.ErrDetail(domain.CodeArchiveFailed,
+			"压缩包条目越界，已中止解压", name)
+	}
+	return target, nil
+}

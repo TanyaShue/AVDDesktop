@@ -3,9 +3,7 @@ import { Win } from "../bridge/api";
 import type { JobInfo, PageKey } from "../bridge/types";
 
 const NAV: Array<{ key: PageKey; label: string; icon: string }> = [
-  { key: "home", label: "首页", icon: "🏠" },
   { key: "devices", label: "设备", icon: "📱" },
-  { key: "sdk", label: "SDK", icon: "🧩" },
   { key: "settings", label: "设置", icon: "⚙️" },
 ];
 

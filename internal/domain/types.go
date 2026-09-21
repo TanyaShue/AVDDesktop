@@ -13,69 +13,51 @@ type ToolID string
 
 const (
 	ToolJDK          ToolID = "jdk"
-	ToolCmdlineTools ToolID = "cmdline-tools"
 	ToolSdkmanager   ToolID = "sdkmanager"
 	ToolAvdmanager   ToolID = "avdmanager"
-	ToolPlatformTool ToolID = "platform-tools"
+	ToolAdb          ToolID = "adb"
 	ToolEmulator     ToolID = "emulator"
 	ToolSystemImages ToolID = "system-images"
 	ToolAcceleration ToolID = "accel"
-	ToolDisk         ToolID = "disk"
-	ToolAvdHome      ToolID = "avd-home"
-	ToolLicenses     ToolID = "licenses"
-	ToolAvdHealth    ToolID = "avd-health"
-	// ToolRunningInstances 报告当前运行中的模拟器实例数（由 service 层注入）。
-	ToolRunningInstances ToolID = "running-instances"
 )
 
-// ToolState 描述组件状态，驱动首页卡片的状态徽标与修复入口。
+// ToolState 描述组件状态，驱动设置页环境检查的状态徽标。
 type ToolState string
 
 const (
-	StateUnknown      ToolState = "unknown"
-	StateMissing      ToolState = "missing"
-	StatePresent      ToolState = "present"
-	StateOutdated     ToolState = "outdated"
-	StateBroken       ToolState = "broken"
-	StateIncompatible ToolState = "incompatible"
+	StateMissing  ToolState = "missing"
+	StatePresent  ToolState = "present"
+	StateOutdated ToolState = "outdated"
 )
 
-// FixKind 是首页卡片上"修复"按钮的动作类型。
+// FixKind 是环境检查项上的修复动作类型。
 type FixKind string
 
 const (
-	FixInstall       FixKind = "install"
-	FixUpdate        FixKind = "update"
-	FixRepair        FixKind = "repair"
-	FixSetJDK        FixKind = "setJdk"
-	FixEnableWHPX    FixKind = "enableWhpx"
-	FixInstallAEHD   FixKind = "installAehd"
-	FixDownloadImage FixKind = "downloadImage"
-	FixChoosePath    FixKind = "choosePath"
-	FixOpenSpeedTest FixKind = "openSpeedTest"
+	// FixPrepare 自动准备 SDK（下载命令行工具 / 接受许可 / 安装基础组件）。
+	FixPrepare FixKind = "prepare"
+	// FixInstall 安装指定 SDK 包（Payload 为包路径，例如 system-images;android-34;google_apis;x86_64）。
+	FixInstall FixKind = "install"
 )
 
-// ToolFix 是组件卡片的可执行修复动作。
+// ToolFix 是可执行的修复动作。
 type ToolFix struct {
 	Kind    FixKind `json:"kind"`
 	Label   string  `json:"label"`
 	Payload string  `json:"payload,omitempty"`
-	// Command 是可复制到管理员终端的修复命令（例如 dism 开功能）。
+	// Command 是可复制到终端的手工命令（例如 sdkmanager 安装命令）。
 	Command string `json:"command,omitempty"`
-	// DocsURL 是官方文档链接（UI 提供“查看文档”）。
-	DocsURL string `json:"docsUrl,omitempty"`
 }
 
 // ToolStatus 是一个组件的检测结果。
 type ToolStatus struct {
-	ID      ToolID            `json:"id"`
-	Name    string            `json:"name"`
-	State   ToolState         `json:"state"`
-	Version string            `json:"version,omitempty"`
-	Path    string            `json:"path,omitempty"`
-	Detail  string            `json:"detail,omitempty"`
-	Fix     *ToolFix          `json:"fix,omitempty"`
-	Meta    map[string]string `json:"meta,omitempty"`
+	ID      ToolID    `json:"id"`
+	Name    string    `json:"name"`
+	State   ToolState `json:"state"`
+	Version string    `json:"version,omitempty"`
+	Path    string    `json:"path,omitempty"`
+	Detail  string    `json:"detail,omitempty"`
+	Fix     *ToolFix  `json:"fix,omitempty"`
 }
 
 // AccelInfo 来自 `emulator -accel-check`。
@@ -86,27 +68,6 @@ type AccelInfo struct {
 	Hints     []string `json:"hints,omitempty"`
 }
 
-// WindowsInfo 是 Windows 宿主的关键开关（非管理员可读）。
-//
-// 注意：当 HypervisorPresent=true 时，虚拟化能力位（VirtFirmware/SLAT/VMMonitor）
-// 会报 false，这是 hypervisor 已接管 CPU 的正常表现，不代表机器不支持虚拟化。
-type WindowsInfo struct {
-	Available         bool   `json:"available"`
-	HypervisorPresent bool   `json:"hypervisorPresent"`
-	VirtFirmware      bool   `json:"virtualizationFirmwareEnabled"`
-	SLAT              bool   `json:"slat"`
-	VMMonitor         bool   `json:"vmmMonitor"`
-	LongPathsEnabled  bool   `json:"longPathsEnabled"`
-	HyperVHostService bool   `json:"hyperVHostService"`
-	VMComputeService  bool   `json:"vmComputeService"`
-	CPU               string `json:"cpu,omitempty"`
-	ProductName       string `json:"productName,omitempty"`
-	Caption           string `json:"caption,omitempty"`
-	Version           string `json:"version,omitempty"`
-	Build             string `json:"build,omitempty"`
-	Source            string `json:"source,omitempty"`
-	Error             string `json:"error,omitempty"`
-}
 
 // IssueSeverity 是环境问题的严重程度。
 type IssueSeverity string
@@ -117,7 +78,7 @@ const (
 	SeverityBlocker IssueSeverity = "blocker"
 )
 
-// EnvIssue 是一条可操作的环境问题（比 ToolStatus 更聚焦于“怎么修”）。
+// EnvIssue 是一条可操作的环境问题。
 type EnvIssue struct {
 	ID         string        `json:"id"`
 	Severity   IssueSeverity `json:"severity"`
@@ -127,7 +88,6 @@ type EnvIssue struct {
 	FixCommand string        `json:"fixCommand,omitempty"`
 	FixKind    FixKind       `json:"fixKind,omitempty"`
 	FixPayload string        `json:"fixPayload,omitempty"`
-	DocsURL    string        `json:"docsUrl,omitempty"`
 }
 
 // DiskInfo 描述一个分区/目录所在磁盘的空间。
@@ -142,187 +102,48 @@ type DiskInfo struct {
 type HostInfo struct {
 	OS       string `json:"os"`
 	Arch     string `json:"arch"`
-	Windows  string `json:"windows,omitempty"`
-	CPUModel string `json:"cpuModel,omitempty"`
 	CPUCores int    `json:"cpuCores,omitempty"`
 	MemoryGB int64  `json:"memoryGB,omitempty"`
 }
 
-// SdkRootCandidate 是一个候选 SDK 根目录及其有效性评分。
-type SdkRootCandidate struct {
-	Path             string `json:"path"`
-	Source           string `json:"source"`
-	Score            int    `json:"score"`
-	Exists           bool   `json:"exists"`
-	HasCmdlineTools  bool   `json:"hasCmdlineTools"`
-	HasPlatformTools bool   `json:"hasPlatformTools"`
-	HasEmulator      bool   `json:"hasEmulator"`
-	Version          string `json:"version,omitempty"`
-}
-
-// SdkRootValidation 手动指定 SDK 路径时的校验结果。
-type SdkRootValidation struct {
-	Path     string   `json:"path"`
-	OK       bool     `json:"ok"`
-	Writable bool     `json:"writable"`
-	Found    []string `json:"found"`   // 发现的组件
-	Missing  []string `json:"missing"` // 缺失的关键组件
-	Message  string   `json:"message"`
-}
-
-// AvdHomeInfo 是 AVD 主目录的解析结果（含来源说明，供 UI 解释"为什么是这个目录"）。
-type AvdHomeInfo struct {
-	Path     string `json:"path"`
-	Source   string `json:"source"`
-	Exists   bool   `json:"exists"`
-	Writable bool   `json:"writable"`
-	Count    int    `json:"count"`
-}
-
-// EnvReport 是首页所需的完整自检结果。
+// EnvReport 是唯一的环境检查结果（设置页与自动准备共用）。
 type EnvReport struct {
-	SdkRoot       string       `json:"sdkRoot"`
-	SdkRootSource string       `json:"sdkRootSource"`
-	JdkPath       string       `json:"jdkPath"`
-	AvdHome       AvdHomeInfo  `json:"avdHome"`
-	Components    []ToolStatus `json:"components"`
-	Accel         AccelInfo    `json:"accel"`
-	Disks         []DiskInfo   `json:"disks"`
-	Host          HostInfo     `json:"host"`
-	Ready         bool         `json:"ready"`
-	Blockers      []ToolStatus `json:"blockers"`
-	ScannedAt     int64        `json:"scannedAt"`
+	AppRoot  string `json:"appRoot"`
+	SdkRoot  string `json:"sdkRoot"`
+	AvdHome  string `json:"avdHome"`
+	JavaPath string `json:"javaPath,omitempty"`
 
-	// 新增：Windows 开关、可操作问题清单、运行中实例数
-	Windows          *WindowsInfo `json:"windows,omitempty"`
-	Issues           []EnvIssue   `json:"issues,omitempty"`
-	RunningInstances int          `json:"runningInstances"`
-	AcceptedLicenses []string     `json:"acceptedLicenses,omitempty"`
-	ScanMs           int64        `json:"scanMs"`
+	// Ready 表示创建 AVD 与启动模拟器所需的工具链已齐备。
+	Ready bool `json:"ready"`
+	// NeedInit 表示软件自己的 SDK 尚未初始化（缺少 sdkmanager）。
+	NeedInit bool `json:"needInit"`
+
+	Components []ToolStatus `json:"components"`
+	Accel      *AccelInfo   `json:"accel,omitempty"`
+	Disk       DiskInfo     `json:"disk"`
+	Host       HostInfo     `json:"host"`
+
+	// Images 是已安装的系统镜像数量，Avds 是已有设备数量。
+	Images int `json:"images"`
+	Avds   int `json:"avds"`
+
+	Issues    []EnvIssue `json:"issues"`
+	CheckedAt int64      `json:"checkedAt"`
+	ElapsedMs int64      `json:"elapsedMs"`
 }
 
 // ---------------------------------------------------------------- 镜像与测速
+// ---------------------------------------------------------------- System Image
 
-// MirrorKind 区分官方源与第三方镜像。
-type MirrorKind string
-
-const (
-	MirrorOfficial MirrorKind = "official"
-	MirrorMirror   MirrorKind = "mirror"
-	MirrorCustom   MirrorKind = "custom"
-)
-
-// MirrorGrade 是镜像的兼容性分级（见 ARCHITECTURE.md ADR-04）。
-type MirrorGrade string
-
-const (
-	GradeUnknown     MirrorGrade = "unknown"
-	GradeFull        MirrorGrade = "full"
-	GradeIndexOnly   MirrorGrade = "index-only"
-	GradeInvalid     MirrorGrade = "invalid"
-	GradeUnreachable MirrorGrade = "unreachable"
-)
-
-// MirrorSource 是一个下载源。
-type MirrorSource struct {
-	ID         string       `json:"id"`
-	Name       string       `json:"name"`
-	BaseURL    string       `json:"baseURL"`
-	Kind       MirrorKind   `json:"kind"`
-	Grade      MirrorGrade  `json:"grade"`
-	Enabled    bool         `json:"enabled"`
-	Note       string       `json:"note,omitempty"`
-	Region     string       `json:"region,omitempty"`
-	LastResult *SpeedResult `json:"lastResult,omitempty"`
-}
-
-// SpeedResult 是一次测速的完整结果。
-type SpeedResult struct {
-	SourceID        string   `json:"sourceId"`
-	At              int64    `json:"at"`
-	OK              bool     `json:"ok"`
-	DNSMs           int64    `json:"dnsMs"`
-	ResolveIPs      []string `json:"resolveIPs,omitempty"`
-	ConnectMs       int64    `json:"connectMs"`
-	TTFBMs          int64    `json:"ttfbMs"`
-	HTTPStatus      int      `json:"httpStatus"`
-	RangeSupported  bool     `json:"rangeSupported"`
-	XMLOK           bool     `json:"xmlOK"`
-	HasCmdlineTools bool     `json:"hasCmdlineTools"`
-	HasEmulator     bool     `json:"hasEmulator"`
-	HasSystemImages bool     `json:"hasSystemImages"`
-	ThroughputMBps  float64  `json:"throughputMBps"`
-	JitterMs        int64    `json:"jitterMs"`
-	Score           int      `json:"score"`
-	Grade           string   `json:"grade"` // recommended | usable | index-only | unusable
-	Error           string   `json:"error,omitempty"`
-}
-
-// ---------------------------------------------------------------- SDK 包
-
-// SdkPackage 是仓库中的一个包（远程或已安装）。
-type SdkPackage struct {
-	Path              string   `json:"path"`
-	DisplayName       string   `json:"displayName"`
-	Kind              string   `json:"kind"` // cmdline-tools | platform-tools | emulator | platforms | build-tools | system-images | extras
-	Revision          string   `json:"revision"`
-	Channel           string   `json:"channel"`
-	SizeBytes         int64    `json:"sizeBytes"`
-	ChecksumSHA1      string   `json:"checksumSHA1"`
-	URL               string   `json:"url"`
-	Installed         bool     `json:"installed"`
-	InstalledRevision string   `json:"installedRevision,omitempty"`
-	HasUpdate         bool     `json:"hasUpdate"`
-	LicenseID         string   `json:"licenseId,omitempty"`
-	Dependencies      []string `json:"dependencies,omitempty"`
-	Obsolete          bool     `json:"obsolete"`
-}
-
-// SystemImage 是系统镜像包（系统镜像仓库的独立视图）。
+// SystemImage 是可以用来创建 AVD 的系统镜像（数据来自官方 sdkmanager 的包列表）。
 type SystemImage struct {
-	Path             string `json:"path"`
-	APILevel         string `json:"apiLevel"`
-	TagID            string `json:"tagId"`
-	TagDisplay       string `json:"tagDisplay"`
-	ABI              string `json:"abi"`
-	Vendor           string `json:"vendor"`
-	IsPlaystore      bool   `json:"isPlaystore"`
-	Revision         string `json:"revision"`
-	SizeBytes        int64  `json:"sizeBytes"`
-	Installed        bool   `json:"installed"`
-	HasUpdate        bool   `json:"hasUpdate"`
-	RequiresEmulator string `json:"requiresEmulator,omitempty"`
-}
-
-// License 是 SDK 许可。
-type License struct {
-	ID       string `json:"id"`
-	Text     string `json:"text"`
-	Accepted bool   `json:"accepted"`
-}
-
-// InstallPlan 是安装前的计划预览。
-type InstallPlan struct {
-	Steps      []PlanStep `json:"steps"`
-	TotalBytes int64      `json:"totalBytes"`
-	Licenses   []License  `json:"licenses"`
-	Warnings   []string   `json:"warnings,omitempty"`
-}
-
-// PlanStep 是安装计划中的一步。
-type PlanStep struct {
-	Path      string `json:"path"`
-	Action    string `json:"action"` // install | update | skip
-	Reason    string `json:"reason"`
-	SizeBytes int64  `json:"sizeBytes"`
-	SourceURL string `json:"sourceURL"`
-}
-
-// VerifyResult 是已安装包完整性校验结果。
-type VerifyResult struct {
-	Path    string   `json:"path"`
-	OK      bool     `json:"ok"`
-	Details []string `json:"details"`
+	Path        string `json:"path"`
+	API         string `json:"api"`
+	Tag         string `json:"tag"`
+	ABI         string `json:"abi"`
+	Version     string `json:"version,omitempty"`
+	Description string `json:"description,omitempty"`
+	Installed   bool   `json:"installed"`
 }
 
 // ---------------------------------------------------------------- AVD
@@ -575,76 +396,16 @@ type LogLine struct {
 	Message string `json:"message"`
 }
 
-// ProxyMode 下载代理模式。
-type ProxyMode string
-
-const (
-	ProxyOff    ProxyMode = "off"
-	ProxySystem ProxyMode = "system"
-	ProxyCustom ProxyMode = "custom"
-)
-
 // AppSettings 是持久化到 settings.json 的用户设置。
 type AppSettings struct {
 	Version int `json:"version"`
 
-	// 环境
-	SdkRoot           string `json:"sdkRoot"`
-	JdkPath           string `json:"jdkPath"`
-	AvdHome           string `json:"avdHome"`
-	InjectEnvForChild bool   `json:"injectEnvForChildren"`
-
-	// 镜像
-	ActiveSourceID         string         `json:"activeSourceId"`
-	CustomSources          []MirrorSource `json:"customSources"`
-	AutoFallbackToOfficial bool           `json:"autoFallbackToOfficial"`
-
-	// 下载
-	MaxConnectionsPerFile int       `json:"maxConnectionsPerFile"`
-	MaxParallelPackages   int       `json:"maxParallelPackages"`
-	TimeoutSeconds        int       `json:"timeoutSeconds"`
-	SpeedLimitKBps        int       `json:"speedLimitKBps"`
-	ProxyMode             ProxyMode `json:"proxyMode"`
-	ProxyURL              string    `json:"proxyURL"`
-	DownloadDir           string    `json:"downloadDir"`
-
-	// 许可
-	AcceptedLicenseIDs []string `json:"acceptedLicenseIds"`
-	AutoAcceptLicenses bool     `json:"autoAcceptLicenses"`
-
-	// AVD 默认值
-	DefaultDeviceProfile  string `json:"defaultDeviceProfile"`
-	DefaultRAMMB          int    `json:"defaultRamMB"`
-	DefaultCores          int    `json:"defaultCores"`
-	DefaultDataPartitionG string `json:"defaultDataPartitionGB"`
-	DefaultGPUMode        string `json:"defaultGpuMode"`
-
 	// 外观与交互
-	Theme               string `json:"theme"`    // light|dark|system
-	Language            string `json:"language"` // zh-CN|en-US
-	DeviceViewMode      string `json:"deviceViewMode"`
+	Theme               string `json:"theme"` // light|dark|system
 	ConfirmBeforeDelete bool   `json:"confirmBeforeDelete"`
 	ShowTaskDrawer      bool   `json:"showTaskDrawer"`
 
-	// 高级
-	LogLevel               string `json:"logLevel"`
-	KeepLogDays            int    `json:"keepLogDays"`
-	AskBeforeDriverInstall bool   `json:"askBeforeDriverInstall"`
-}
-
-// DiagnosticReport 是诊断包摘要。
-type DiagnosticReport struct {
-	GeneratedAt int64         `json:"generatedAt"`
-	AppVersion  string        `json:"appVersion"`
-	Env         EnvReport     `json:"env"`
-	Settings    AppSettings   `json:"settings"`
-	Checks      []CheckResult `json:"checks"`
-}
-
-// CheckResult 是冒烟自检的一项。
-type CheckResult struct {
-	Name      string `json:"name"`
-	OK        bool   `json:"ok"`
-	Detail    string `json:"detail"`
-	ElapsedMs int64  `json:"elapsedMs"`
+	// 日志
+	LogLevel    string `json:"logLevel"`
+	KeepLogDays int    `json:"keepLogDays"`
 }

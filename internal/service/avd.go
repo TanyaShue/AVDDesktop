@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"AVDDesktop/internal/avd/backend"
 	"AVDDesktop/internal/avd/profile"
@@ -14,6 +13,7 @@ import (
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/job"
 	"AVDDesktop/internal/platform"
+	"AVDDesktop/internal/sdk"
 )
 
 // AvdService 提供 AVD 的增删改查。
@@ -59,10 +59,24 @@ func (s *AvdService) Get(name string) (*domain.AvdDetail, error) {
 	return &detail, nil
 }
 
-// ListProfiles 返回设备档案（优先 avdmanager，失败用内置兜底）。
+// ListImages 返回可用于创建 AVD 的系统镜像。
+//
+// 数据全部来自官方 sdkmanager：installedOnly 为 true 时只读本地列表（不联网）。
+func (s *AvdService) ListImages(installedOnly bool) ([]domain.SystemImage, error) {
+	comp := s.rt.Components()
+	images, err := sdk.ListImages(s.rt.Context(), comp.Tools, comp.Env, installedOnly, func(stream, line string) {
+		s.rt.Log().Debug("sdkmanager", "%s", line)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return domain.NonNil(images), nil
+}
+
+// ListProfiles 返回设备档案（由官方 avdmanager 提供）。
 func (s *AvdService) ListProfiles(refresh bool) ([]domain.DeviceProfile, error) {
 	comp := s.rt.Components()
-	profiles, err := profile.List(s.rt.Context(), comp.Paths.Avdmanager, comp.Env)
+	profiles, err := profile.List(s.rt.Context(), comp.Tools.Avdmanager, comp.Env)
 	if err != nil {
 		return nil, err
 	}
@@ -102,14 +116,11 @@ func (s *AvdService) Create(spec domain.AvdSpec) (string, error) {
 	if v := comp.Store.ValidateName(spec.Name); !v.Valid {
 		return "", domain.Err(domain.CodeAvdNameInvalid, v.Reason)
 	}
-	if _, _, _, err := backend.SplitSystemImage(spec.SystemImagePath); err != nil {
-		return "", err
-	}
 	relDir, err := backend.SystemImageDir(spec.SystemImagePath)
 	if err != nil {
 		return "", err
 	}
-	imgDir := filepath.Join(comp.Paths.SdkRoot, relDir)
+	imgDir := filepath.Join(comp.Tools.SdkRoot, relDir)
 	if !platform.DirExists(imgDir) {
 		return "", domain.ErrDetail(domain.CodeImageNotInstalled,
 			"系统镜像尚未安装", spec.SystemImagePath+"\n期望目录: "+imgDir).
@@ -127,20 +138,10 @@ func (s *AvdService) Create(spec domain.AvdSpec) (string, error) {
 		Subtitle: spec.SystemImagePath,
 	}, func(ctx context.Context, j *job.Job) error {
 		defer unlock()
-		// SDK 元数据自愈（缺 package.xml 时官方工具看不到该包）：通用包与系统镜像可离线补写，
-		// 少数包（platforms / sources）需要仓库索引，因此限时执行，避免网络问题拖慢创建。
-		ensureMetadata := func(ctx context.Context) []string {
-			repairCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-			defer cancel()
-			return s.rt.repairSDKMetadata(repairCtx, j.Logf)
-		}
 		be := backend.Select(spec, backend.Deps{
-			Paths: comp.Paths,
+			Tools: comp.Tools,
 			Store: comp.Store,
 			Env:   comp.Env,
-			// avdmanager 靠包目录下的 package.xml 判断"包是否已安装"（emulator 与系统镜像都需要），
-			// 缺失时先自愈一次，否则会以 "emulator" package must be installed! 等错误失败。
-			EnsureMetadata: ensureMetadata,
 			OnOutput: func(stream, line string) {
 				level := "info"
 				if stream == "stderr" {
@@ -151,10 +152,9 @@ func (s *AvdService) Create(spec domain.AvdSpec) (string, error) {
 		})
 		j.SetPhase("正在创建（后端：" + be.Kind() + "）")
 		res, err := be.Create(ctx, spec, backend.Deps{
-			Paths:          comp.Paths,
-			Store:          comp.Store,
-			Env:            comp.Env,
-			EnsureMetadata: ensureMetadata,
+			Tools: comp.Tools,
+			Store: comp.Store,
+			Env:   comp.Env,
 			OnOutput: func(stream, line string) {
 				j.Log("info", be.Kind(), line)
 			},
@@ -426,14 +426,6 @@ func (s *AvdService) WriteConfigRaw(req WriteConfigRawRequest) (*domain.ConfigDi
 	return &diff, nil
 }
 
-// OpenFolder 在文件管理器中打开 AVD 目录。
-func (s *AvdService) OpenFolder(name string) error {
-	comp := s.rt.Components()
-	layout := comp.Store.Resolve(name)
-	env := NewEnvService(s.rt)
-	return env.OpenInExplorer(layout.Dir)
-}
-
 // ComputeCommand 生成等效命令行（供 UI 展示）。
 func (s *AvdService) ComputeCommand(spec domain.AvdSpec) map[string]string {
 	avdArgs := []string{"create", "avd", "-n", spec.Name, "-k", spec.SystemImagePath}
@@ -451,103 +443,9 @@ func (s *AvdService) ComputeCommand(spec domain.AvdSpec) map[string]string {
 		emulatorArgs = launchArgsFor(spec.Name, *spec.LaunchDefaults)
 	}
 	return map[string]string{
-		"avdmanager": comp.Paths.Avdmanager + " " + strings.Join(avdArgs, " "),
-		"emulator":   comp.Paths.EmulatorExe + " " + strings.Join(emulatorArgs, " "),
+		"avdmanager": comp.Tools.Avdmanager + " " + strings.Join(avdArgs, " "),
+		"emulator":   comp.Tools.Emulator + " " + strings.Join(emulatorArgs, " "),
 	}
-}
-
-// ExportRequest 是导出请求（打包 .avd 目录与 .ini）。
-type ExportRequest struct {
-	Name             string `json:"name"`
-	TargetZip        string `json:"targetZip"`
-	IncludeSnapshots bool   `json:"includeSnapshots"`
-}
-
-// Export 把设备导出为一个 zip 包（内部结构：<name>.ini + <name>.avd/...）。
-func (s *AvdService) Export(req ExportRequest) (string, error) {
-	comp := s.rt.Components()
-	layout := comp.Store.Resolve(req.Name)
-	if !layout.Exists {
-		return "", domain.Err(domain.CodeAvdNotFound, "设备不存在: "+req.Name)
-	}
-	if strings.TrimSpace(req.TargetZip) == "" {
-		return "", domain.Err(domain.CodeInvalidArgument, "未指定导出文件路径")
-	}
-	if _, ok := comp.Launcher.ByAvd(req.Name); ok {
-		return "", domain.Err(domain.CodeFileInUse,
-			"设备正在运行，无法导出（数据文件正在被写入）").
-			WithHint("请先停止设备后重试")
-	}
-
-	unlock, ok := s.rt.locks.TryLock("avd:" + comp.Store.AvdHome)
-	if !ok {
-		return "", domain.Err(domain.CodeJobBusy, "已有设备写任务正在进行")
-	}
-
-	j := s.rt.jobs.Start(s.rt.Context(), job.Spec{
-		Kind:  domain.JobExport,
-		Title: "导出设备 " + req.Name,
-	}, func(ctx context.Context, j *job.Job) error {
-		defer unlock()
-		j.SetPhase("正在打包")
-		written, err := comp.Store.Export(ctx, req.Name, req.TargetZip, req.IncludeSnapshots, func(done, total int64, name string, line string) {
-			if line != "" {
-				j.Log("info", "export", line)
-			}
-			if total > 0 {
-				j.SetBytes(done, total, 0)
-			}
-		})
-		if err != nil {
-			return err
-		}
-		j.Logf("info", "export", "已导出到 %s（%s）", req.TargetZip, platform.HumanSize(written))
-		return nil
-	})
-	return j.ID(), nil
-}
-
-// ImportRequest 是导入请求。
-type ImportRequest struct {
-	ZipPath string `json:"zipPath"`
-	// Name 为空时使用包内的设备名；重名时自动加后缀。
-	Name string `json:"name"`
-}
-
-// Import 从 zip 包导入设备（恢复到当前 AVD 目录并修正配置中的路径）。
-func (s *AvdService) Import(req ImportRequest) (string, error) {
-	comp := s.rt.Components()
-	if !platform.FileExists(req.ZipPath) {
-		return "", domain.Err(domain.CodePathNotFound, "文件不存在: "+req.ZipPath)
-	}
-	unlock, ok := s.rt.locks.TryLock("avd:" + comp.Store.AvdHome)
-	if !ok {
-		return "", domain.Err(domain.CodeJobBusy, "已有设备写任务正在进行")
-	}
-
-	j := s.rt.jobs.Start(s.rt.Context(), job.Spec{
-		Kind:  domain.JobAvdCreate,
-		Title: "导入设备 " + filepath.Base(req.ZipPath),
-	}, func(ctx context.Context, j *job.Job) error {
-		defer unlock()
-		j.SetPhase("正在解包")
-		name, err := comp.Store.Import(ctx, req.ZipPath, req.Name, func(done, total int64, current string) error {
-			if err := ctx.Err(); err != nil {
-				return domain.Err(domain.CodeJobCanceled, "操作已取消")
-			}
-			if total > 0 {
-				j.SetBytes(done, total, 0)
-			}
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-		j.Logf("info", "import", "已导入设备 %s", name)
-		s.rt.Emit("avd:changed", map[string]any{"action": "created", "name": name})
-		return nil
-	})
-	return j.ID(), nil
 }
 
 // SnapshotDir 返回快照目录（供 UI 显示占用）。
@@ -591,5 +489,3 @@ func launchArgsFor(name string, opts domain.LaunchOptions) []string {
 	}
 	return out
 }
-
-var _ = time.Second

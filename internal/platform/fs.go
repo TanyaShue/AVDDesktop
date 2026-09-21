@@ -19,8 +19,6 @@ func FileExists(path string) bool {
 	return err == nil && !st.IsDir()
 }
 
-func fileExists(path string) bool { return FileExists(path) }
-
 // DirExists 判断目录是否存在。
 func DirExists(path string) bool {
 	st, err := os.Stat(path)
@@ -153,29 +151,6 @@ func DiskSpace(path string) domain.DiskInfo {
 	info.FreeGB = int64(free / (1 << 30))
 	info.Sufficient = info.FreeGB >= 12
 	return info
-}
-
-// ReadProperties 读取 key=value 形式的属性文件（例如 source.properties）。
-//
-// 第二个返回值为 false 表示文件不存在或不可读；格式错误的行被忽略。
-func ReadProperties(path string) (map[string]string, bool) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, false
-	}
-	props := map[string]string{}
-	for _, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		i := strings.IndexByte(line, '=')
-		if i <= 0 {
-			continue
-		}
-		props[strings.TrimSpace(line[:i])] = strings.TrimSpace(line[i+1:])
-	}
-	return props, true
 }
 
 // WriteFileAtomic 原子写文件（写临时文件后 rename），避免半截配置。
@@ -358,31 +333,6 @@ func VersionAtLeast(a, b string) bool {
 	return ap >= bp
 }
 
-// CompareVersions 返回 -1/0/1。
-func CompareVersions(a, b string) int {
-	am, an, ap := parseVersion(a)
-	bm, bn, bp := parseVersion(b)
-	if am != bm {
-		if am > bm {
-			return 1
-		}
-		return -1
-	}
-	if an != bn {
-		if an > bn {
-			return 1
-		}
-		return -1
-	}
-	if ap != bp {
-		if ap > bp {
-			return 1
-		}
-		return -1
-	}
-	return 0
-}
-
 func parseVersion(v string) (int, int, int) {
 	v = strings.TrimSpace(v)
 	if v == "" {
@@ -418,35 +368,3 @@ func parseVersion(v string) (int, int, int) {
 // NowMs 返回当前 Unix 毫秒。
 func NowMs() int64 { return time.Now().UnixMilli() }
 
-// InboxTempDir 返回应用级临时目录（用于下载与解压）。
-func InboxTempDir(base, sub string) string {
-	if base == "" {
-		base = os.TempDir()
-	}
-	dir := filepath.Join(base, sub)
-	_ = EnsureDir(dir)
-	return dir
-}
-
-// SameVolume 判断两个路径是否在同一磁盘卷（决定 rename 是否可原子完成）。
-func SameVolume(a, b string) bool {
-	va, err1 := volumeOf(a)
-	vb, err2 := volumeOf(b)
-	return err1 == nil && err2 == nil && strings.EqualFold(va, vb)
-}
-
-func volumeOf(path string) (string, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	for probe := abs; ; probe = filepath.Dir(probe) {
-		if DirExists(probe) {
-			return filepath.VolumeName(probe) + string(filepath.Separator), nil
-		}
-		parent := filepath.Dir(probe)
-		if parent == probe {
-			return filepath.VolumeName(abs) + string(filepath.Separator), nil
-		}
-	}
-}

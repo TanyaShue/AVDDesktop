@@ -6,12 +6,16 @@ export function Get() {
   return window['go']['service']['SettingsService']['Get']();
 }
 
+export function Info() {
+  return window['go']['service']['SettingsService']['Info']();
+}
+
 export function Path() {
   return window['go']['service']['SettingsService']['Path']();
 }
 
-export function Reset(arg1) {
-  return window['go']['service']['SettingsService']['Reset'](arg1);
+export function Reset() {
+  return window['go']['service']['SettingsService']['Reset']();
 }
 
 export function Update(arg1) {

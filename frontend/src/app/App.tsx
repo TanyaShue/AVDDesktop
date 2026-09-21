@@ -10,27 +10,23 @@ import { Toasts } from "../components/ui";
 import { useJobs, useTheme, useToasts, useWailsEvent } from "../hooks/useApp";
 import { useEnvCheck } from "../hooks/useEnvCheck";
 import { DevicesPage } from "../pages/DevicesPage";
-import { HomePage } from "../pages/HomePage";
-import { SdkPage } from "../pages/SdkPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import "../styles/tokens.css";
 import "../styles/app.css";
 
 /** 错误边界提示用：页面中文名。 */
 const PAGE_TITLES: Record<PageKey, string> = {
-  home: "首页",
   devices: "设备",
-  sdk: "SDK",
   settings: "设置",
 };
 
 export default function App() {
-  const [page, setPage] = useState<PageKey>("home");
+  const [page, setPage] = useState<PageKey>("devices");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const { jobs, logs } = useJobs();
   const { toasts, push, dismiss } = useToasts();
-  // 环境自检由应用壳持有：每次启动只跑一次，切标签页不会重新检查（详见 useEnvCheck）
+  // 环境检查由应用壳持有：只跑一次，页面切换不重新探测；后端自检结果通过 env:changed 复用
   const env = useEnvCheck(push);
 
   useTheme(settings?.theme ?? "light");
@@ -63,14 +59,14 @@ export default function App() {
         <NavRail page={page} onChange={setPage} />
         {/* key 让切换页面时自动丢弃上一个页面的错误状态 */}
         <ErrorBoundary key={page} scope={PAGE_TITLES[page]}>
-          {page === "home" ? (
-            <HomePage env={env} onToast={push} onGotoDevices={() => setPage("devices")} />
-          ) : page === "devices" ? (
-            <DevicesPage onToast={push} />
-          ) : page === "sdk" ? (
-            <SdkPage onToast={push} />
+          {page === "devices" ? (
+            <DevicesPage onToast={push} env={env} />
           ) : (
-            <SettingsPage onToast={push} onSettingsChanged={handleSettingsChanged} />
+            <SettingsPage
+              onToast={push}
+              env={env}
+              onSettingsChanged={handleSettingsChanged}
+            />
           )}
         </ErrorBoundary>
       </div>

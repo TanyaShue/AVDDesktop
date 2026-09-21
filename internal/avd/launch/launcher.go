@@ -35,7 +35,7 @@ const (
 
 // Launcher 管理所有模拟器实例。
 type Launcher struct {
-	Paths platform.InstallPaths
+	Tools platform.Tools
 	Env   []string
 	Store *store.Store
 	Adb   *adb.Client
@@ -61,9 +61,9 @@ type instance struct {
 const EventState = "emulator:state"
 
 // New 创建启动器。log 为 nil 时使用空日志器。
-func New(paths platform.InstallPaths, env []string, st *store.Store, adbClient *adb.Client, sink func(string, any), log logging.Interface) *Launcher {
+func New(tools platform.Tools, env []string, st *store.Store, adbClient *adb.Client, sink func(string, any), log logging.Interface) *Launcher {
 	return &Launcher{
-		Paths:     paths,
+		Tools:     tools,
 		Env:       env,
 		Store:     st,
 		Adb:       adbClient,
@@ -167,7 +167,7 @@ func isPortFree(port int) bool {
 
 // Start 启动一个 AVD 实例（立即返回，启动过程由后台协程推进状态）。
 func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.LaunchOptions) (*domain.EmulatorInstance, error) {
-	if !platform.FileExists(l.Paths.EmulatorExe) {
+	if !platform.FileExists(l.Tools.Emulator) {
 		return nil, domain.Err(domain.CodeToolMissing, "未安装模拟器（emulator）").
 			WithAction("install", "安装模拟器", "emulator")
 	}
@@ -196,8 +196,8 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 	opts.Port = port
 
 	args := BuildArgs(avdName, opts)
-	cmd := exec.Command(l.Paths.EmulatorExe, args...)
-	cmd.Dir = l.Paths.Emulator
+	cmd := exec.Command(l.Tools.Emulator, args...)
+	cmd.Dir = l.Tools.EmulatorDir
 	cmd.Env = l.Env
 	proc.Prepare(cmd)
 
@@ -210,7 +210,7 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 		return nil, domain.Wrap(domain.CodeProcessFailed, "无法捕获模拟器错误输出", err)
 	}
 	if err := cmd.Start(); err != nil {
-		l.log.Error("emulator", "启动 %s 失败：%v（可执行文件 %s）", avdName, err, l.Paths.EmulatorExe)
+		l.log.Error("emulator", "启动 %s 失败：%v（可执行文件 %s）", avdName, err, l.Tools.Emulator)
 		return nil, domain.Wrap(domain.CodeProcessFailed, "无法启动模拟器", err).
 			WithHint("请确认模拟器未被杀毒软件拦截，且路径没有特殊字符")
 	}
@@ -228,7 +228,7 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 			State:     domain.AvdStarting,
 			StartedAt: platform.NowMs(),
 			Args:      args,
-			LogsPath:  filepath.Join(l.Paths.SdkRoot, "emulator", "avddesktop-logs"),
+			LogsPath:  filepath.Join(l.Tools.SdkRoot, "emulator", "logs"),
 		},
 		cmd:  cmd,
 		done: make(chan struct{}),
@@ -246,7 +246,7 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 		l.Store.TouchLastUsed(avdName)
 	}
 	l.log.Info("emulator", "已启动 %s：pid=%d serial=%s port=%d\n  参数：%s %s",
-		avdName, cmd.Process.Pid, serial, port, l.Paths.EmulatorExe, strings.Join(args, " "))
+		avdName, cmd.Process.Pid, serial, port, l.Tools.Emulator, strings.Join(args, " "))
 	l.emit(inst.Snapshot())
 	info := inst.Snapshot()
 	return &info, nil

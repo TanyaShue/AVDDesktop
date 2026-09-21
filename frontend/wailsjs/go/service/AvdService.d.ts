@@ -13,19 +13,15 @@ export function Create(arg1:domain.AvdSpec):Promise<string>;
 
 export function Delete(arg1:service.DeleteRequest):Promise<string>;
 
-export function Export(arg1:service.ExportRequest):Promise<string>;
-
 export function Get(arg1:string):Promise<domain.AvdDetail>;
-
-export function Import(arg1:service.ImportRequest):Promise<string>;
 
 export function List():Promise<Array<domain.AvdSummary>>;
 
 export function ListConfigSchema():Promise<Array<domain.HwConfigItem>>;
 
-export function ListProfiles(arg1:boolean):Promise<Array<domain.DeviceProfile>>;
+export function ListImages(arg1:boolean):Promise<Array<domain.SystemImage>>;
 
-export function OpenFolder(arg1:string):Promise<void>;
+export function ListProfiles(arg1:boolean):Promise<Array<domain.DeviceProfile>>;
 
 export function ReadConfigRaw(arg1:string):Promise<string>;
 

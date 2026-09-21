@@ -1,109 +1,157 @@
 package platform
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
-// TestChildEnvAvdHome 验证 ANDROID_AVD_HOME 指向 avd 目录本身。
-//
-// 端到端测试发现的真实问题：曾经写成 filepath.Dir(avdHome)，
-// 导致 avdmanager 把新建的 AVD 放到错误位置，工具随后找不到设备。
-func TestChildEnvAvdHome(t *testing.T) {
-	sdk := filepath.Join("C:", "sdk")
-	avd := filepath.Join("C:", "users", "me", ".android", "avd")
+func TestNewToolsLayout(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "sdk")
+	tools := NewTools(root)
 
-	env := ChildEnv(sdk, avd, true)
-	got := lookupEnv(env, "ANDROID_AVD_HOME")
-	if got != avd {
-		t.Errorf("ANDROID_AVD_HOME = %q，期望 %q（必须是 avd 目录本身，不是父目录）", got, avd)
+	if tools.SdkRoot != root {
+		t.Fatalf("SdkRoot = %q", tools.SdkRoot)
 	}
-	if lookupEnv(env, "ANDROID_HOME") != sdk {
-		t.Errorf("ANDROID_HOME 未设置：%q", lookupEnv(env, "ANDROID_HOME"))
-	}
-	path := lookupEnv(env, "PATH")
-	if !strings.Contains(path, filepath.Join(sdk, "platform-tools")) {
-		t.Errorf("PATH 未包含 platform-tools：%q", path)
-	}
-
-	// 不注入时应保持原样（不添加任何 ANDROID_* 覆盖项）
-	unchanged := ChildEnv(sdk, avd, false)
-	if lookupEnv(unchanged, "ANDROID_AVD_HOME") != lookupEnv(env, "ANDROID_AVD_HOME") &&
-		lookupEnv(unchanged, "ANDROID_AVD_HOME") != "" {
-		// 只有当宿主机本来就有该变量时才可能相等，这里只要求不主动写入
-		t.Log("宿主机原本已设置 ANDROID_AVD_HOME，跳过严格断言")
-	}
-}
-
-// TestResolveAvdHomePriority 验证 AVD 目录解析优先级链。
-func TestResolveAvdHomePriority(t *testing.T) {
-	t.Setenv("ANDROID_AVD_HOME", filepath.Join("C:", "explicit"))
-	t.Setenv("ANDROID_USER_HOME", filepath.Join("C:", "userhome"))
-	t.Setenv("ANDROID_SDK_HOME", filepath.Join("C:", "sdkhome"))
-	t.Setenv("ANDROID_PREFS_ROOT", filepath.Join("C:", "prefs"))
-
-	if got := ResolveAvdHome(""); got.Path != filepath.Join("C:", "explicit") {
-		t.Errorf("应优先使用 ANDROID_AVD_HOME，实际 %q", got.Path)
-	}
-	if got := ResolveAvdHome(filepath.Join("C:", "manual")); got.Path != filepath.Join("C:", "manual") {
-		t.Errorf("显式设置应最优先，实际 %q", got.Path)
-	}
-
-	t.Setenv("ANDROID_AVD_HOME", "")
-	if got := ResolveAvdHome(""); got.Path != filepath.Join("C:", "userhome", "avd") {
-		t.Errorf("应回退到 ANDROID_USER_HOME/avd，实际 %q", got.Path)
-	}
-
-	t.Setenv("ANDROID_USER_HOME", "")
-	if got := ResolveAvdHome(""); got.Path != filepath.Join("C:", "sdkhome", ".android", "avd") {
-		t.Errorf("应回退到 ANDROID_SDK_HOME/.android/avd，实际 %q", got.Path)
-	}
-
-	t.Setenv("ANDROID_SDK_HOME", "")
-	if got := ResolveAvdHome(""); got.Path != filepath.Join("C:", "prefs", ".android", "avd") {
-		t.Errorf("应回退到 ANDROID_PREFS_ROOT/.android/avd，实际 %q", got.Path)
-	}
-}
-
-// TestDirSizeCache 验证目录大小缓存与失效。
-func TestDirSizeCache(t *testing.T) {
-	dir := t.TempDir()
-	if err := EnsureDir(dir); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(dir, "a.bin"), 1024)
-	first := DirSizeCached(dir)
-	if first != 1024 {
-		t.Fatalf("首次统计 = %d，期望 1024", first)
-	}
-
-	// 新增文件后仍命中缓存
-	writeFile(t, filepath.Join(dir, "b.bin"), 2048)
-	if got := DirSizeCached(dir); got != first {
-		t.Errorf("缓存未命中：%d ≠ %d", got, first)
-	}
-
-	// 失效后应重新统计
-	InvalidateDirSize(dir)
-	if got := DirSizeCached(dir); got != 3072 {
-		t.Errorf("失效后统计 = %d，期望 3072", got)
-	}
-}
-
-func lookupEnv(env []string, key string) string {
-	prefix := strings.ToUpper(key) + "="
-	for i := len(env) - 1; i >= 0; i-- { // 后出现的优先（与 os/exec 行为一致）
-		if strings.HasPrefix(strings.ToUpper(env[i]), prefix) {
-			return env[i][len(prefix):]
+	// 工具链必须全部位于软件自有 SDK 目录内
+	for name, path := range map[string]string{
+		"sdkmanager":   tools.Sdkmanager,
+		"avdmanager":   tools.Avdmanager,
+		"adb":          tools.Adb,
+		"emulator":     tools.Emulator,
+		"licenses":     tools.Licenses,
+		"systemImages": tools.SystemImages,
+	} {
+		if !strings.HasPrefix(path, root) {
+			t.Errorf("%s 不在 SDK 目录内: %q", name, path)
 		}
 	}
-	return ""
+	if filepath.Dir(tools.Sdkmanager) != filepath.Join(root, "cmdline-tools", "latest", "bin") {
+		t.Errorf("sdkmanager 路径不符合官方目录结构: %q", tools.Sdkmanager)
+	}
+	if filepath.Dir(tools.Adb) != filepath.Join(root, "platform-tools") {
+		t.Errorf("adb 路径不符合官方目录结构: %q", tools.Adb)
+	}
+	if filepath.Dir(tools.Emulator) != filepath.Join(root, "emulator") {
+		t.Errorf("emulator 路径不符合官方目录结构: %q", tools.Emulator)
+	}
+
+	if runtime.GOOS == "windows" {
+		if filepath.Ext(tools.Sdkmanager) != ".bat" {
+			t.Errorf("Windows 上 sdkmanager 应为 .bat：%q", tools.Sdkmanager)
+		}
+		if filepath.Ext(tools.Adb) != ".exe" {
+			t.Errorf("Windows 上 adb 应为 .exe：%q", tools.Adb)
+		}
+	} else {
+		if filepath.Ext(tools.Sdkmanager) != "" || filepath.Ext(tools.Adb) != "" {
+			t.Errorf("非 Windows 平台不应带可执行后缀：%q / %q", tools.Sdkmanager, tools.Adb)
+		}
+	}
 }
 
-func writeFile(t *testing.T, path string, size int) {
+func TestToolsAvailability(t *testing.T) {
+	root := t.TempDir()
+	tools := NewTools(root)
+	if tools.HasSdkmanager() || tools.HasAdb() || tools.HasEmulator() || tools.HasAvdmanager() {
+		t.Fatal("空目录不应报告工具就位")
+	}
+	if err := os.MkdirAll(filepath.Dir(tools.Sdkmanager), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTemp(t, tools.Sdkmanager, "#!/bin/sh\n")
+	if !tools.HasSdkmanager() {
+		t.Fatal("文件存在时应报告 sdkmanager 可用")
+	}
+	if tools.HasEmulator() {
+		t.Fatal("emulator 仍未安装")
+	}
+}
+
+func TestChildEnvInjectsOwnSdk(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "sdk")
+	avdHome := filepath.Join(t.TempDir(), "avd")
+	tools := NewTools(root)
+
+	env := ChildEnv(tools, avdHome)
+	got := map[string]string{}
+	for _, kv := range env {
+		i := strings.IndexByte(kv, '=')
+		if i <= 0 {
+			continue
+		}
+		got[strings.ToUpper(kv[:i])] = kv[i+1:]
+	}
+
+	if got["ANDROID_SDK_ROOT"] != root || got["ANDROID_HOME"] != root {
+		t.Errorf("未把软件自有 SDK 注入子进程: %v", got["ANDROID_SDK_ROOT"])
+	}
+	if got["ANDROID_AVD_HOME"] != avdHome {
+		t.Errorf("ANDROID_AVD_HOME 应为 AVD 目录本身，实际 %q", got["ANDROID_AVD_HOME"])
+	}
+	// PATH 必须把自带工具链放在前面，且保留原 PATH
+	path := got["PATH"]
+	if !strings.HasPrefix(path, filepath.Join(root, "platform-tools")) {
+		t.Errorf("PATH 未优先使用自带 platform-tools: %q", path)
+	}
+	if !strings.Contains(path, filepath.Join(root, "emulator")) ||
+		!strings.Contains(path, filepath.Join(root, "cmdline-tools", "latest", "bin")) {
+		t.Errorf("PATH 缺少自带工具链目录: %q", path)
+	}
+	if old := os.Getenv("PATH"); old != "" && !strings.Contains(path, old) {
+		t.Errorf("PATH 应保留原有内容")
+	}
+	// 绝不修改当前进程环境
+	if os.Getenv("ANDROID_SDK_ROOT") != got["ANDROID_SDK_ROOT"] {
+		// 仅当原环境没有该值时成立；不修改环境是本函数的硬约束
+		if os.Getenv("ANDROID_SDK_ROOT") == root {
+			t.Fatal("ChildEnv 不应修改当前进程环境")
+		}
+	}
+}
+
+func TestRootOverridable(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AVDDESKTOP_HOME", dir)
+
+	// Root 使用 sync.Once 缓存，这里直接验证解析函数的行为
+	if got := resolveRoot(); got != filepath.Clean(dir) {
+		t.Fatalf("AVDDESKTOP_HOME 应决定软件根目录：期望 %q，实际 %q", dir, got)
+	}
+	if got := SdkRoot(); !strings.HasPrefix(got, filepath.Clean(dir)) {
+		t.Fatalf("SDK 目录应位于软件根目录下: %q", got)
+	}
+	if got := AvdHome(); got != filepath.Join(filepath.Clean(dir), "avd") {
+		t.Fatalf("AVD 目录错误: %q", got)
+	}
+	if got := SettingsPath(); got != filepath.Join(filepath.Clean(dir), "config", "settings.json") {
+		t.Fatalf("设置文件路径错误: %q", got)
+	}
+}
+
+func TestFindJavaPrefersJavaHome(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := "java"
+	if runtime.GOOS == "windows" {
+		name = "java.exe"
+	}
+	writeTemp(t, filepath.Join(bin, name), "stub")
+
+	t.Setenv("JAVA_HOME", dir)
+	if got := FindJava(); got != filepath.Join(bin, name) {
+		t.Fatalf("应优先使用 JAVA_HOME 下的 java：期望 %q，实际 %q", filepath.Join(bin, name), got)
+	}
+}
+
+func writeTemp(t *testing.T, path, content string) {
 	t.Helper()
-	if err := WriteFileAtomic(path, make([]byte, size), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
 		t.Fatal(err)
 	}
 }

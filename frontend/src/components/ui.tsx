@@ -1,6 +1,6 @@
 // 通用 UI 组件：弹窗、Toast 容器、状态徽标、进度条。
 import type { ReactNode } from "react";
-import type { JobInfo, Toast, ToolState } from "../bridge/types";
+import type { JobInfo, Toast } from "../bridge/types";
 
 export function Modal({
   title,
@@ -87,53 +87,18 @@ function iconTone(level: Toast["level"]) {
   }
 }
 
-/** 组件状态 → chip 样式与文案。 */
-export function stateChip(state: ToolState | undefined) {
-  switch (state) {
-    case "present":
-      return { cls: "chip chip--success", text: "就绪" };
-    case "missing":
-      return { cls: "chip chip--danger", text: "缺失" };
-    case "broken":
-      return { cls: "chip chip--danger", text: "异常" };
-    case "incompatible":
-      return { cls: "chip chip--warning", text: "需升级" };
-    case "outdated":
-      return { cls: "chip chip--warning", text: "可更新" };
-    default:
-      return { cls: "chip", text: "未知" };
-  }
+/** 耗时格式化（环境检查/任务耗时展示）。 */
+export function formatMs(ms: number): string {
+  if (!ms || ms < 0) return "—";
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  return `${(ms / 1000).toFixed(1)} s`;
 }
 
-/** 组件状态 → 图标样式。 */
-export function stateTone(state: ToolState | undefined) {
-  switch (state) {
-    case "present":
-      return { cls: "tool__icon tool__icon--ok", char: "✓" };
-    case "missing":
-    case "broken":
-      return { cls: "tool__icon tool__icon--bad", char: "✕" };
-    case "incompatible":
-    case "outdated":
-      return { cls: "tool__icon tool__icon--warn", char: "!" };
-    default:
-      return { cls: "tool__icon", char: "—" };
-  }
-}
-
+/** 进度条。 */
 export function Progress({ percent, indeterminate }: { percent: number; indeterminate?: boolean }) {
   return (
     <div className={`progress${indeterminate ? " progress--indeterminate" : ""}`}>
       <div className="progress__bar" style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />
-    </div>
-  );
-}
-
-export function ScoreBar({ score }: { score: number }) {
-  const color = score >= 70 ? "var(--speed-fast)" : score >= 35 ? "var(--speed-mid)" : "var(--speed-slow)";
-  return (
-    <div className="scorebar" title={`评分 ${score}`}>
-      <div className="scorebar__fill" style={{ width: `${score}%`, background: color }} />
     </div>
   );
 }

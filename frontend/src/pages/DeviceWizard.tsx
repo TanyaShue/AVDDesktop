@@ -63,12 +63,7 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
     if (step !== 2 || images.length > 0) return;
     void (async () => {
       try {
-        const list = (await api.Sdk.ListSystemImages({
-          tags: [],
-          sourceId: "",
-          refresh: false,
-          onlyInstalled: true,
-        })) as SystemImage[];
+        const list = (await api.Avd.ListImages(true)) as SystemImage[];
         setImages(api.asArray(list));
         if (!imagePath && list.length > 0) setImagePath(list[0].path);
       } catch (err) {
@@ -307,7 +302,7 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
             <div className="empty__icon">🧩</div>
             <div className="empty__title">还没有已安装的系统镜像</div>
             <div className="empty__desc">
-              创建 AVD 需要至少一个系统镜像。请到「SDK」页面从当前镜像源下载一个（推荐 Google APIs，约 1.5-2 GB）。
+              创建 AVD 需要至少一个系统镜像。请到「设置」页查看可用镜像，或先完成环境准备（会自动安装官方命令行工具）。
             </div>
           </div>
         ) : (
@@ -324,13 +319,15 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
                 }}
                 onClick={() => setImagePath(img.path)}
               >
-                <div style={{ fontWeight: 600 }}>Android {img.apiLevel}</div>
+                <div style={{ fontWeight: 600 }}>Android {img.api}</div>
                 <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                  {img.tagDisplay || img.tagId} · {img.abi}
+                  {img.tag} · {img.abi}
                 </div>
                 <div className="row" style={{ marginTop: 6, gap: 6 }}>
-                  {img.isPlaystore ? <span className="chip chip--sm chip--warning">Play</span> : null}
-                  <span className="chip chip--sm">rev {img.revision}</span>
+                  {img.tag.includes("playstore") ? (
+                    <span className="chip chip--sm chip--warning">Play</span>
+                  ) : null}
+                  {img.version ? <span className="chip chip--sm">rev {img.version}</span> : null}
                 </div>
               </button>
             ))}

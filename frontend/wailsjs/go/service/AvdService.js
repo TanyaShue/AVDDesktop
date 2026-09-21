@@ -22,16 +22,8 @@ export function Delete(arg1) {
   return window['go']['service']['AvdService']['Delete'](arg1);
 }
 
-export function Export(arg1) {
-  return window['go']['service']['AvdService']['Export'](arg1);
-}
-
 export function Get(arg1) {
   return window['go']['service']['AvdService']['Get'](arg1);
-}
-
-export function Import(arg1) {
-  return window['go']['service']['AvdService']['Import'](arg1);
 }
 
 export function List() {
@@ -42,12 +34,12 @@ export function ListConfigSchema() {
   return window['go']['service']['AvdService']['ListConfigSchema']();
 }
 
-export function ListProfiles(arg1) {
-  return window['go']['service']['AvdService']['ListProfiles'](arg1);
+export function ListImages(arg1) {
+  return window['go']['service']['AvdService']['ListImages'](arg1);
 }
 
-export function OpenFolder(arg1) {
-  return window['go']['service']['AvdService']['OpenFolder'](arg1);
+export function ListProfiles(arg1) {
+  return window['go']['service']['AvdService']['ListProfiles'](arg1);
 }
 
 export function ReadConfigRaw(arg1) {

@@ -3,36 +3,10 @@
 import {domain} from '../models';
 import {service} from '../models';
 
-export function CheckAcceleration():Promise<domain.AccelInfo>;
+export function Check():Promise<domain.EnvReport>;
 
 export function CopyToClipboard(arg1:string):Promise<void>;
 
-export function Detect(arg1:service.DetectRequest):Promise<domain.EnvReport>;
+export function Prepare():Promise<string>;
 
-export function DetectJava():Promise<domain.ToolStatus>;
-
-export function DetectSdkRoots():Promise<Array<domain.SdkRootCandidate>>;
-
-export function DiskSpace(arg1:string):Promise<domain.DiskInfo>;
-
-export function EnabledWindowsFeatures():Promise<domain.WindowsInfo>;
-
-export function HostInfo():Promise<Record<string, string>>;
-
-export function OpenExternalURL(arg1:string):Promise<void>;
-
-export function OpenInExplorer(arg1:string):Promise<void>;
-
-export function OpenTerminal(arg1:service.TerminalRequest):Promise<void>;
-
-export function PickDirectory(arg1:service.PickRequest):Promise<string>;
-
-export function PickFile(arg1:service.PickRequest):Promise<string>;
-
-export function ResolveAvdHome():Promise<domain.AvdHomeInfo>;
-
-export function ResolvedPaths():Promise<service.ResolvedPaths>;
-
-export function SaveFile(arg1:service.PickRequest):Promise<string>;
-
-export function ValidateSdkRoot(arg1:string):Promise<domain.SdkRootValidation>;
+export function Resolved():Promise<service.ResolvedPaths>;

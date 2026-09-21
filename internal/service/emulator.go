@@ -34,7 +34,7 @@ func (s *EmulatorService) Start(req StartRequest) (*domain.EmulatorInstance, err
 	if req.AvdName == "" {
 		return nil, domain.Err(domain.CodeInvalidArgument, "未指定设备名称")
 	}
-	if !platform.FileExists(comp.Paths.EmulatorExe) {
+	if !platform.FileExists(comp.Tools.Emulator) {
 		return nil, domain.Err(domain.CodeToolMissing, "尚未安装模拟器（emulator）").
 			WithAction("install", "安装模拟器", "emulator")
 	}
@@ -271,7 +271,7 @@ func (s *EmulatorService) emu(instanceID, consoleCommand string) error {
 	}
 	args := strings.Fields(consoleCommand)
 	full := append([]string{"-s", inst.Serial, "emu"}, args...)
-	_, err := outputCommand(s.rt.Context(), comp.Paths.Adb, full, comp.Env)
+	_, err := outputCommand(s.rt.Context(), comp.Tools.Adb, full, comp.Env)
 	return err
 }
 
@@ -402,7 +402,7 @@ func (s *AdbService) Root(serial string) (string, error) {
 	if err == nil && strings.Contains(out, "uid=0") {
 		return "已经是 root 权限", nil
 	}
-	_, err = outputCommand(s.rt.Context(), comp.Paths.Adb, []string{"-s", serial, "root"}, comp.Env)
+	_, err = outputCommand(s.rt.Context(), comp.Tools.Adb, []string{"-s", serial, "root"}, comp.Env)
 	if err != nil {
 		return "", domain.ErrDetail(domain.CodeProcessFailed, "无法切换到 root",
 			"Play 商店镜像不支持 root，请改用 google_apis 或 aosp 镜像")
@@ -449,7 +449,7 @@ func (s *AdbService) StartLogcat(req LogcatRequest) (string, error) {
 	}
 
 	// 先确认设备在线，避免任务启动后立即失败
-	if _, err := outputCommand(s.rt.Context(), comp.Paths.Adb,
+	if _, err := outputCommand(s.rt.Context(), comp.Tools.Adb,
 		[]string{"-s", req.Serial, "get-state"}, comp.Env); err != nil {
 		return "", domain.ErrDetail(domain.CodeProcessFailed,
 			"设备 "+req.Serial+" 当前不可用", "请确认模拟器已启动完成").
@@ -472,7 +472,7 @@ func (s *AdbService) StartLogcat(req LogcatRequest) (string, error) {
 		j.Logf("info", "logcat", "开始订阅 %s 的日志（buffer=%s）", req.Serial, nonEmpty(req.Buffer, "main"))
 
 		// adb logcat 是长驻进程：ctx 取消时 proc.Run 会终止它
-		res, err := proc.Run(ctx, comp.Paths.Adb, args, proc.Options{
+		res, err := proc.Run(ctx, comp.Tools.Adb, args, proc.Options{
 			Env:    comp.Env,
 			OnLine: func(stream, line string) { s.emitLogcatLine(req.Serial, j, line) },
 		})
@@ -517,7 +517,7 @@ func (s *AdbService) LogcatSnapshot(serial, filter string, lines int) ([]string,
 	if f := strings.TrimSpace(filter); f != "" {
 		args = append(args, strings.Fields(f)...)
 	}
-	out, err := outputCommand(s.rt.Context(), comp.Paths.Adb, args, comp.Env)
+	out, err := outputCommand(s.rt.Context(), comp.Tools.Adb, args, comp.Env)
 	if err != nil {
 		return nil, err
 	}
@@ -537,6 +537,6 @@ func detectLogLevel(line string) string {
 	}
 }
 
-func (s *AdbService) adbPath() string { return s.rt.Components().Paths.Adb }
+func (s *AdbService) adbPath() string { return s.rt.Components().Tools.Adb }
 
 var _ = time.Second
