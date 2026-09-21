@@ -1,52 +1,33 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 # ============================================================================
-# AVDDesktop 端到端回归测试运行脚本
+# AVDDesktop 端到端测试运行脚本
 #
 # 用法：
-#   .\scripts\e2e.ps1                 # 轻量回归：自检 + 仓库索引 + 测速 + AVD 生命周期
-#   .\scripts\e2e.ps1 -Heavy          # 追加：真实下载安装 cmdline-tools / platform-tools
-#   .\scripts\e2e.ps1 -Boot           # 追加：真实启动模拟器并验证 adb
-#   .\scripts\e2e.ps1 -All            # 全部（耗时最长，需要已安装系统镜像）
-#   .\scripts\e2e.ps1 -Run TestE2E_RepoIndexAndPlan
+#   .\scripts\e2e.ps1
 #
 # 说明：
-#   - 所有用例使用临时目录，不会改动你真实的 SDK / AVD 目录（仅只读引用）
-#   - 需要网络、JDK、系统镜像的用例在缺失时会自动跳过并说明原因
+#   - 走真实服务层 + 真网络 + 真磁盘：首次运行会下载官方命令行工具（约 150 MB），
+#     并安装 platform-tools / emulator 到软件自己的 SDK 目录
+#   - 软件根目录由 AVDDESKTOP_E2E_HOME 指定（默认 %LOCALAPPDATA%\AVDDesktop\e2e），
+#     与真实使用中的软件目录隔离；重复运行会复用已下载内容
+#   - 需要 JDK（sdkmanager / avdmanager 依赖）与网络
 # ============================================================================
 [CmdletBinding()]
-param(
-    [switch]$Heavy,
-    [switch]$Boot,
-    [switch]$All,
-    [string]$Run = "",
-    [string]$Source = "",
-    [int]$TimeoutMinutes = 60,
-    # 透传给 go test 的 -v（注意：-Verbose 是 PowerShell 内置参数，不能重用）
-    [switch]$Detailed
-)
+param()
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
 try {
-    if ($All) { $Heavy = $true; $Boot = $true }
-
-    if ($Heavy) { $env:AVDDESKTOP_E2E_HEAVY = "1" } else { Remove-Item Env:AVDDESKTOP_E2E_HEAVY -ErrorAction SilentlyContinue }
-    if ($Boot)  { $env:AVDDESKTOP_E2E_BOOT  = "1" } else { Remove-Item Env:AVDDESKTOP_E2E_BOOT  -ErrorAction SilentlyContinue }
-    if ($Source) { $env:AVDDESKTOP_E2E_SOURCE = $Source } else { Remove-Item Env:AVDDESKTOP_E2E_SOURCE -ErrorAction SilentlyContinue }
+    if (-not $env:AVDDESKTOP_E2E_HOME) {
+        $env:AVDDESKTOP_E2E_HOME = Join-Path $env:LOCALAPPDATA "AVDDesktop\e2e"
+    }
 
     Write-Host "=== AVDDesktop E2E ===" -ForegroundColor Cyan
-    Write-Host ("  下载安装用例 : {0}" -f $(if ($Heavy) { "启用" } else { "跳过" }))
-    Write-Host ("  模拟器启动用例: {0}" -f $(if ($Boot)  { "启用" } else { "跳过" }))
-    if ($Source) { Write-Host ("  镜像源       : {0}" -f $Source) }
+    Write-Host ("  软件根目录: {0}" -f $env:AVDDESKTOP_E2E_HOME)
     Write-Host ""
 
-    $args = @("test", "-tags", "e2e", "./internal/e2e/", "-timeout", "$($TimeoutMinutes)m")
-    if ($Detailed) { $args += "-v" }
-    if ($Run) { $args += @("-run", $Run) }
-
-    Write-Host ("go " + ($args -join " ")) -ForegroundColor DarkGray
-    & go @args
+    & go test -tags e2e -count=1 -timeout 60m ./internal/e2e/ -v
     $code = $LASTEXITCODE
 
     if ($code -eq 0) {

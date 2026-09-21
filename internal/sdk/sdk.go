@@ -35,11 +35,12 @@ var cmdlineToolsSHA1 = map[string]string{
 
 // 命令超时策略：按命令类型区分，任何命令都不允许无限等待。
 const (
-	versionTimeout = 60 * time.Second          // --version
-	listTimeout    = 3 * time.Minute           // --list（需要访问官方仓库）
-	licenseTimeout = 3 * time.Minute           // --licenses
-	installTimeout = 45 * time.Minute          // 下载安装组件（system image 约 1-2 GB）
-	licenseFeed    = 80                        // 许可确认时预置的 "y" 行数
+	versionTimeout   = 60 * time.Second // --version
+	listTimeout      = 3 * time.Minute  // --list（需要访问官方仓库）
+	licenseTimeout   = 3 * time.Minute  // --licenses
+	installTimeout   = 45 * time.Minute // 下载安装组件（system image 约 1-2 GB）
+	licenseFeed      = 80               // 许可确认时预置的 "y" 行数
+	bootstrapTimeout = 30 * time.Minute // 自举整体上限（下载 + 解压）
 )
 
 // LineFunc 是命令输出的逐行回调（stream 为 stdout / stderr）。
@@ -79,8 +80,12 @@ func CmdlineToolsArchive() (name, sha1sum string, err error) {
 
 // Bootstrap 下载并解压官方命令行工具到 <sdk>/cmdline-tools/latest。
 //
-// 解压先落到 .staging 目录，成功后整体替换 latest，避免留下半成品目录。
+// 解压先落到 .staging 目录，成功后整体替换 latest（失败时回滚旧目录），避免留下半成品。
 func Bootstrap(ctx context.Context, tools platform.Tools, cacheDir string, onProgress ProgressFunc) error {
+	// 下载与解压共用同一个整体超时，避免网络挂死导致无限等待。
+	ctx, cancel := context.WithTimeout(ctx, bootstrapTimeout)
+	defer cancel()
+
 	archive, sha1sum, err := CmdlineToolsArchive()
 	if err != nil {
 		return err
@@ -108,15 +113,33 @@ func Bootstrap(ctx context.Context, tools platform.Tools, cacheDir string, onPro
 		return domain.ErrDetail(domain.CodeArchiveFailed,
 			"命令行工具归档内容不符合预期", "缺少 bin/sdkmanager")
 	}
-	if err := os.RemoveAll(tools.CmdlineTools); err != nil {
-		_ = os.RemoveAll(staging)
-		return domain.Wrap(domain.CodePermissionDenied, "无法替换已有的命令行工具目录", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(tools.CmdlineTools), 0o755); err != nil {
-		return domain.Wrap(domain.CodePermissionDenied, "无法创建 cmdline-tools 目录", err)
+
+	// 可回滚替换：旧目录先挪到 .old，启用新目录失败时再挪回来，避免连旧安装一起丢掉。
+	old := tools.CmdlineTools + ".old"
+	_ = os.RemoveAll(old)
+	hadOld := false
+	if platform.DirExists(tools.CmdlineTools) {
+		if err := os.Rename(tools.CmdlineTools, old); err != nil {
+			_ = os.RemoveAll(staging)
+			return domain.Wrap(domain.CodePermissionDenied, "无法替换已有的命令行工具目录", err)
+		}
+		hadOld = true
 	}
 	if err := os.Rename(staging, tools.CmdlineTools); err != nil {
+		if hadOld {
+			_ = os.Rename(old, tools.CmdlineTools)
+		}
+		_ = os.RemoveAll(staging)
 		return domain.Wrap(domain.CodePermissionDenied, "无法启用命令行工具", err)
+	}
+	_ = os.RemoveAll(old)
+	_ = os.RemoveAll(staging)
+
+	// 官方 zip 的条目不一定带 Unix 模式位，非 Windows 平台需显式补上可执行权限。
+	if runtime.GOOS != "windows" {
+		for _, name := range []string{"sdkmanager", "avdmanager"} {
+			_ = os.Chmod(filepath.Join(tools.CmdlineTools, "bin", name), 0o755)
+		}
 	}
 	_ = os.Remove(zipPath)
 	return nil
@@ -128,13 +151,20 @@ func AcceptLicenses(ctx context.Context, tools platform.Tools, env []string, onL
 	return err
 }
 
-// InstallPackages 通过官方 sdkmanager 安装组件并返回等价命令行。
+// InstallPackages 通过官方 sdkmanager 安装组件。
 //
-// 命令文本由项目自行拼装（不含交互输入的 y），其执行结果为最终现状。
+// sdkmanager 失败时仍可能有正常输出，因此必须检查退出码，否则会把安装失败当成功。
 func InstallPackages(ctx context.Context, tools platform.Tools, env []string, packages []string, onLine LineFunc) error {
 	args := append([]string{"--sdk_root=" + tools.SdkRoot}, packages...)
-	_, err := runSdkmanager(ctx, tools, env, args, installTimeout, onLine, yesLines(licenseFeed))
-	return err
+	res, err := runSdkmanager(ctx, tools, env, args, installTimeout, onLine, yesLines(licenseFeed))
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 {
+		return domain.ErrDetail(domain.CodeProcessFailed,
+			"sdkmanager 安装失败", res.Combined())
+	}
+	return nil
 }
 
 // InstallCommand 返回可复制执行的等价命令行（供界面展示）。
@@ -184,7 +214,8 @@ func ListImages(ctx context.Context, tools platform.Tools, env []string, install
 //	  system-images;android-34;google_apis;x86_64 | 14 | Google APIs … | system-images\…
 func ParsePackages(out string) []Package {
 	var (
-		installed = true // 头部之前出现的表格视为本地已安装
+		// 只有出现在 "Installed packages:" 表头之后的表格才算本地已安装。
+		installed = false
 		seen      = map[string]int{}
 		list      []Package
 	)
@@ -217,7 +248,7 @@ func ParsePackages(out string) []Package {
 			item.Description = strings.TrimSpace(fields[2])
 		}
 		if prev, ok := seen[path]; ok {
-			// 同一个包既在已安装又在可安装列表中出现：保留「已安装」状态与较高版本
+			// 同一个包同时出现在两个区块时去重：以「已安装」状态为准，缺失的版本号用另一处补全。
 			if item.Installed && !list[prev].Installed {
 				list[prev].Installed = true
 			}

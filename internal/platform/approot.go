@@ -12,6 +12,7 @@ package platform
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -27,8 +28,8 @@ var (
 //
 // 解析顺序：
 //  1. 环境变量 AVDDESKTOP_HOME（便携部署 / 测试用）
-//  2. 可执行文件所在目录（可写时）
-//  3. 用户数据目录（安装到只读位置时的回退）
+//  2. 可执行文件所在目录（可写，且不是临时目录或 macOS .app 包内部时）
+//  3. 用户数据目录
 func Root() string {
 	rootOnce.Do(func() { rootDir = resolveRoot() })
 	return rootDir
@@ -40,11 +41,25 @@ func resolveRoot() string {
 	}
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
-		if IsWritable(dir) {
+		if usableAppDir(dir) && IsWritable(dir) {
 			return dir
 		}
 	}
 	return userDataDir(AppDirName)
+}
+
+// usableAppDir 判断可执行文件目录是否适合当作软件根目录。
+//
+// 排除两类情况：
+//   - 临时目录（wails dev / go run 的构建产物在临时目录里）
+//   - macOS 的 .app 包内部（SDK 不应该装进应用包）
+func usableAppDir(dir string) bool {
+	slash := filepath.ToSlash(dir)
+	if strings.Contains(slash, ".app/Contents") {
+		return false
+	}
+	tmp := filepath.ToSlash(os.TempDir())
+	return tmp == "" || !strings.HasPrefix(slash+"/", strings.TrimSuffix(tmp, "/")+"/")
 }
 
 // userDataDir 返回各平台的用户数据目录。

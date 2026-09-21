@@ -118,9 +118,13 @@ func extractFile(f *zip.File, target string) error {
 }
 
 // safeJoin 校验 zip 条目路径不会逃出 destDir。
+//
+// zip 条目必须是相对路径：绝对路径、以 "/" 开头的路径、UNC 路径一律拒绝
+// （Windows 上 "/abs" 不算 filepath.IsAbs，因此显式判一次，保证各平台行为一致）。
 func safeJoin(destDir, name string) (string, error) {
 	clean := filepath.Clean(filepath.FromSlash(name))
-	if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
+	if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") ||
+		strings.HasPrefix(name, "/") || strings.HasPrefix(name, `\`) {
 		return "", domain.ErrDetail(domain.CodeArchiveFailed,
 			"压缩包包含非法路径，已中止解压", name)
 	}

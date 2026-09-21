@@ -12,7 +12,7 @@ import (
 
 // AcquireSingleInstance 通过锁文件 + PID 实现单实例（类 Unix）。
 func AcquireSingleInstance(name string) (release func(), alreadyRunning bool, err error) {
-	lockPath := filepath.Join(AppDataDir(name), "app.lock")
+	lockPath := filepath.Join(Root(), "config", "app.lock")
 	if err := EnsureDir(filepath.Dir(lockPath)); err != nil {
 		return func() {}, false, err
 	}

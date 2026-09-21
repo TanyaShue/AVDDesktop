@@ -49,7 +49,6 @@ func Download(ctx context.Context, url, dest, wantSHA1 string, onProgress Progre
 
 	hash := sha1.New()
 	total := resp.ContentLength
-	started := time.Now()
 	lastReport := time.Now()
 	var done int64
 
@@ -104,6 +103,5 @@ func Download(ctx context.Context, url, dest, wantSHA1 string, onProgress Progre
 		_ = os.Remove(tmp)
 		return domain.Wrap(domain.CodePermissionDenied, "无法保存下载文件", err)
 	}
-	_ = started
 	return nil
 }
