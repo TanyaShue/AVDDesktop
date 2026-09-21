@@ -1,0 +1,122 @@
+/* ============================================================================
+ * AVDDesktop 设计令牌
+ * 视觉基线：assets/ 下的参考截图（浅色、留白、圆角卡片、蓝色主操作）
+ * 完整规范见 docs/UI-SPEC.md §3
+ * ========================================================================== */
+
+:root {
+  /* 品牌 / 强调 */
+  --primary: #2f7cf6;
+  --primary-hover: #1e6be8;
+  --primary-active: #1758c4;
+  --primary-soft: #eaf2fe;
+  --primary-border: #bbd5fc;
+
+  /* 文本 */
+  --text-primary: #1d2129;
+  --text-secondary: #4e5969;
+  --text-tertiary: #86909c;
+  --text-disabled: #c9cdd4;
+  --text-inverse: #ffffff;
+
+  /* 背景 / 边框 */
+  --bg-page: #f5f6f8;
+  --bg-surface: #ffffff;
+  --bg-subtle: #f7f8fa;
+  --bg-hover: #f2f3f5;
+  --bg-pressed: #e5e6eb;
+  --border-subtle: #eeeff1;
+  --border: #e5e6eb;
+
+  /* 语义 */
+  --success: #00b42a;
+  --success-soft: #e8ffea;
+  --warning: #ff7d00;
+  --warning-soft: #fff7e8;
+  --danger: #f53f3f;
+  --danger-soft: #ffece8;
+  --info: #2f7cf6;
+  --info-soft: #eaf2fe;
+  --neutral: #86909c;
+  --neutral-soft: #f2f3f5;
+
+  /* 速度/评分条 */
+  --speed-fast: #00b42a;
+  --speed-mid: #ff7d00;
+  --speed-slow: #f53f3f;
+
+  /* 字体 */
+  --font-sans: -apple-system, "Segoe UI Variable Text", "Segoe UI", "PingFang SC",
+    "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+
+  /* 间距 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* 圆角 */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-full: 999px;
+
+  /* 阴影 */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-pop: 0 6px 20px rgba(0, 0, 0, 0.1);
+  --shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.16);
+
+  /* 布局尺寸 */
+  --titlebar-h: 56px;
+  --nav-w: 80px;
+  --pageheader-h: 64px;
+  --drawer-collapsed-h: 44px;
+  --drawer-expanded-h: 240px;
+
+  /* 动效 */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur: 160ms;
+}
+
+[data-theme="dark"] {
+  --primary: #4c90ff;
+  --primary-hover: #6ba4ff;
+  --primary-active: #3a7fe0;
+  --primary-soft: #12233d;
+  --primary-border: #2a4a7a;
+
+  --text-primary: #e5e6eb;
+  --text-secondary: #a9aeb8;
+  --text-tertiary: #6b7280;
+  --text-disabled: #4a4d55;
+
+  --bg-page: #17181a;
+  --bg-surface: #1f2022;
+  --bg-subtle: #242527;
+  --bg-hover: #2a2b2e;
+  --bg-pressed: #33353a;
+  --border-subtle: #2a2b2e;
+  --border: #33353a;
+
+  --success-soft: #10281a;
+  --warning-soft: #2b1f0e;
+  --danger-soft: #2c1513;
+  --info-soft: #12233d;
+  --neutral-soft: #242527;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-pop: 0 6px 20px rgba(0, 0, 0, 0.45);
+  --shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur: 0ms;
+  }
+}
