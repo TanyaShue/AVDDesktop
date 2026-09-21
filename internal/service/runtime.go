@@ -9,8 +9,8 @@ import (
 	"sync"
 
 	"AVDDesktop/internal/adb"
+	"AVDDesktop/internal/avd"
 	"AVDDesktop/internal/avd/launch"
-	"AVDDesktop/internal/avd/store"
 	"AVDDesktop/internal/config"
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/job"
@@ -40,7 +40,7 @@ type Runtime struct {
 // components 是软件自有 SDK / AVD 目录下的工具链句柄集合。
 type components struct {
 	Tools    platform.Tools
-	Store    *store.Store
+	Store    *avd.Store
 	Launcher *launch.Launcher
 	Adb      *adb.Client
 	Env      []string
@@ -55,8 +55,7 @@ func NewRuntime(appName, version string, settings *config.Manager, log *logging.
 	avdHome := platform.AvdHome()
 	env := platform.ChildEnv(tools, avdHome)
 
-	st := store.New(avdHome)
-	st.SetSdkRoot(tools.SdkRoot)
+	st := avd.New(avdHome, tools.SdkRoot)
 
 	r := &Runtime{
 		AppName:  appName,

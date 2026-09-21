@@ -6,7 +6,6 @@ import type { AvdSummary, EmulatorInstance, LaunchOptions } from "../bridge/type
 import type { EnvCheck } from "../hooks/useEnvCheck";
 import { useWailsEvent } from "../hooks/useApp";
 import { DeviceWizard } from "./DeviceWizard";
-import { humanSize } from "../components/ui";
 
 interface Props {
   onToast: (level: "info" | "success" | "warning" | "danger", title: string, text?: string) => void;
@@ -18,7 +17,7 @@ export function DevicesPage({ onToast, env }: Props) {
   const [instances, setInstances] = useState<EmulatorInstance[]>([]);
   const [query, setQuery] = useState("");
   const [view, setView] = useState<"grid" | "list">("grid");
-  const [sortBy, setSortBy] = useState<"name" | "api" | "recent">("name");
+  const [sortBy, setSortBy] = useState<"name" | "api">("name");
   const [showWizard, setShowWizard] = useState(false);
   const [busyName, setBusyName] = useState<string | null>(null);
 
@@ -52,14 +51,12 @@ export function DevicesPage({ onToast, env }: Props) {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = devices.filter(
-      (d) => !q || `${d.name} ${d.displayName} ${d.apiLevel} ${d.tagId}`.toLowerCase().includes(q),
+      (d) => !q || `${d.name} ${d.api} ${d.tag} ${d.abi}`.toLowerCase().includes(q),
     );
     return [...list].sort((a, b) => {
       switch (sortBy) {
         case "api":
-          return (b.apiLevel || "").localeCompare(a.apiLevel || "", undefined, { numeric: true });
-        case "recent":
-          return (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0);
+          return (b.api || "").localeCompare(a.api || "", undefined, { numeric: true });
         default:
           return a.name.localeCompare(b.name);
       }
@@ -84,7 +81,7 @@ export function DevicesPage({ onToast, env }: Props) {
             } as LaunchOptions),
         }),
       );
-      onToast("info", "正在启动 " + device.displayName, "首次启动可能需要几分钟");
+      onToast("info", "正在启动 " + device.name, "首次启动可能需要几分钟");
       await load();
     } catch (err) {
       onToast("danger", "启动失败", errorText(err));
@@ -97,7 +94,7 @@ export function DevicesPage({ onToast, env }: Props) {
     setBusyName(device.name);
     try {
       await api.Emulator.StopByAvd(device.name, false);
-      onToast("success", "已停止 " + device.displayName);
+      onToast("success", "已停止 " + device.name);
       await load();
     } catch (err) {
       onToast("danger", "停止失败", errorText(err));
@@ -108,35 +105,16 @@ export function DevicesPage({ onToast, env }: Props) {
 
   const deleteDevice = async (device: AvdSummary) => {
     const ok = window.confirm(
-      `确认删除设备「${device.displayName}」？\n\n将删除 ${humanSize(device.sizeBytes)} 数据与所有快照，此操作不可撤销。`,
+      `确认删除设备「${device.name}」？
+
+将删除该设备的全部数据，此操作不可撤销。`,
     );
     if (!ok) return;
     try {
-      const id = await api.Avd.Delete({ name: device.name, deleteFiles: true });
+      const id = await api.Avd.Delete(device.name);
       onToast("info", "正在删除设备", `任务 ${id}`);
     } catch (err) {
       onToast("danger", "删除失败", errorText(err));
-    }
-  };
-
-  const cloneDevice = async (device: AvdSummary) => {
-    const newName = window.prompt("新设备名称：", `${device.name}_copy`);
-    if (!newName) return;
-    try {
-      const id = await api.Avd.Clone({ sourceName: device.name, newName });
-      onToast("info", "正在克隆设备", `任务 ${id}`);
-    } catch (err) {
-      onToast("danger", "克隆失败", errorText(err));
-    }
-  };
-
-  const wipeDevice = async (device: AvdSummary) => {
-    if (!window.confirm(`清除「${device.displayName}」的所有用户数据（相当于恢复出厂设置）？`)) return;
-    try {
-      const id = await api.Avd.WipeData(device.name);
-      onToast("info", "正在清除数据", `任务 ${id}`);
-    } catch (err) {
-      onToast("danger", "清除失败", errorText(err));
     }
   };
 
@@ -193,7 +171,6 @@ export function DevicesPage({ onToast, env }: Props) {
             >
               <option value="name">按名称</option>
               <option value="api">按 Android 版本</option>
-              <option value="recent">按最近使用</option>
             </select>
             <div className="segmented">
               <button aria-pressed={view === "grid"} onClick={() => setView("grid")} title="网格视图">
@@ -233,23 +210,16 @@ export function DevicesPage({ onToast, env }: Props) {
                   </div>
 
                   <div className="device__body">
-                    <div className="device__name truncate" title={device.displayName}>
-                      {device.displayName || device.name}
+                    <div className="device__name truncate" title={device.name}>
+                      {device.name}
                     </div>
                     <div className="device__chips">
-                      <span className="chip">Android {device.apiLevel || "?"}</span>
-                      {device.cores ? <span className="chip">{device.cores} 核</span> : null}
-                      {device.ramMB ? <span className="chip">{(device.ramMB / 1024).toFixed(1)} GB</span> : null}
-                      {device.playstore ? <span className="chip chip--warning">Google Play</span> : null}
+                      <span className="chip">Android {device.api || "?"}</span>
+                      {device.tag ? <span className="chip">{device.tag}</span> : null}
+                      {device.abi ? <span className="chip">{device.abi}</span> : null}
                       {device.broken ? <span className="chip chip--danger">配置异常</span> : null}
                     </div>
                     <div className="device__meta nums">
-                      <span>
-                        {device.width} × {device.height}
-                      </span>
-                      <span className="device__meta-sep" />
-                      <span>{device.density} DPI</span>
-                      <span className="device__meta-sep" />
                       <span className="device__state">
                         <span
                           className="dot"
@@ -322,8 +292,6 @@ export function DevicesPage({ onToast, env }: Props) {
                             label="无窗口启动"
                             onClick={() => void startDevice(device, { noWindow: true } as LaunchOptions)}
                           />
-                          <MenuItem label="清除数据" onClick={() => void wipeDevice(device)} />
-                          <MenuItem label="克隆设备" onClick={() => void cloneDevice(device)} />
                           <MenuItem
                             label="复制启动命令"
                             onClick={() =>
@@ -335,9 +303,6 @@ export function DevicesPage({ onToast, env }: Props) {
                           <MenuItem label="删除设备" danger onClick={() => void deleteDevice(device)} />
                         </div>
                       </details>
-                    </div>
-                    <div className="muted nums" style={{ fontSize: 12 }}>
-                      {humanSize(device.sizeBytes)}
                     </div>
                   </div>
                 </div>

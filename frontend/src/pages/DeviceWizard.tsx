@@ -1,11 +1,12 @@
-// 创建 / 编辑设备向导（对齐 docs/UI-SPEC.md §5.4）。
-import { useEffect, useMemo, useState } from "react";
+// 创建设备：只保留 设备名称 / System Image / 设备档案 三项。
+//
+// 镜像不存在时由后端在同一任务里通过官方 sdkmanager 自动安装，界面不再让用户配置
+// CPU、GPU、RAM、分辨率等底层参数（见 目标.md §四.2）。
+import { useCallback, useEffect, useState } from "react";
 import * as api from "../bridge/api";
 import { errorText } from "../bridge/api";
-import type { AvdSpec, DeviceProfile, HwConfigItem, SystemImage } from "../bridge/types";
+import type { AvdSpec, DeviceProfile, SystemImage } from "../bridge/types";
 import { Modal } from "../components/ui";
-
-const STEPS = ["基本信息", "设备型号", "系统镜像", "硬件配置"] as const;
 
 interface Props {
   onClose: () => void;
@@ -13,65 +14,56 @@ interface Props {
   onToast: (level: "info" | "success" | "warning" | "danger", title: string, text?: string) => void;
 }
 
-export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
-  const [step, setStep] = useState(0);
-  const [profiles, setProfiles] = useState<DeviceProfile[]>([]);
-  const [images, setImages] = useState<SystemImage[]>([]);
-  const [schema, setSchema] = useState<HwConfigItem[]>([]);
-  const [meta, setMeta] = useState<{ groupOrder: string[]; groupLabels: Record<string, string> }>({
-    groupOrder: [],
-    groupLabels: {},
-  });
-  const [profileQuery, setProfileQuery] = useState("");
-  const [profileCategory, setProfileCategory] = useState("all");
-  const [submitting, setSubmitting] = useState(false);
+const DEFAULT_NAME = "MyDevice";
+const DEFAULT_PROFILE = "medium_phone";
 
-  const [name, setName] = useState("MyDevice");
-  const [displayName, setDisplayName] = useState("");
+export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
+  const [name, setName] = useState(DEFAULT_NAME);
   const [validation, setValidation] = useState<{ valid: boolean; reason?: string; suggest?: string }>({
     valid: true,
   });
-  const [profileId, setProfileId] = useState("medium_phone");
+  const [images, setImages] = useState<SystemImage[]>([]);
+  const [allImagesLoaded, setAllImagesLoaded] = useState(false);
   const [imagePath, setImagePath] = useState("");
-  const [sdcard, setSdcard] = useState("512M");
-  const [hw, setHw] = useState<Record<string, string>>({});
-  const [showIni, setShowIni] = useState(false);
+  const [loadingImages, setLoadingImages] = useState(true);
+  const [profiles, setProfiles] = useState<DeviceProfile[]>([]);
+  const [profileId, setProfileId] = useState(DEFAULT_PROFILE);
+  const [submitting, setSubmitting] = useState(false);
 
+  const loadImages = useCallback(
+    async (installedOnly: boolean) => {
+      setLoadingImages(true);
+      try {
+        const list = api.asArray((await api.Avd.ListImages(installedOnly)) as SystemImage[]);
+        setImages(list);
+        if (installedOnly) setAllImagesLoaded(false);
+        setImagePath((current) => (list.some((i) => i.path === current) ? current : (list[0]?.path ?? "")));
+      } catch (err) {
+        onToast("danger", installedOnly ? "读取已安装镜像失败" : "读取可用镜像失败", errorText(err));
+      } finally {
+        setLoadingImages(false);
+      }
+    },
+    [onToast],
+  );
+
+  // 打开时先读本地已安装镜像（不联网），设备档案来自官方 avdmanager
   useEffect(() => {
+    void loadImages(true);
     void (async () => {
       try {
-        const [p, m] = await Promise.all([
-          api.Avd.ListProfiles(false) as Promise<DeviceProfile[]>,
-          api.Avd.ConfigSchemaMetadata() as Promise<{
-            groupOrder: string[];
-            groupLabels: Record<string, string>;
-            presets: unknown;
-          }>,
-        ]);
-        setProfiles(api.asArray(p));
-        setMeta({ groupOrder: m?.groupOrder ?? [], groupLabels: m?.groupLabels ?? {} });
-        const s = (await api.Avd.ListConfigSchema()) as HwConfigItem[];
-        setSchema(api.asArray(s));
+        const list = api.asArray((await api.Avd.ListProfiles(false)) as DeviceProfile[]);
+        setProfiles(list);
+        if (list.length > 0 && !list.some((p) => p.id === DEFAULT_PROFILE)) {
+          setProfileId(list[0].id);
+        }
       } catch (err) {
-        onToast("warning", "设备档案加载失败", errorText(err));
+        onToast("warning", "读取设备档案失败", errorText(err));
       }
     })();
-  }, [onToast]);
+  }, [loadImages, onToast]);
 
-  // 只在打开"系统镜像"步骤时拉取镜像列表（可能触发网络请求）
-  useEffect(() => {
-    if (step !== 2 || images.length > 0) return;
-    void (async () => {
-      try {
-        const list = (await api.Avd.ListImages(true)) as SystemImage[];
-        setImages(api.asArray(list));
-        if (!imagePath && list.length > 0) setImagePath(list[0].path);
-      } catch (err) {
-        onToast("warning", "无法读取已安装镜像", errorText(err));
-      }
-    })();
-  }, [step, images.length, imagePath, onToast]);
-
+  // 名称实时校验
   useEffect(() => {
     const timer = setTimeout(() => {
       void (async () => {
@@ -83,61 +75,25 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
           };
           setValidation(res);
         } catch {
-          /* 忽略 */
+          /* 后端未就绪时忽略 */
         }
       })();
     }, 250);
     return () => clearTimeout(timer);
   }, [name]);
 
-  const filteredProfiles = useMemo(() => {
-    const q = profileQuery.trim().toLowerCase();
-    return profiles.filter((p) => {
-      if (profileCategory !== "all" && p.category !== profileCategory) return false;
-      if (!q) return true;
-      return `${p.name} ${p.id} ${p.oem}`.toLowerCase().includes(q);
-    });
-  }, [profiles, profileQuery, profileCategory]);
-
-  const categories = useMemo(() => {
-    const set = new Map<string, number>();
-    profiles.forEach((p) => set.set(p.category, (set.get(p.category) ?? 0) + 1));
-    return Array.from(set.entries());
-  }, [profiles]);
-
-  const groupedSchema = useMemo(() => {
-    const map = new Map<string, HwConfigItem[]>();
-    schema.forEach((item) => {
-      const list = map.get(item.group) ?? [];
-      list.push(item);
-      map.set(item.group, list);
-    });
-    return map;
-  }, [schema]);
-
-  const buildSpec = (): AvdSpec =>
-    ({
-      name,
-      displayName: displayName || name,
-      profileId,
-      systemImagePath: imagePath,
-      sdcardSize: sdcard,
-      hw,
-      createWithAvdManager: true,
-    }) as AvdSpec;
-
-  const canNext = () => {
-    if (step === 0) return validation.valid && name.trim().length > 0;
-    if (step === 1) return !!profileId;
-    if (step === 2) return !!imagePath;
-    return true;
-  };
+  const selected = images.find((i) => i.path === imagePath);
 
   const submit = async () => {
     setSubmitting(true);
     try {
-      const id = await api.Avd.Create(buildSpec());
-      onToast("success", "已开始创建设备", `任务 ${id}，可在底部任务面板查看进度`);
+      const spec = {
+        name: name.trim(),
+        systemImagePath: imagePath,
+        profileId,
+      } as AvdSpec;
+      const id = await api.Avd.Create(spec);
+      onToast("success", "已开始创建设备", `任务 ${id}，进度显示在底部任务区域`);
       onCreated();
       onClose();
     } catch (err) {
@@ -147,341 +103,92 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
     }
   };
 
-  const [cmdPreview, setCmdPreview] = useState<Record<string, string> | null>(null);
+  const canSubmit = validation.valid && !!imagePath && !submitting;
 
   return (
     <Modal
       title="新建设备"
-      size="xl"
+      size="md"
       onClose={onClose}
       footer={
-        <>
-          <button
-            className="btn btn--ghost"
-            onClick={() =>
-              void (async () => {
-                try {
-                  const res = (await api.Avd.ComputeCommand(buildSpec())) as Record<string, string>;
-                  setCmdPreview(res);
-                } catch (err) {
-                  onToast("warning", "无法生成命令", errorText(err));
-                }
-              })()
-            }
-          >
-            查看等效命令
+        <div className="modal__foot-right">
+          <button className="btn btn--secondary" onClick={onClose}>
+            取消
           </button>
-          <div className="modal__foot-right">
-            <button className="btn btn--secondary" disabled={step === 0} onClick={() => setStep((s) => s - 1)}>
-              上一步
-            </button>
-            {step < STEPS.length - 1 ? (
-              <button className="btn btn--primary" disabled={!canNext()} onClick={() => setStep((s) => s + 1)}>
-                下一步
-              </button>
-            ) : (
-              <button className="btn btn--primary" disabled={submitting || !validation.valid} onClick={() => void submit()}>
-                {submitting ? "创建中…" : "创建"}
-              </button>
-            )}
-          </div>
-        </>
-      }
-    >
-      <div className="row" style={{ marginBottom: 20, gap: 8 }}>
-        {STEPS.map((label, i) => (
-          <div key={label} className="row" style={{ gap: 8 }}>
-            <span
-              className={`chip${i === step ? " chip--info" : i < step ? " chip--success" : ""}`}
-              style={{ height: 28 }}
-            >
-              {i < step ? "✓" : i + 1} {label}
-            </span>
-            {i < STEPS.length - 1 ? <span style={{ color: "var(--text-disabled)" }}>›</span> : null}
-          </div>
-        ))}
-      </div>
-
-      {step === 0 ? (
-        <>
-          <div className="field">
-            <div className="field__label">设备名称</div>
-            <div className="field__control">
-              <input
-                className={`input${validation.valid ? "" : " input--error"}`}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="仅字母、数字、下划线、点、连字符"
-              />
-              <div className={`field__hint${validation.valid ? "" : " field__hint--error"}`}>
-                {validation.valid
-                  ? "用于目录名与命令行，创建后不建议修改"
-                  : `${validation.reason ?? "名称不合法"}${validation.suggest ? `（建议：${validation.suggest}）` : ""}`}
-              </div>
-            </div>
-          </div>
-          <div className="field">
-            <div className="field__label">显示名称</div>
-            <div className="field__control">
-              <input
-                className="input"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="支持中文与空格，留空则与设备名称相同"
-              />
-            </div>
-          </div>
-        </>
-      ) : null}
-
-      {step === 1 ? (
-        <>
-          <div className="row" style={{ marginBottom: 12 }}>
-            <input
-              className="input"
-              style={{ maxWidth: 260 }}
-              placeholder="搜索设备型号…"
-              value={profileQuery}
-              onChange={(e) => setProfileQuery(e.target.value)}
-            />
-            <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
-              <button
-                className={`chip${profileCategory === "all" ? " chip--info" : ""}`}
-                onClick={() => setProfileCategory("all")}
-              >
-                全部 {profiles.length}
-              </button>
-              {categories.map(([cat, count]) => (
-                <button
-                  key={cat}
-                  className={`chip${profileCategory === cat ? " chip--info" : ""}`}
-                  onClick={() => setProfileCategory(cat)}
-                >
-                  {categoryLabel(cat)} {count}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", maxHeight: 380, overflow: "auto" }}>
-            {filteredProfiles.map((p) => (
-              <button
-                key={p.id}
-                className={`card card--hover${p.id === profileId ? " " : ""}`}
-                style={{
-                  padding: 12,
-                  textAlign: "left",
-                  borderColor: p.id === profileId ? "var(--primary)" : undefined,
-                  background: p.id === profileId ? "var(--primary-soft)" : undefined,
-                }}
-                onClick={() => setProfileId(p.id)}
-              >
-                <div style={{ fontWeight: 600, fontSize: 13 }} className="truncate">
-                  {p.name}
-                </div>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  {p.oem} · {categoryLabel(p.category)}
-                </div>
-                {p.width ? (
-                  <div className="muted nums" style={{ fontSize: 12, marginTop: 4 }}>
-                    {p.width} × {p.height} @ {p.density}dpi
-                  </div>
-                ) : (
-                  <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                    {p.id}
-                  </div>
-                )}
-              </button>
-            ))}
-          </div>
-        </>
-      ) : null}
-
-      {step === 2 ? (
-        images.length === 0 ? (
-          <div className="empty">
-            <div className="empty__icon">🧩</div>
-            <div className="empty__title">还没有已安装的系统镜像</div>
-            <div className="empty__desc">
-              创建 AVD 需要至少一个系统镜像。请到「设置」页查看可用镜像，或先完成环境准备（会自动安装官方命令行工具）。
-            </div>
-          </div>
-        ) : (
-          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
-            {images.map((img) => (
-              <button
-                key={img.path}
-                className="card card--hover"
-                style={{
-                  padding: 12,
-                  textAlign: "left",
-                  borderColor: img.path === imagePath ? "var(--primary)" : undefined,
-                  background: img.path === imagePath ? "var(--primary-soft)" : undefined,
-                }}
-                onClick={() => setImagePath(img.path)}
-              >
-                <div style={{ fontWeight: 600 }}>Android {img.api}</div>
-                <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                  {img.tag} · {img.abi}
-                </div>
-                <div className="row" style={{ marginTop: 6, gap: 6 }}>
-                  {img.tag.includes("playstore") ? (
-                    <span className="chip chip--sm chip--warning">Play</span>
-                  ) : null}
-                  {img.version ? <span className="chip chip--sm">rev {img.version}</span> : null}
-                </div>
-              </button>
-            ))}
-          </div>
-        )
-      ) : null}
-
-      {step === 3 ? (
-        <>
-          <div className="row" style={{ marginBottom: 12 }}>
-            <button className="btn btn--secondary" onClick={() => setShowIni((v) => !v)}>
-              {showIni ? "返回可视化配置" : "直接编辑 config.ini 键值"}
-            </button>
-            <span className="muted">留空的项使用设备档案默认值</span>
-          </div>
-
-          {showIni ? (
-            <textarea
-              className="input mono"
-              style={{ height: 320, padding: 12, resize: "vertical" }}
-              value={Object.entries(hw)
-                .map(([k, v]) => `${k}=${v}`)
-                .join("\n")}
-              onChange={(e) => {
-                const next: Record<string, string> = {};
-                e.target.value.split("\n").forEach((line) => {
-                  const idx = line.indexOf("=");
-                  if (idx > 0) next[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
-                });
-                setHw(next);
-              }}
-              placeholder={"hw.ramSize=4096\nhw.cpu.ncore=8"}
-            />
-          ) : (
-            <div style={{ maxHeight: 380, overflow: "auto" }}>
-              {meta.groupOrder.map((group) => {
-                const items = groupedSchema.get(group);
-                if (!items) return null;
-                return (
-                  <div key={group} className="section">
-                    <div className="section__title">{meta.groupLabels[group] ?? group}</div>
-                    {items
-                      .filter((item) => !item.advanced)
-                      .map((item) => (
-                        <HwField
-                          key={item.key}
-                          item={item}
-                          value={hw[item.key] ?? ""}
-                          onChange={(v) => setHw((prev) => ({ ...prev, [item.key]: v }))}
-                        />
-                      ))}
-                  </div>
-                );
-              })}
-              <div className="section">
-                <div className="section__title">存储</div>
-                <div className="field">
-                  <div className="field__label">SD 卡容量</div>
-                  <div className="field__control">
-                    <select className="input" value={sdcard} onChange={(e) => setSdcard(e.target.value)}>
-                      {["256M", "512M", "1G", "2G", "4G"].map((v) => (
-                        <option key={v} value={v}>
-                          {v}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </>
-      ) : null}
-
-      {cmdPreview ? (
-        <div className="card" style={{ padding: 12, marginTop: 16 }}>
-          <div className="section__title">等效命令行</div>
-          <div className="mono" style={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
-            {Object.entries(cmdPreview)
-              .map(([k, v]) => `# ${k}\n${v}`)
-              .join("\n\n")}
-          </div>
-          <button className="btn btn--ghost" style={{ marginTop: 8 }} onClick={() => setCmdPreview(null)}>
-            收起
+          <button className="btn btn--primary" disabled={!canSubmit} onClick={() => void submit()}>
+            {submitting ? "创建中…" : "创建"}
           </button>
         </div>
-      ) : null}
-    </Modal>
-  );
-}
-
-function HwField({
-  item,
-  value,
-  onChange,
-}: {
-  item: HwConfigItem;
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  const placeholder = item.default ? `默认 ${item.default}` : "未设置";
-  return (
-    <div className="field">
-      <div className="field__label" title={item.description}>
-        {item.label}
-        {item.unit ? <span className="muted"> ({item.unit})</span> : null}
+      }
+    >
+      <div className="field">
+        <div className="field__label">设备名称</div>
+        <div className="field__control">
+          <input
+            className={`input${validation.valid ? "" : " input--error"}`}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="仅字母、数字、下划线、点、连字符"
+            autoFocus
+          />
+          <div className={`field__hint${validation.valid ? "" : " field__hint--error"}`}>
+            {validation.valid
+              ? "用于设备目录名，创建后不建议修改"
+              : `${validation.reason ?? "名称不合法"}${validation.suggest ? `（建议：${validation.suggest}）` : ""}`}
+          </div>
+        </div>
       </div>
-      <div className="field__control">
-        {item.type === "bool" ? (
-          <select className="input" value={value || ""} onChange={(e) => onChange(e.target.value)}>
-            <option value="">{placeholder}</option>
-            <option value="yes">开启</option>
-            <option value="no">关闭</option>
-          </select>
-        ) : item.type === "enum" ? (
-          <select className="input" value={value || ""} onChange={(e) => onChange(e.target.value)}>
-            <option value="">{placeholder}</option>
-            {(item.enumValues ?? []).map((v) => (
-              <option key={v} value={v}>
-                {v || "默认"}
+
+      <div className="field">
+        <div className="field__label">System Image</div>
+        <div className="field__control">
+          <select
+            className="input"
+            value={imagePath}
+            onChange={(e) => setImagePath(e.target.value)}
+            disabled={loadingImages || images.length === 0}
+          >
+            {images.length === 0 ? (
+              <option value="">{loadingImages ? "读取中…" : "没有可用的系统镜像"}</option>
+            ) : null}
+            {images.map((img) => (
+              <option key={img.path} value={img.path}>
+                {`Android ${img.api} · ${img.tag} · ${img.abi}${img.installed ? "（已安装）" : ""}`}
               </option>
             ))}
           </select>
-        ) : (
-          <input
-            className="input"
-            value={value}
-            placeholder={placeholder}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        )}
-        <div className="field__hint">{item.description}</div>
+          <div className="field__hint">
+            {selected && !selected.installed
+              ? "该镜像尚未安装，创建时会自动通过 sdkmanager 下载（约 1-2 GB）"
+              : "镜像由官方 sdkmanager 安装到软件自己的 SDK 目录"}
+          </div>
+        </div>
+        <button
+          className="btn btn--ghost"
+          disabled={loadingImages || allImagesLoaded}
+          onClick={() => {
+            setAllImagesLoaded(true);
+            void loadImages(false);
+          }}
+        >
+          {allImagesLoaded ? "已加载全部" : "加载全部可用镜像"}
+        </button>
       </div>
-    </div>
-  );
-}
 
-function categoryLabel(cat: string): string {
-  switch (cat) {
-    case "phone":
-      return "手机";
-    case "tablet":
-      return "平板";
-    case "desktop":
-      return "桌面";
-    case "tv":
-      return "电视";
-    case "automotive":
-      return "车机";
-    case "wear":
-      return "手表";
-    case "xr":
-      return "XR";
-    default:
-      return "其他";
-  }
+      <div className="field">
+        <div className="field__label">设备档案</div>
+        <div className="field__control">
+          <select className="input" value={profileId} onChange={(e) => setProfileId(e.target.value)}>
+            {profiles.length === 0 ? <option value="">（由 avdmanager 决定）</option> : null}
+            {profiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <div className="field__hint">决定屏幕、内存等硬件默认值，来自官方 avdmanager</div>
+        </div>
+      </div>
+    </Modal>
+  );
 }

@@ -3,19 +3,13 @@
 import {domain} from '../models';
 import {service} from '../models';
 
-export function DeleteSnapshot(arg1:string,arg2:string):Promise<void>;
-
 export function GetLog(arg1:string,arg2:number):Promise<Array<domain.LogLine>>;
 
 export function ListRunning():Promise<Array<domain.EmulatorInstance>>;
 
-export function LoadSnapshot(arg1:string,arg2:string):Promise<void>;
-
 export function Restart(arg1:string,arg2:domain.LaunchOptions):Promise<domain.EmulatorInstance>;
 
 export function Rotate(arg1:string,arg2:string):Promise<void>;
-
-export function SaveSnapshot(arg1:string,arg2:string):Promise<void>;
 
 export function Screenshot(arg1:string):Promise<string>;
 
@@ -28,8 +22,6 @@ export function SetGps(arg1:string,arg2:number,arg3:number):Promise<void>;
 export function SetNetwork(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function Shutdown(arg1:boolean):Promise<void>;
-
-export function Snapshots(arg1:string):Promise<Array<domain.Snapshot>>;
 
 export function Start(arg1:service.StartRequest):Promise<domain.EmulatorInstance>;
 

@@ -3,11 +3,9 @@ package platform
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"AVDDesktop/internal/domain"
@@ -53,78 +51,6 @@ func EnsureDir(path string) error {
 		return errors.New("空目录路径")
 	}
 	return os.MkdirAll(path, 0o755)
-}
-
-// DirSize 递归统计目录大小（用于设备卡片显示占用空间）。
-//
-// 大目录可能较慢，调用方应放入后台任务或使用 DirSizeCached。
-func DirSize(path string) int64 {
-	var total int64
-	_ = filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // 忽略无法访问的项
-		}
-		if !info.IsDir() {
-			total += info.Size()
-		}
-		return nil
-	})
-	return total
-}
-
-// 目录大小缓存：AVD 与系统镜像目录可能上百 MB 到数 GB，
-// 每次刷新都重新遍历会让首页自检耗时数秒。
-type dirSizeEntry struct {
-	size     int64
-	computed time.Time
-}
-
-var (
-	dirSizeMu    sync.Mutex
-	dirSizeCache = map[string]dirSizeEntry{}
-)
-
-// dirSizeTTL 是目录大小缓存的有效期。
-const dirSizeTTL = 10 * time.Minute
-
-// DirSizeCached 返回带缓存的目录大小。
-//
-// 缓存未命中时会真的遍历目录（可能较慢），因此敏感路径请用 ListOptions 跳过。
-func DirSizeCached(path string) int64 {
-	if path == "" {
-		return 0
-	}
-	dirSizeMu.Lock()
-	if entry, ok := dirSizeCache[path]; ok && time.Since(entry.computed) < dirSizeTTL {
-		dirSizeMu.Unlock()
-		return entry.size
-	}
-	dirSizeMu.Unlock()
-
-	size := DirSize(path)
-
-	dirSizeMu.Lock()
-	dirSizeCache[path] = dirSizeEntry{size: size, computed: time.Now()}
-	dirSizeMu.Unlock()
-	return size
-}
-
-// InvalidateDirSize 在目录内容变化（安装/删除/启动）后清除缓存。
-func InvalidateDirSize(path string) {
-	dirSizeMu.Lock()
-	if path == "" {
-		dirSizeCache = map[string]dirSizeEntry{}
-	} else {
-		delete(dirSizeCache, path)
-		// 同时清除其子路径的缓存（例如删除某个包目录）
-		prefix := filepath.Clean(path) + string(filepath.Separator)
-		for key := range dirSizeCache {
-			if strings.HasPrefix(key, prefix) {
-				delete(dirSizeCache, key)
-			}
-		}
-	}
-	dirSizeMu.Unlock()
 }
 
 // DiskSpace 返回指定路径所在卷的总量与剩余空间（GB）。
@@ -197,57 +123,6 @@ func ReadJSON(path string, v any) error {
 		return err
 	}
 	return json.Unmarshal(data, v)
-}
-
-// CopyFile 复制文件并保留大小校验。
-func CopyFile(src, dst string) (int64, error) {
-	if err := EnsureDir(filepath.Dir(dst)); err != nil {
-		return 0, err
-	}
-	in, err := os.Open(src)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = in.Close() }()
-	out, err := os.Create(dst)
-	if err != nil {
-		return 0, err
-	}
-	n, err := io.Copy(out, in)
-	if err != nil {
-		_ = out.Close()
-		return n, err
-	}
-	return n, out.Close()
-}
-
-// CopyTree 递归复制目录（用于 AVD 克隆/导出）。
-func CopyTree(src, dst string, skip func(rel string, isDir bool) bool) error {
-	src = filepath.Clean(src)
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return EnsureDir(dst)
-		}
-		if skip != nil && skip(rel, info.IsDir()) {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		target := filepath.Join(dst, rel)
-		if info.IsDir() {
-			return EnsureDir(target)
-		}
-		_, err = CopyFile(path, target)
-		return err
-	})
 }
 
 // HumanSize 把字节数格式化为人类可读（用于日志与错误信息）。
@@ -367,4 +242,3 @@ func parseVersion(v string) (int, int, int) {
 
 // NowMs 返回当前 Unix 毫秒。
 func NowMs() int64 { return time.Now().UnixMilli() }
-

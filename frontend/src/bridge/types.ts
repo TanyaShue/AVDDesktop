@@ -23,8 +23,6 @@ export type SystemImage = domain.SystemImage;
 export type DeviceProfile = domain.DeviceProfile;
 export type NameValidation = domain.NameValidation;
 export type AvdSpec = domain.AvdSpec;
-export type HwConfigItem = domain.HwConfigItem;
-export type ConfigDiff = domain.ConfigDiff;
 
 export type AvdSummary = domain.AvdSummary;
 export type EmulatorInstance = domain.EmulatorInstance;
@@ -37,8 +35,6 @@ export type AppError = domain.AppError;
 
 export type ResolvedPaths = service.ResolvedPaths;
 export type AppInfo = service.AppInfo;
-export type CloneRequest = service.CloneRequest;
-export type DeleteRequest = service.DeleteRequest;
 
 /** 导航页签名：只保留核心流程所需的两个页面。 */
 export type PageKey = "devices" | "settings";

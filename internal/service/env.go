@@ -8,7 +8,6 @@ import (
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"AVDDesktop/internal/avd/store"
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/job"
 	"AVDDesktop/internal/platform"
@@ -254,7 +253,7 @@ func (s *EnvService) checkAcceleration(ctx context.Context, tools platform.Tools
 }
 
 func (s *EnvService) avdNames(comp *components) []string {
-	items, err := comp.Store.ListWith(store.ListOptions{WithSize: false})
+	items, err := comp.Store.List()
 	if err != nil {
 		return nil
 	}

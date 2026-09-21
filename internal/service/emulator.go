@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/base64"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -179,69 +178,6 @@ func (s *EmulatorService) SetBattery(instanceID string, level int, charging bool
 	}
 	return s.emu(instanceID, "power ac "+(map[bool]string{true: "on", false: "off"})[charging]+
 		" ; power status "+status)
-}
-
-// Snapshot 通过扫描 snapshots 目录列出快照。
-//
-// 注意：快照的创建/恢复由 emulator 的 `-snapshot` 参数与运行期控制台完成，
-// 这里只做只读列表（写操作见 TODO）。
-func (s *EmulatorService) Snapshots(avdName string) ([]domain.Snapshot, error) {
-	comp := s.rt.Components()
-	dir := filepath.Join(comp.Store.Resolve(avdName).Dir, "snapshots")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, nil // 没有快照目录是正常状态
-	}
-	var out []domain.Snapshot
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		var size int64
-		_ = filepath.Walk(filepath.Join(dir, e.Name()), func(_ string, info os.FileInfo, err error) error {
-			if err == nil && !info.IsDir() {
-				size += info.Size()
-			}
-			return nil
-		})
-		out = append(out, domain.Snapshot{Name: e.Name(), SizeBytes: size})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return domain.NonNil(out), nil
-}
-
-// DeleteSnapshot 删除快照目录。
-func (s *EmulatorService) DeleteSnapshot(avdName, name string) error {
-	comp := s.rt.Components()
-	if _, ok := comp.Launcher.ByAvd(avdName); ok {
-		return domain.Err(domain.CodeFileInUse, "设备正在运行，无法删除快照")
-	}
-	target := filepath.Join(comp.Store.Resolve(avdName).Dir, "snapshots", name)
-	if !platform.DirExists(target) {
-		return domain.Err(domain.CodeInvalidArgument, "快照不存在: "+name)
-	}
-	if err := os.RemoveAll(target); err != nil {
-		return domain.Wrap(domain.CodePermissionDenied, "无法删除快照", err)
-	}
-	return nil
-}
-
-// SaveSnapshot 保存快照（通过模拟器控制台命令）。
-func (s *EmulatorService) SaveSnapshot(avdName, name string) error {
-	inst, ok := s.rt.Components().Launcher.ByAvd(avdName)
-	if !ok {
-		return domain.Err(domain.CodeInvalidArgument, "该设备没有运行中的实例，请先启动")
-	}
-	return s.emu(inst.ID, "avd snapshot save "+name)
-}
-
-// LoadSnapshot 加载快照。
-func (s *EmulatorService) LoadSnapshot(avdName, name string) error {
-	inst, ok := s.rt.Components().Launcher.ByAvd(avdName)
-	if !ok {
-		return domain.Err(domain.CodeInvalidArgument, "该设备没有运行中的实例，请先启动")
-	}
-	return s.emu(inst.ID, "avd snapshot load "+name)
 }
 
 // Shutdown 停止所有实例（应用退出）。

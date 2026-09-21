@@ -94,37 +94,33 @@ export namespace domain {
 	        this.keepLogDays = source["keepLogDays"];
 	    }
 	}
+	export class AvdSpec {
+	    name: string;
+	    systemImagePath: string;
+	    profileId?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AvdSpec(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.systemImagePath = source["systemImagePath"];
+	        this.profileId = source["profileId"];
+	    }
+	}
 	export class AvdSummary {
 	    name: string;
-	    displayName: string;
 	    path: string;
-	    target: string;
-	    apiLevel: string;
-	    tagId: string;
-	    tagDisplay: string;
+	    api: string;
+	    tag: string;
 	    abi: string;
 	    deviceProfileId: string;
-	    deviceProfileName: string;
-	    oem: string;
-	    ramMB: number;
-	    cores: number;
-	    dataPartition: string;
-	    sdCard: string;
-	    width: number;
-	    height: number;
-	    density: number;
-	    gpuEnabled: boolean;
-	    gpuMode: string;
-	    playstore: boolean;
 	    state: string;
 	    instanceId?: string;
 	    serial?: string;
 	    port?: number;
-	    sizeBytes: number;
-	    createdAt?: number;
-	    lastUsedAt?: number;
-	    tags?: string[];
-	    note?: string;
 	    broken?: string;
 	
 	    static createFrom(source: any = {}) {
@@ -134,231 +130,16 @@ export namespace domain {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
-	        this.displayName = source["displayName"];
 	        this.path = source["path"];
-	        this.target = source["target"];
-	        this.apiLevel = source["apiLevel"];
-	        this.tagId = source["tagId"];
-	        this.tagDisplay = source["tagDisplay"];
+	        this.api = source["api"];
+	        this.tag = source["tag"];
 	        this.abi = source["abi"];
 	        this.deviceProfileId = source["deviceProfileId"];
-	        this.deviceProfileName = source["deviceProfileName"];
-	        this.oem = source["oem"];
-	        this.ramMB = source["ramMB"];
-	        this.cores = source["cores"];
-	        this.dataPartition = source["dataPartition"];
-	        this.sdCard = source["sdCard"];
-	        this.width = source["width"];
-	        this.height = source["height"];
-	        this.density = source["density"];
-	        this.gpuEnabled = source["gpuEnabled"];
-	        this.gpuMode = source["gpuMode"];
-	        this.playstore = source["playstore"];
 	        this.state = source["state"];
 	        this.instanceId = source["instanceId"];
 	        this.serial = source["serial"];
 	        this.port = source["port"];
-	        this.sizeBytes = source["sizeBytes"];
-	        this.createdAt = source["createdAt"];
-	        this.lastUsedAt = source["lastUsedAt"];
-	        this.tags = source["tags"];
-	        this.note = source["note"];
 	        this.broken = source["broken"];
-	    }
-	}
-	export class AvdDetail {
-	    summary: AvdSummary;
-	    config: Record<string, string>;
-	    rawConfig: string;
-	    systemImageDir: string;
-	    missingImage: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new AvdDetail(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.summary = this.convertValues(source["summary"], AvdSummary);
-	        this.config = source["config"];
-	        this.rawConfig = source["rawConfig"];
-	        this.systemImageDir = source["systemImageDir"];
-	        this.missingImage = source["missingImage"];
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	export class LaunchOptions {
-	    coldBoot: boolean;
-	    wipeData: boolean;
-	    noWindow: boolean;
-	    noAudio: boolean;
-	    noBootAnim: boolean;
-	    gpuMode?: string;
-	    snapshotName?: string;
-	    writableSystem: boolean;
-	    netSpeed?: string;
-	    netDelay?: string;
-	    dnsServers?: string[];
-	    httpProxy?: string;
-	    timezone?: string;
-	    locale?: string;
-	    memoryMB?: number;
-	    cores?: number;
-	    port?: number;
-	    scale?: string;
-	    extraArgs?: string[];
-	
-	    static createFrom(source: any = {}) {
-	        return new LaunchOptions(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.coldBoot = source["coldBoot"];
-	        this.wipeData = source["wipeData"];
-	        this.noWindow = source["noWindow"];
-	        this.noAudio = source["noAudio"];
-	        this.noBootAnim = source["noBootAnim"];
-	        this.gpuMode = source["gpuMode"];
-	        this.snapshotName = source["snapshotName"];
-	        this.writableSystem = source["writableSystem"];
-	        this.netSpeed = source["netSpeed"];
-	        this.netDelay = source["netDelay"];
-	        this.dnsServers = source["dnsServers"];
-	        this.httpProxy = source["httpProxy"];
-	        this.timezone = source["timezone"];
-	        this.locale = source["locale"];
-	        this.memoryMB = source["memoryMB"];
-	        this.cores = source["cores"];
-	        this.port = source["port"];
-	        this.scale = source["scale"];
-	        this.extraArgs = source["extraArgs"];
-	    }
-	}
-	export class AvdPatch {
-	    displayName?: string;
-	    hw?: Record<string, string>;
-	    removeHW?: string[];
-	    tags?: string[];
-	    note?: string;
-	    launch?: LaunchOptions;
-	
-	    static createFrom(source: any = {}) {
-	        return new AvdPatch(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.displayName = source["displayName"];
-	        this.hw = source["hw"];
-	        this.removeHW = source["removeHW"];
-	        this.tags = source["tags"];
-	        this.note = source["note"];
-	        this.launch = this.convertValues(source["launch"], LaunchOptions);
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	export class AvdSpec {
-	    name: string;
-	    displayName: string;
-	    profileId: string;
-	    systemImagePath: string;
-	    path?: string;
-	    sdcardSize?: string;
-	    hw: Record<string, string>;
-	    createWithAvdManager: boolean;
-	    tags?: string[];
-	    note?: string;
-	    launchDefaults?: LaunchOptions;
-	
-	    static createFrom(source: any = {}) {
-	        return new AvdSpec(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.displayName = source["displayName"];
-	        this.profileId = source["profileId"];
-	        this.systemImagePath = source["systemImagePath"];
-	        this.path = source["path"];
-	        this.sdcardSize = source["sdcardSize"];
-	        this.hw = source["hw"];
-	        this.createWithAvdManager = source["createWithAvdManager"];
-	        this.tags = source["tags"];
-	        this.note = source["note"];
-	        this.launchDefaults = this.convertValues(source["launchDefaults"], LaunchOptions);
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	
-	export class ConfigDiff {
-	    added: Record<string, string>;
-	    changed: Record<string, string>;
-	    removed: string[];
-	    warnings?: string[];
-	
-	    static createFrom(source: any = {}) {
-	        return new ConfigDiff(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.added = source["added"];
-	        this.changed = source["changed"];
-	        this.removed = source["removed"];
-	        this.warnings = source["warnings"];
 	    }
 	}
 	export class DeviceProfile {
@@ -367,11 +148,6 @@ export namespace domain {
 	    name: string;
 	    oem: string;
 	    tag: string;
-	    category: string;
-	    width?: number;
-	    height?: number;
-	    density?: number;
-	    ramMB?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new DeviceProfile(source);
@@ -384,11 +160,6 @@ export namespace domain {
 	        this.name = source["name"];
 	        this.oem = source["oem"];
 	        this.tag = source["tag"];
-	        this.category = source["category"];
-	        this.width = source["width"];
-	        this.height = source["height"];
-	        this.density = source["density"];
-	        this.ramMB = source["ramMB"];
 	    }
 	}
 	export class DiskInfo {
@@ -608,38 +379,6 @@ export namespace domain {
 		}
 	}
 	
-	export class HwConfigItem {
-	    key: string;
-	    label: string;
-	    group: string;
-	    type: string;
-	    default: string;
-	    enumValues?: string[];
-	    min?: number;
-	    max?: number;
-	    unit?: string;
-	    description: string;
-	    advanced: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new HwConfigItem(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.key = source["key"];
-	        this.label = source["label"];
-	        this.group = source["group"];
-	        this.type = source["type"];
-	        this.default = source["default"];
-	        this.enumValues = source["enumValues"];
-	        this.min = source["min"];
-	        this.max = source["max"];
-	        this.unit = source["unit"];
-	        this.description = source["description"];
-	        this.advanced = source["advanced"];
-	    }
-	}
 	export class JobInfo {
 	    id: string;
 	    kind: string;
@@ -702,7 +441,54 @@ export namespace domain {
 		    return a;
 		}
 	}
+	export class LaunchOptions {
+	    coldBoot: boolean;
+	    wipeData: boolean;
+	    noWindow: boolean;
+	    noAudio: boolean;
+	    noBootAnim: boolean;
+	    gpuMode?: string;
+	    snapshotName?: string;
+	    writableSystem: boolean;
+	    netSpeed?: string;
+	    netDelay?: string;
+	    dnsServers?: string[];
+	    httpProxy?: string;
+	    timezone?: string;
+	    locale?: string;
+	    memoryMB?: number;
+	    cores?: number;
+	    port?: number;
+	    scale?: string;
+	    extraArgs?: string[];
 	
+	    static createFrom(source: any = {}) {
+	        return new LaunchOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.coldBoot = source["coldBoot"];
+	        this.wipeData = source["wipeData"];
+	        this.noWindow = source["noWindow"];
+	        this.noAudio = source["noAudio"];
+	        this.noBootAnim = source["noBootAnim"];
+	        this.gpuMode = source["gpuMode"];
+	        this.snapshotName = source["snapshotName"];
+	        this.writableSystem = source["writableSystem"];
+	        this.netSpeed = source["netSpeed"];
+	        this.netDelay = source["netDelay"];
+	        this.dnsServers = source["dnsServers"];
+	        this.httpProxy = source["httpProxy"];
+	        this.timezone = source["timezone"];
+	        this.locale = source["locale"];
+	        this.memoryMB = source["memoryMB"];
+	        this.cores = source["cores"];
+	        this.port = source["port"];
+	        this.scale = source["scale"];
+	        this.extraArgs = source["extraArgs"];
+	    }
+	}
 	export class LogLine {
 	    at: number;
 	    level: string;
@@ -737,24 +523,6 @@ export namespace domain {
 	        this.valid = source["valid"];
 	        this.reason = source["reason"];
 	        this.suggest = source["suggest"];
-	    }
-	}
-	export class Snapshot {
-	    name: string;
-	    sizeBytes: number;
-	    createdAt?: number;
-	    description?: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new Snapshot(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.sizeBytes = source["sizeBytes"];
-	        this.createdAt = source["createdAt"];
-	        this.description = source["description"];
 	    }
 	}
 	export class SystemImage {
@@ -807,34 +575,6 @@ export namespace service {
 	        this.sdkRoot = source["sdkRoot"];
 	        this.avdHome = source["avdHome"];
 	        this.logLevel = source["logLevel"];
-	    }
-	}
-	export class CloneRequest {
-	    sourceName: string;
-	    newName: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new CloneRequest(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.sourceName = source["sourceName"];
-	        this.newName = source["newName"];
-	    }
-	}
-	export class DeleteRequest {
-	    name: string;
-	    deleteFiles: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new DeleteRequest(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.deleteFiles = source["deleteFiles"];
 	    }
 	}
 	export class ResolvedPaths {
@@ -890,22 +630,6 @@ export namespace service {
 		    }
 		    return a;
 		}
-	}
-	export class WriteConfigRawRequest {
-	    name: string;
-	    content: string;
-	    dryRun: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new WriteConfigRawRequest(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.content = source["content"];
-	        this.dryRun = source["dryRun"];
-	    }
 	}
 
 }

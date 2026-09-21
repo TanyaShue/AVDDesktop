@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"AVDDesktop/internal/adb"
-	"AVDDesktop/internal/avd/store"
+	"AVDDesktop/internal/avd"
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/logging"
 	"AVDDesktop/internal/platform"
@@ -37,7 +37,7 @@ const (
 type Launcher struct {
 	Tools platform.Tools
 	Env   []string
-	Store *store.Store
+	Store *avd.Store
 	Adb   *adb.Client
 
 	log  logging.Interface
@@ -61,7 +61,7 @@ type instance struct {
 const EventState = "emulator:state"
 
 // New 创建启动器。log 为 nil 时使用空日志器。
-func New(tools platform.Tools, env []string, st *store.Store, adbClient *adb.Client, sink func(string, any), log logging.Interface) *Launcher {
+func New(tools platform.Tools, env []string, st *avd.Store, adbClient *adb.Client, sink func(string, any), log logging.Interface) *Launcher {
 	return &Launcher{
 		Tools:     tools,
 		Env:       env,
@@ -242,9 +242,6 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 	go l.capture(inst, stderr)
 	go l.monitor(ctx, inst, cmd)
 
-	if l.Store != nil {
-		l.Store.TouchLastUsed(avdName)
-	}
 	l.log.Info("emulator", "已启动 %s：pid=%d serial=%s port=%d\n  参数：%s %s",
 		avdName, cmd.Process.Pid, serial, port, l.Tools.Emulator, strings.Join(args, " "))
 	l.emit(inst.Snapshot())

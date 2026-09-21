@@ -68,7 +68,6 @@ type AccelInfo struct {
 	Hints     []string `json:"hints,omitempty"`
 }
 
-
 // IssueSeverity 是环境问题的严重程度。
 type IssueSeverity string
 
@@ -149,17 +148,13 @@ type SystemImage struct {
 // ---------------------------------------------------------------- AVD
 
 // DeviceProfile 是 avdmanager 提供的设备档案。
+// DeviceProfile 是 avdmanager 提供的设备档案。
 type DeviceProfile struct {
-	ID       string `json:"id"`
-	Index    int    `json:"index"`
-	Name     string `json:"name"`
-	OEM      string `json:"oem"`
-	Tag      string `json:"tag"`
-	Category string `json:"category"` // phone | tablet | desktop | tv | automotive | wear | xr | other
-	Width    int    `json:"width,omitempty"`
-	Height   int    `json:"height,omitempty"`
-	Density  int    `json:"density,omitempty"`
-	RAMMB    int    `json:"ramMB,omitempty"`
+	ID    string `json:"id"`
+	Index int    `json:"index"`
+	Name  string `json:"name"`
+	OEM   string `json:"oem"`
+	Tag   string `json:"tag"`
 }
 
 // AvdState 是 AVD 的运行状态（由 EmulatorService 维护）。
@@ -175,87 +170,26 @@ const (
 )
 
 // AvdSummary 是设备列表卡片的数据。
+// AvdSummary 是设备列表里的一行（只保留界面真正展示的信息）。
 type AvdSummary struct {
-	Name              string   `json:"name"`
-	DisplayName       string   `json:"displayName"`
-	Path              string   `json:"path"`
-	Target            string   `json:"target"`
-	APILevel          string   `json:"apiLevel"`
-	TagID             string   `json:"tagId"`
-	TagDisplay        string   `json:"tagDisplay"`
-	ABI               string   `json:"abi"`
-	DeviceProfileID   string   `json:"deviceProfileId"`
-	DeviceProfileName string   `json:"deviceProfileName"`
-	OEM               string   `json:"oem"`
-	RAMMB             int      `json:"ramMB"`
-	Cores             int      `json:"cores"`
-	DataPartition     string   `json:"dataPartition"`
-	SDCard            string   `json:"sdCard"`
-	Width             int      `json:"width"`
-	Height            int      `json:"height"`
-	Density           int      `json:"density"`
-	GPUEnabled        bool     `json:"gpuEnabled"`
-	GPUMode           string   `json:"gpuMode"`
-	Playstore         bool     `json:"playstore"`
-	State             AvdState `json:"state"`
-	InstanceID        string   `json:"instanceId,omitempty"`
-	Serial            string   `json:"serial,omitempty"`
-	Port              int      `json:"port,omitempty"`
-	SizeBytes         int64    `json:"sizeBytes"`
-	CreatedAt         int64    `json:"createdAt,omitempty"`
-	LastUsedAt        int64    `json:"lastUsedAt,omitempty"`
-	Tags              []string `json:"tags,omitempty"`
-	Note              string   `json:"note,omitempty"`
-	Broken            string   `json:"broken,omitempty"` // 非空表示该 AVD 配置有问题
+	Name            string   `json:"name"`
+	Path            string   `json:"path"`
+	API             string   `json:"api"`
+	Tag             string   `json:"tag"`
+	ABI             string   `json:"abi"`
+	DeviceProfileID string   `json:"deviceProfileId"`
+	State           AvdState `json:"state"`
+	InstanceID      string   `json:"instanceId,omitempty"`
+	Serial          string   `json:"serial,omitempty"`
+	Port            int      `json:"port,omitempty"`
+	Broken          string   `json:"broken,omitempty"` // 非空表示该 AVD 配置有问题
 }
 
-// AvdDetail 是设备详情（含完整 config.ini 键值）。
-type AvdDetail struct {
-	Summary        AvdSummary        `json:"summary"`
-	Config         map[string]string `json:"config"`
-	RawConfig      string            `json:"rawConfig"`
-	SystemImageDir string            `json:"systemImageDir"`
-	MissingImage   bool              `json:"missingImage"`
-}
-
-// AvdSpec 是创建 AVD 的完整输入（创建向导提交）。
+// AvdSpec 是创建 AVD 的输入（只需要名称、系统镜像与可选的设备档案）。
 type AvdSpec struct {
-	Name                 string            `json:"name"`
-	DisplayName          string            `json:"displayName"`
-	ProfileID            string            `json:"profileId"`
-	SystemImagePath      string            `json:"systemImagePath"`
-	Path                 string            `json:"path,omitempty"`
-	SDCardSize           string            `json:"sdcardSize,omitempty"`
-	HW                   map[string]string `json:"hw"`
-	CreateWithAvdManager bool              `json:"createWithAvdManager"`
-	Tags                 []string          `json:"tags,omitempty"`
-	Note                 string            `json:"note,omitempty"`
-	LaunchDefaults       *LaunchOptions    `json:"launchDefaults,omitempty"`
-}
-
-// AvdPatch 是对已有 AVD 的增量修改。
-type AvdPatch struct {
-	DisplayName *string           `json:"displayName,omitempty"`
-	HW          map[string]string `json:"hw,omitempty"`
-	RemoveHW    []string          `json:"removeHW,omitempty"`
-	Tags        []string          `json:"tags,omitempty"`
-	Note        *string           `json:"note,omitempty"`
-	Launch      *LaunchOptions    `json:"launch,omitempty"`
-}
-
-// HwConfigItem 是 config.ini 中一个硬件配置项的元数据（schema）。
-type HwConfigItem struct {
-	Key         string   `json:"key"`
-	Label       string   `json:"label"`
-	Group       string   `json:"group"` // basic|compute|storage|display|input|sensors|camera|network|boot
-	Type        string   `json:"type"`  // bool|int|string|enum|size
-	Default     string   `json:"default"`
-	EnumValues  []string `json:"enumValues,omitempty"`
-	Min         int      `json:"min,omitempty"`
-	Max         int      `json:"max,omitempty"`
-	Unit        string   `json:"unit,omitempty"`
-	Description string   `json:"description"`
-	Advanced    bool     `json:"advanced"`
+	Name            string `json:"name"`
+	SystemImagePath string `json:"systemImagePath"`
+	ProfileID       string `json:"profileId,omitempty"`
 }
 
 // NameValidation 是 AVD 名称校验结果。
@@ -264,14 +198,6 @@ type NameValidation struct {
 	Valid   bool   `json:"valid"`
 	Reason  string `json:"reason,omitempty"`
 	Suggest string `json:"suggest,omitempty"`
-}
-
-// ConfigDiff 是 ini 直编保存时的差异。
-type ConfigDiff struct {
-	Added    map[string]string `json:"added"`
-	Changed  map[string]string `json:"changed"`
-	Removed  []string          `json:"removed"`
-	Warnings []string          `json:"warnings,omitempty"`
 }
 
 // ---------------------------------------------------------------- 模拟器实例
@@ -314,14 +240,6 @@ type EmulatorInstance struct {
 	LastError       string   `json:"lastError,omitempty"`
 	Args            []string `json:"args"`
 	LogsPath        string   `json:"logsPath"`
-}
-
-// Snapshot 是一个 AVD 快照。
-type Snapshot struct {
-	Name        string `json:"name"`
-	SizeBytes   int64  `json:"sizeBytes"`
-	CreatedAt   int64  `json:"createdAt,omitempty"`
-	Description string `json:"description,omitempty"`
 }
 
 // AdbDevice 是 `adb devices -l` 中的一行。
