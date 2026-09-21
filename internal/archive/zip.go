@@ -23,13 +23,20 @@ type Progress func(done, total int64, current string)
 
 // ExtractZip 把 zip 解压到 destDir。
 //
-// onProgress 可为 nil。ctx 取消通过 onProgress 返回错误实现（返回非 nil 即中止）。
+// 自动处理 Android SDK 归档的“包装目录”约定：
+// 官方包（platform-tools / cmdline-tools / emulator / system-images …）的 zip 里都套了一层
+// 与包同名的顶层目录（如 platform-tools/adb.exe），而 sdkmanager 会把它剥掉。
+// 若 zip 中所有条目同属一个顶层目录，本函数会按同样的规则剥离；否则原样解压。
+//
+// onProgress 可为 nil。返回错误即中止（用于响应 ctx 取消）。
 func ExtractZip(zipPath, destDir string, onProgress func(done, total int64, current string) error) error {
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return domain.Wrap(domain.CodeArchiveFailed, "无法打开压缩包", err)
 	}
 	defer func() { _ = r.Close() }()
+
+	prefix := SingleRootPrefix(r.File)
 
 	var total int64
 	for _, f := range r.File {
@@ -38,7 +45,11 @@ func ExtractZip(zipPath, destDir string, onProgress func(done, total int64, curr
 
 	var done int64
 	for _, f := range r.File {
-		target, err := safeJoin(destDir, f.Name)
+		name := stripPrefix(f.Name, prefix)
+		if name == "" {
+			continue // 包装目录本身
+		}
+		target, err := safeJoin(destDir, name)
 		if err != nil {
 			return err
 		}
@@ -56,12 +67,57 @@ func ExtractZip(zipPath, destDir string, onProgress func(done, total int64, curr
 		}
 		done += int64(f.UncompressedSize64)
 		if onProgress != nil {
-			if err := onProgress(done, total, f.Name); err != nil {
+			if err := onProgress(done, total, name); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// SingleRootPrefix 返回 zip 中所有条目共同的顶层目录前缀（形如 "platform-tools/"）。
+//
+// 只要存在任何顶层文件、或顶层目录不唯一，就返回空串（表示不应剥离）。
+func SingleRootPrefix(files []*zip.File) string {
+	prefix := ""
+	for _, f := range files {
+		name := filepath.ToSlash(strings.TrimPrefix(f.Name, "./"))
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		i := strings.IndexByte(name, '/')
+		if i <= 0 {
+			return "" // 有顶层文件 → 不能剥离
+		}
+		top := name[:i+1]
+		// 不把 "./" 或 "../" 当作可剥离的包装目录：保留原条目名，
+		// 让 safeJoin 去做越界校验（不能把越界路径“洗白”成正常路径）。
+		if strings.TrimSuffix(top, "/") == "." || strings.TrimSuffix(top, "/") == ".." {
+			return ""
+		}
+		if prefix == "" {
+			prefix = top
+			continue
+		}
+		if top != prefix {
+			return "" // 多个顶层目录 → 不能剥离
+		}
+	}
+	return prefix
+}
+
+func stripPrefix(name, prefix string) string {
+	if prefix == "" {
+		return name
+	}
+	normalized := filepath.ToSlash(strings.TrimPrefix(name, "./"))
+	if normalized == strings.TrimSuffix(prefix, "/") {
+		return "" // 包装目录自身
+	}
+	if !strings.HasPrefix(normalized, prefix) {
+		return name
+	}
+	return strings.TrimPrefix(normalized, prefix)
 }
 
 func extractFile(f *zip.File, target string) error {

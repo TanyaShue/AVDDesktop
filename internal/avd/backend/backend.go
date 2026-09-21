@@ -46,12 +46,16 @@ type Backend interface {
 	Create(ctx context.Context, spec domain.AvdSpec, deps Deps) (CreateResult, error)
 }
 
-// Select 选择可用后端：优先 avdmanager，不可用或用户明确要求时使用 Direct。
+// Select 选择可用后端。
+//
+// 语义（与 UI 的“优先使用 avdmanager”开关对应）：
+//   - spec.CreateWithAvdManager=true  且 avdmanager 可用 → 用官方 CLI（device profile 指纹与官方一致）
+//   - 否则 → 直写配置文件（无需 JDK，也是无 JDK 环境的降级路径）
 func Select(spec domain.AvdSpec, deps Deps) Backend {
-	am := &AvdManagerBackend{Paths: deps.Paths}
-	if spec.CreateWithAvdManager && am.Available() {
-		return am
+	if !spec.CreateWithAvdManager {
+		return &DirectBackend{}
 	}
+	am := &AvdManagerBackend{Paths: deps.Paths}
 	if am.Available() {
 		return am
 	}
@@ -132,6 +136,10 @@ func (b *DirectBackend) Create(ctx context.Context, spec domain.AvdSpec, deps De
 	if err != nil {
 		return res, err
 	}
+	sysDir, err := SystemImageDir(spec.SystemImagePath)
+	if err != nil {
+		return res, err
+	}
 	if platform.DirExists(layout.Dir) {
 		if err := deps.Store.Delete(spec.Name, true); err != nil {
 			return res, err
@@ -148,7 +156,7 @@ func (b *DirectBackend) Create(ctx context.Context, spec domain.AvdSpec, deps De
 		"target":                 "android-" + api,
 		"abi.type":               abi,
 		"hw.cpu.arch":            abi,
-		"image.sysdir.1":         filepath.Join("system-images", api, tag, abi) + string(filepath.Separator),
+		"image.sysdir.1":         sysDir + string(filepath.Separator),
 		"tag.id":                 tag,
 		"tag.ids":                tag,
 		"tag.display":            TagDisplay(tag),
@@ -244,6 +252,9 @@ func finalize(res CreateResult, spec domain.AvdSpec, deps Deps) (CreateResult, e
 
 // SplitSystemImage 拆解系统镜像包路径：
 // system-images;android-36.1;google_apis_playstore;x86_64 → ("36.1", "google_apis_playstore", "x86_64")。
+//
+// 返回的 api 已去掉 android- 前缀（用于 config.ini 的 target=android-XX 与 UI 展示）；
+// 若要拼目录请用 SystemImageDir，它会保留原始段（目录名是 android-36.1 而非 36.1）。
 func SplitSystemImage(pkgPath string) (api, tag, abi string, err error) {
 	parts := strings.Split(pkgPath, ";")
 	if len(parts) < 4 || parts[0] != "system-images" {
@@ -251,6 +262,19 @@ func SplitSystemImage(pkgPath string) (api, tag, abi string, err error) {
 			"系统镜像路径格式不正确", "期望: system-images;<api>;<tag>;<abi>，实际: "+pkgPath)
 	}
 	return strings.TrimPrefix(parts[1], "android-"), parts[2], parts[3], nil
+}
+
+// SystemImageDir 返回系统镜像在 SDK 下的相对目录（保留原始 API 段）。
+//
+// 实测：真实目录是 system-images/android-34/android-desktop/x86_64，其中 API 段
+// 必须保留 android- 前缀，否则路径不存在（该问题由端到端测试发现）。
+func SystemImageDir(pkgPath string) (string, error) {
+	parts := strings.Split(pkgPath, ";")
+	if len(parts) < 4 || parts[0] != "system-images" {
+		return "", domain.ErrDetail(domain.CodeInvalidArgument,
+			"系统镜像路径格式不正确", "期望: system-images;<api>;<tag>;<abi>，实际: "+pkgPath)
+	}
+	return filepath.Join(parts[0], parts[1], parts[2], parts[3]), nil
 }
 
 // TagDisplay 返回 tag 的展示名（转发到 repo 的统一定义）。

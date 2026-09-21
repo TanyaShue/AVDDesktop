@@ -102,11 +102,14 @@ func (s *AvdService) Create(spec domain.AvdSpec) (string, error) {
 	if v := comp.Store.ValidateName(spec.Name); !v.Valid {
 		return "", domain.Err(domain.CodeAvdNameInvalid, v.Reason)
 	}
-	api, tag, abi, err := backend.SplitSystemImage(spec.SystemImagePath)
+	if _, _, _, err := backend.SplitSystemImage(spec.SystemImagePath); err != nil {
+		return "", err
+	}
+	relDir, err := backend.SystemImageDir(spec.SystemImagePath)
 	if err != nil {
 		return "", err
 	}
-	imgDir := filepath.Join(comp.Paths.SystemImages, api, tag, abi)
+	imgDir := filepath.Join(comp.Paths.SdkRoot, relDir)
 	if !platform.DirExists(imgDir) {
 		return "", domain.ErrDetail(domain.CodeImageNotInstalled,
 			"系统镜像尚未安装", spec.SystemImagePath+"\n期望目录: "+imgDir).

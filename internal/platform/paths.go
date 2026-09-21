@@ -329,7 +329,9 @@ func ChildEnv(sdkRoot, avdHome string, inject bool) []string {
 	set("ANDROID_HOME", sdkRoot)
 	set("ANDROID_SDK_ROOT", sdkRoot)
 	if avdHome != "" {
-		set("ANDROID_AVD_HOME", filepath.Dir(avdHome))
+		// ANDROID_AVD_HOME 指向“包含 <name>.avd 与 <name>.ini 的目录”本身，
+		// 而不是它的父目录（写错会让 avdmanager 把设备建到别处）。
+		set("ANDROID_AVD_HOME", avdHome)
 	}
 	if sdkRoot != "" {
 		paths := []string{
