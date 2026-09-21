@@ -8,6 +8,7 @@ package proc
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -116,10 +117,7 @@ func Run(ctx context.Context, name string, args []string, opts Options) (Result,
 	readWait.Add(2)
 	go func() {
 		defer readWait.Done()
-		scan := bufio.NewScanner(stdout)
-		scan.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-		for scan.Scan() {
-			line := scan.Text()
+		scanStream(stdout, func(line string) {
 			mu.Lock()
 			outBuf.WriteString(line)
 			outBuf.WriteString("\n")
@@ -127,14 +125,11 @@ func Run(ctx context.Context, name string, args []string, opts Options) (Result,
 			if opts.OnLine != nil {
 				opts.OnLine("stdout", line)
 			}
-		}
+		})
 	}()
 	go func() {
 		defer readWait.Done()
-		scan := bufio.NewScanner(stderr)
-		scan.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-		for scan.Scan() {
-			line := scan.Text()
+		scanStream(stderr, func(line string) {
 			mu.Lock()
 			errBuf.WriteString(line)
 			errBuf.WriteString("\n")
@@ -142,7 +137,7 @@ func Run(ctx context.Context, name string, args []string, opts Options) (Result,
 			if opts.OnLine != nil {
 				opts.OnLine("stderr", line)
 			}
-		}
+		})
 	}()
 
 	waitErr := cmd.Wait()
@@ -176,6 +171,45 @@ func Run(ctx context.Context, name string, args []string, opts Options) (Result,
 		}
 	}
 	return res, nil
+}
+
+// maxLineBytes 是单行输出的上限（超出后该流停止读取，避免异常程序打爆内存）。
+const maxLineBytes = 4 * 1024 * 1024
+
+// scanStream 按行读取子进程输出并逐行回调。
+//
+// 行结束符同时接受 \n 与 \r：sdkmanager、下载器等工具用 \r 就地刷新进度条，
+// 若只认 \n，这些内容会一直攒在 bufio.Scanner 的缓冲里，直到进程退出才一次性
+// 冒出来——表现就是「任务日志不实时」。空白行（含进度条擦除留下的空格）直接丢弃。
+func scanStream(r io.Reader, emit func(line string)) {
+	scan := bufio.NewScanner(r)
+	scan.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
+	scan.Split(splitLines)
+	for scan.Scan() {
+		if line := scan.Text(); strings.TrimSpace(line) != "" {
+			emit(line)
+		}
+	}
+}
+
+// splitLines 是 bufio.SplitFunc：\r、\n、\r\n 都算一个行结束符。
+//
+// 末尾的 \r 先单独消费，紧随其后的 \n 会在下一轮切成空行被丢弃，
+// 因此 \r\n 不会产生多余的空行。
+func splitLines(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		if data[i] == '\r' && i+1 < len(data) && data[i+1] == '\n' {
+			return i + 2, data[:i], nil
+		}
+		return i + 1, data[:i], nil
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
 
 // Output 执行并返回 stdout（失败时返回带上下文的 AppError）。

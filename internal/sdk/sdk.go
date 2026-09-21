@@ -155,7 +155,9 @@ func AcceptLicenses(ctx context.Context, tools platform.Tools, env []string, onL
 //
 // sdkmanager 失败时仍可能有正常输出，因此必须检查退出码，否则会把安装失败当成功。
 func InstallPackages(ctx context.Context, tools platform.Tools, env []string, packages []string, onLine LineFunc) error {
-	args := append([]string{"--sdk_root=" + tools.SdkRoot}, packages...)
+	// 必须加 --verbose：默认情况下 sdkmanager 安装过程一言不发（实测连 TTY 下也没有
+	// 进度条），任务日志会长时间空着；加了之后至少能看到 Preparing/Installing/complete 阶段。
+	args := append([]string{"--verbose", "--sdk_root=" + tools.SdkRoot}, packages...)
 	res, err := runSdkmanager(ctx, tools, env, args, installTimeout, onLine, yesLines(licenseFeed))
 	if err != nil {
 		return err

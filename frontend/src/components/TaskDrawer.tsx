@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import * as api from "../bridge/api";
 import type { JobInfo, LogLine } from "../bridge/types";
-import { lineId } from "../hooks/useApp";
+import type { ConsoleLine } from "../hooks/useApp";
 import { humanSize, humanSpeed, jobStatusText, Progress } from "./ui";
 
 export function TaskDrawer({
@@ -15,7 +15,7 @@ export function TaskDrawer({
   onToggle,
 }: {
   jobs: JobInfo[];
-  lines: LogLine[];
+  lines: ConsoleLine[];
   expanded: boolean;
   onToggle: (open: boolean) => void;
 }) {
@@ -127,7 +127,7 @@ export function TaskDrawer({
               <span style={{ opacity: 0.6 }}>（暂无日志）</span>
             ) : (
               lines.map((line) => (
-                <div key={lineId(line)} className={lineClass(line)}>
+                <div key={line.key} className={lineClass(line)}>
                   {line.source ? `[${line.source}] ` : ""}
                   {line.message}
                 </div>

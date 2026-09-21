@@ -61,6 +61,7 @@ type Job struct {
 	info    domain.JobInfo
 	logs    []domain.LogLine
 	pending []domain.LogLine
+	logSeq  uint64 // 任务内日志序号，前端据此去重（必须唯一且单调递增）
 	dirty   bool
 	ended   bool
 	cancel  context.CancelFunc
@@ -117,8 +118,17 @@ func (j *Job) SetBytes(done, total int64, speedBps int64) {
 
 // Log 追加一条日志（由推送协程按 logFlushInterval 节流发给前端，并保留最近 maxLogLines 条）。
 func (j *Job) Log(level, source, message string) {
-	line := domain.LogLine{At: time.Now().UnixMilli(), Level: level, Source: source, Message: message}
 	j.mu.Lock()
+	// 同一任务内序号唯一：实时推送与历史回填携带同一序号，前端才能可靠去重；
+	// 没有序号时只能按「时间+来源+文本」判重，会误删同一毫秒内的相同日志。
+	j.logSeq++
+	line := domain.LogLine{
+		Seq:     j.logSeq,
+		At:      time.Now().UnixMilli(),
+		Level:   level,
+		Source:  source,
+		Message: message,
+	}
 	j.logs = append(j.logs, line)
 	if len(j.logs) > maxLogLines {
 		j.logs = j.logs[len(j.logs)-maxLogLines:]

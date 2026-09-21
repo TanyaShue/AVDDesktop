@@ -10,14 +10,33 @@ const CONSOLE_TAIL = 200;
 /** 初始回填日志的已结束任务数。 */
 const CONSOLE_BACKFILL_JOBS = 5;
 
-/** 控制台去重键 / React key：应用日志用后端唯一序号，任务日志（无序号）用时间 + 来源 + 内容。
- *  同一条日志无论是实时推送还是历史回填，都得到同一个 id，因此不可能被插入两次。 */
-export function lineId(line: LogLine): string {
-  // seq 只在应用日志上有值（任务日志不带序号），因此按可选处理
-  const seq = line.seq ?? 0;
-  if (seq > 0) return `a:${seq}`;
-  return `j:${line.at}|${line.source ?? ""}|${line.message}`;
+/** 控制台行：日志原文 + 去重与渲染共用的 key。 */
+export type ConsoleLine = LogLine & { key: string };
+
+/** 应用日志的命名空间；任务日志各自使用 job:<id>。 */
+const APP_NS = "app";
+
+/** 任务日志的命名空间。 */
+function jobNs(jobId: string): string {
+  return `job:${jobId}`;
 }
+
+/**
+ * 计算控制台行的唯一 key。
+ *
+ * 后端保证序号在来源内唯一（应用日志是进程内序号，任务日志是任务内序号），
+ * 且实时推送与历史回填携带同一序号，因此同一行必定得到同一个 key：既不会被插入两次，
+ * 也不会因为「同一毫秒内文本相同」而被误判成重复行丢弃。
+ */
+function lineKey(ns: string, line: LogLine): string {
+  const seq = line.seq ?? 0;
+  if (seq > 0) return `${ns}:${seq}`;
+  // 兼容没有序号的日志：退化成 时间 + 来源 + 内容
+  return `${ns}:${line.at}|${line.source ?? ""}|${line.message}`;
+}
+
+/** 一批待追加的日志及其来源命名空间。 */
+type LineBatch = { ns: string; lines: LogLine[] };
 
 /** 订阅一个 Wails 事件；handler 变化时自动重订阅。 */
 export function useWailsEvent<T>(name: string, handler: (payload: T) => void): void {
@@ -36,22 +55,31 @@ export function useWailsEvent<T>(name: string, handler: (payload: T) => void): v
 /** 任务列表 + 统一控制台（应用日志 + 任务日志按时间合并）。 */
 export function useJobs() {
   const [jobs, setJobs] = useState<JobInfo[]>([]);
-  const [lines, setLines] = useState<LogLine[]>([]);
+  const [lines, setLines] = useState<ConsoleLine[]>([]);
 
   /**
    * 追行并去重：历史回填（LogService.Tail / Jobs.Logs）与实时事件（log:line / job:log）
-   * 可能包含同一行，按 lineId 去重（含同一批次内部），避免启动瞬间同一行出现两次。
+   * 可能包含同一行，按「来源命名空间 + 序号」去重；多来源时按时间合并，保持时间线顺序。
    */
-  const append = useCallback((incoming: LogLine[]) => {
+  const append = useCallback((batches: LineBatch[]) => {
+    const incoming: { ns: string; line: LogLine }[] = [];
+    let sources = 0;
+    for (const batch of batches) {
+      if (batch.lines.length === 0) continue;
+      sources++;
+      for (const line of batch.lines) incoming.push({ ns: batch.ns, line });
+    }
     if (incoming.length === 0) return;
+    if (sources > 1) incoming.sort((a, b) => a.line.at - b.line.at);
+
     setLines((prev) => {
-      const seen = new Set(prev.map(lineId));
-      const fresh: LogLine[] = [];
-      for (const line of incoming) {
-        const id = lineId(line);
-        if (seen.has(id)) continue;
-        seen.add(id);
-        fresh.push(line);
+      const seen = new Set(prev.map((l) => l.key));
+      const fresh: ConsoleLine[] = [];
+      for (const item of incoming) {
+        const key = lineKey(item.ns, item.line);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        fresh.push({ ...item.line, key });
       }
       if (fresh.length === 0) return prev;
       const next = prev.concat(fresh);
@@ -88,7 +116,9 @@ export function useJobs() {
             }
           }),
         );
-        append(appLines.concat(...jobLines).sort((a, b) => a.at - b.at));
+        const batches: LineBatch[] = [{ ns: APP_NS, lines: appLines }];
+        finished.forEach((j, i) => batches.push({ ns: jobNs(j.id), lines: jobLines[i] }));
+        append(batches);
       } catch {
         /* 忽略：开发模式下后端可能尚未就绪 */
       }
@@ -100,11 +130,11 @@ export function useJobs() {
   useWailsEvent<JobInfo>(EVENTS.jobDone, upsert);
   useWailsEvent<JobInfo>(EVENTS.jobFailed, upsert);
   // 任务日志与应用日志（含 module=emulator 的模拟器输出）汇入同一条控制台时间线
-  useWailsEvent<{ jobId: string; lines: LogLine[] }>(EVENTS.jobLog, ({ lines }) => {
-    append(lines ?? []);
+  useWailsEvent<{ jobId: string; lines: LogLine[] }>(EVENTS.jobLog, ({ jobId, lines }) => {
+    append([{ ns: jobId ? jobNs(jobId) : "job:?", lines: lines ?? [] }]);
   });
   useWailsEvent<LogLine>(EVENTS.logLine, (line) => {
-    if (line) append([line]);
+    if (line) append([{ ns: APP_NS, lines: [line] }]);
   });
 
   return { jobs, lines };
