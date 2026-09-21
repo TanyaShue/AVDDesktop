@@ -116,6 +116,7 @@ export function TaskDrawer({
                     <Progress
                       percent={job.percent}
                       indeterminate={job.status === "running" && job.percent <= 0}
+                      showPercent
                     />
                   </div>
                 </div>
@@ -146,6 +147,9 @@ function detail(job: JobInfo): string {
   if (job.phase) parts.push(job.phase);
   if (job.bytesTotal > 0) {
     parts.push(`${humanSize(job.bytesDone)} / ${humanSize(job.bytesTotal)}`);
+  } else if (job.bytesDone > 0) {
+    // 总量未知（例如仓库未返回归档大小）时也要能看到下载在推进
+    parts.push(`已下载 ${humanSize(job.bytesDone)}`);
   } else if (job.subtitle) {
     parts.push(job.subtitle);
   }

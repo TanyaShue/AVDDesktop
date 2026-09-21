@@ -185,7 +185,10 @@ func (s *EnvService) Prepare() (string, error) {
 		if len(missing) > 0 {
 			j.SetPhase("安装 " + strings.Join(missing, "、"))
 			j.Logf("info", "sdk", "执行：%s", sdk.InstallCommand(tools, missing))
-			if err := sdk.InstallPackages(ctx, tools, env, missing, jobLine(j, "sdkmanager")); err != nil {
+			stopProgress := watchInstallProgress(ctx, j, tools.SdkRoot, missing)
+			err := sdk.InstallPackages(ctx, tools, env, missing, jobLine(j, "sdkmanager"))
+			stopProgress()
+			if err != nil {
 				return err
 			}
 		}

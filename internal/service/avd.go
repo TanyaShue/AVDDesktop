@@ -95,7 +95,10 @@ func (s *AvdService) Create(spec domain.AvdSpec) (string, error) {
 		defer unlock()
 
 		j.SetPhase("检查系统镜像")
+		// 缺镜像时 EnsureImage 会走 sdkmanager 安装，因此同样要接进度。
+		stopProgress := watchInstallProgress(ctx, j, comp.Tools.SdkRoot, []string{spec.SystemImagePath})
 		already, err := avd.EnsureImage(ctx, comp.Tools, comp.Env, spec.SystemImagePath, jobLine(j, "sdkmanager"))
+		stopProgress()
 		if err != nil {
 			return err
 		}
@@ -168,6 +171,8 @@ func (s *AvdService) InstallImage(pkgPath string) (string, error) {
 		Subtitle: sdk.InstallCommand(comp.Tools, []string{pkgPath}),
 	}, func(ctx context.Context, j *job.Job) error {
 		defer unlock()
+		stopProgress := watchInstallProgress(ctx, j, comp.Tools.SdkRoot, []string{pkgPath})
+		defer stopProgress()
 		if err := sdk.InstallPackages(ctx, comp.Tools, comp.Env, []string{pkgPath}, jobLine(j, "sdkmanager")); err != nil {
 			return err
 		}

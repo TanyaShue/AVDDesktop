@@ -783,6 +783,23 @@ select {
   transition: width 200ms linear;
 }
 
+.progress-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.progress-line > .progress {
+  flex: 1;
+}
+
+.progress-line__value {
+  min-width: 40px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
 .progress--indeterminate .progress__bar {
   width: 40% !important;
   animation: slide 1.2s infinite var(--ease);

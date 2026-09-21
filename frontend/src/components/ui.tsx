@@ -95,10 +95,31 @@ export function formatMs(ms: number): string {
 }
 
 /** 进度条。 */
-export function Progress({ percent, indeterminate }: { percent: number; indeterminate?: boolean }) {
-  return (
+/**
+ * 进度条。
+ *
+ * showPercent 为真且进度确定时，在右侧给出百分比数字——下载/安装这类有明确总量的
+ * 任务需要它；总量未知（不确定进度）时不显示数字，避免出现假的百分比。
+ */
+export function Progress({
+  percent,
+  indeterminate,
+  showPercent,
+}: {
+  percent: number;
+  indeterminate?: boolean;
+  showPercent?: boolean;
+}) {
+  const bar = (
     <div className={`progress${indeterminate ? " progress--indeterminate" : ""}`}>
       <div className="progress__bar" style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />
+    </div>
+  );
+  if (!showPercent || indeterminate) return bar;
+  return (
+    <div className="progress-line">
+      {bar}
+      <span className="progress-line__value nums">{Math.round(percent)}%</span>
     </div>
   );
 }

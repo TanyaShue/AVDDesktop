@@ -20,8 +20,8 @@ import (
 	"AVDDesktop/internal/proc"
 )
 
-// cmdlineToolsBaseURL 是官方命令行工具归档的来源（不做镜像/测速）。
-const cmdlineToolsBaseURL = "https://dl.google.com/android/repository/"
+// repoBaseURL 是官方 Android SDK 仓库根地址（命令行工具归档与组件归档都从这里取）。
+const repoBaseURL = "https://dl.google.com/android/repository/"
 
 // cmdlineToolsBuild 是官方命令行工具归档的构建号（cmdline-tools;21.0）。
 const cmdlineToolsBuild = "15641748"
@@ -98,7 +98,7 @@ func Bootstrap(ctx context.Context, tools platform.Tools, cacheDir string, onPro
 	}
 
 	zipPath := filepath.Join(cacheDir, archive)
-	if err := Download(ctx, cmdlineToolsBaseURL+archive, zipPath, sha1sum, onProgress); err != nil {
+	if err := Download(ctx, repoBaseURL+archive, zipPath, sha1sum, onProgress); err != nil {
 		return err
 	}
 
