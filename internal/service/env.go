@@ -158,16 +158,8 @@ func (s *EnvService) Prepare() (string, error) {
 			j.SetPhase("下载 Android 命令行工具")
 			j.Logf("info", "sdk", "从官方地址下载命令行工具到 %s", tools.CmdlineTools)
 			started := time.Now()
-			lastBytes := int64(0)
-			lastAt := started
-			err := sdk.Bootstrap(ctx, tools, platform.CacheDir(), func(done, total int64) {
-				speed := int64(0)
-				if elapsed := time.Since(lastAt).Seconds(); elapsed > 0.5 {
-					speed = int64(float64(done-lastBytes) / elapsed)
-					lastBytes, lastAt = done, time.Now()
-				}
-				j.SetBytes(done, total, speed)
-			})
+			// 速度由任务内部采样估算，这里只上报字节数
+			err := sdk.Bootstrap(ctx, tools, platform.CacheDir(), j.SetBytes)
 			if err != nil {
 				return err
 			}

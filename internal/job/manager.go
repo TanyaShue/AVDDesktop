@@ -62,6 +62,7 @@ type Job struct {
 	logs    []domain.LogLine
 	pending []domain.LogLine
 	logSeq  uint64 // 任务内日志序号，前端据此去重（必须唯一且单调递增）
+	speed   speedEstimator
 	dirty   bool
 	ended   bool
 	cancel  context.CancelFunc
@@ -100,18 +101,32 @@ func (j *Job) Progress(done, total int64) {
 	j.SetPercent(float64(done) / float64(total) * 100)
 }
 
-// SetBytes 更新字节进度与速度。
-func (j *Job) SetBytes(done, total int64, speedBps int64) {
+// SetBytes 更新字节进度。
+//
+// 速度与 ETA 由任务内部根据采样自动估算：调用方只提供「已完成 / 总量」，
+// 既不用重复实现，也不可能再出现「某次回调把速度写成 0」导致界面闪烁。
+func (j *Job) SetBytes(done, total int64) {
+	j.setBytesAt(done, total, time.Now())
+}
+
+// setBytesAt 是 SetBytes 的可注入时钟版本（便于测试采样节奏）。
+func (j *Job) setBytesAt(done, total int64, now time.Time) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+
+	speed := j.speed.sample(done, now)
 	j.info.BytesDone = done
 	j.info.BytesTotal = total
-	j.info.SpeedBps = speedBps
+	j.info.SpeedBps = speed
 	if total > 0 {
 		j.info.Percent = clamp(float64(done)/float64(total)*100, 0, 100)
 	}
-	if speedBps > 0 && total > done {
-		j.info.ETASeconds = int((total - done) / speedBps)
+	switch {
+	case speed > 0 && total > done:
+		j.info.ETASeconds = int((total - done) / speed)
+	default:
+		// 下载完成或无法估算速度时不再保留旧的剩余时间
+		j.info.ETASeconds = 0
 	}
 	j.dirty = true
 }
