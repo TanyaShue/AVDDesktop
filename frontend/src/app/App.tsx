@@ -4,9 +4,11 @@ import * as api from "../bridge/api";
 import { EVENTS } from "../bridge/api";
 import type { AppSettings, PageKey } from "../bridge/types";
 import { NavRail, TitleBar } from "../components/Chrome";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 import { TaskDrawer } from "../components/TaskDrawer";
 import { Toasts } from "../components/ui";
 import { useJobs, useTheme, useToasts, useWailsEvent } from "../hooks/useApp";
+import { useEnvCheck } from "../hooks/useEnvCheck";
 import { DevicesPage } from "../pages/DevicesPage";
 import { HomePage } from "../pages/HomePage";
 import { SdkPage } from "../pages/SdkPage";
@@ -14,12 +16,22 @@ import { SettingsPage } from "../pages/SettingsPage";
 import "../styles/tokens.css";
 import "../styles/app.css";
 
+/** 错误边界提示用：页面中文名。 */
+const PAGE_TITLES: Record<PageKey, string> = {
+  home: "首页",
+  devices: "设备",
+  sdk: "SDK",
+  settings: "设置",
+};
+
 export default function App() {
   const [page, setPage] = useState<PageKey>("home");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const { jobs, logs } = useJobs();
   const { toasts, push, dismiss } = useToasts();
+  // 环境自检由应用壳持有：每次启动只跑一次，切标签页不会重新检查（详见 useEnvCheck）
+  const env = useEnvCheck(push);
 
   useTheme(settings?.theme ?? "light");
 
@@ -49,15 +61,18 @@ export default function App() {
       <TitleBar jobs={jobs} onOpenDrawer={() => setDrawerOpen(true)} />
       <div className="app__body">
         <NavRail page={page} onChange={setPage} />
-        {page === "home" ? (
-          <HomePage onToast={push} onGotoDevices={() => setPage("devices")} />
-        ) : page === "devices" ? (
-          <DevicesPage onToast={push} />
-        ) : page === "sdk" ? (
-          <SdkPage onToast={push} />
-        ) : (
-          <SettingsPage onToast={push} onSettingsChanged={handleSettingsChanged} />
-        )}
+        {/* key 让切换页面时自动丢弃上一个页面的错误状态 */}
+        <ErrorBoundary key={page} scope={PAGE_TITLES[page]}>
+          {page === "home" ? (
+            <HomePage env={env} onToast={push} onGotoDevices={() => setPage("devices")} />
+          ) : page === "devices" ? (
+            <DevicesPage onToast={push} />
+          ) : page === "sdk" ? (
+            <SdkPage onToast={push} />
+          ) : (
+            <SettingsPage onToast={push} onSettingsChanged={handleSettingsChanged} />
+          )}
+        </ErrorBoundary>
       </div>
       <TaskDrawer
         jobs={jobs}

@@ -262,7 +262,7 @@ func (s *DiagnosticsService) LogDir() string {
 }
 
 // LogFiles 返回保留的日志文件列表（新→旧）。
-func (s *DiagnosticsService) LogFiles() []string { return s.rt.Log().Files() }
+func (s *DiagnosticsService) LogFiles() []string { return domain.NonNil(s.rt.Log().Files()) }
 
 // TestLog 向日志写入一条测试消息（验证日志链路与实时推送）。
 func (s *DiagnosticsService) TestLog(message string) string {
@@ -278,7 +278,7 @@ func entriesToLines(entries []logging.Entry) []domain.LogLine {
 	for _, e := range entries {
 		out = append(out, domain.LogLine{At: e.At, Level: e.Level, Source: e.Module, Message: e.Message})
 	}
-	return out
+	return domain.NonNil(out)
 }
 
 // ClearCache 清理缓存与临时下载文件。
@@ -304,7 +304,13 @@ func (s *DiagnosticsService) ClearCache() error {
 
 // OpenLogFolder 打开日志目录。
 func (s *DiagnosticsService) OpenLogFolder() error {
-	wailsruntime.BrowserOpenURL(s.rt.Context(), "file://"+filepath.ToSlash(s.LogDir()))
+	dir := s.LogDir()
+	if err := platform.EnsureDir(dir); err != nil {
+		return domain.Wrap(domain.CodePathNotFound, "无法创建日志目录", err)
+	}
+	if err := platform.OpenPath(dir); err != nil {
+		return domain.Wrap(domain.CodeUnknown, "无法打开日志目录", err)
+	}
 	return nil
 }
 

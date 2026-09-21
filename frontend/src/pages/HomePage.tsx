@@ -1,45 +1,26 @@
 // 首页：环境自检（对齐 docs/UI-SPEC.md §5.1）。
-import { useCallback, useEffect, useState } from "react";
+//
+// 自检状态由应用壳持有（见 hooks/useEnvCheck）：本页只负责展示与触发显式刷新，
+// 不在挂载时重新探测 —— 否则每次切回首页都会重跑一遍自检。
+import { useState } from "react";
 import * as api from "../bridge/api";
-import { EVENTS, errorText } from "../bridge/api";
-import type { EnvIssue, EnvReport, MirrorSource, ToolState, ToolStatus, WindowsInfo } from "../bridge/types";
-import { useWailsEvent } from "../hooks/useApp";
+import { errorText } from "../bridge/api";
+import type { EnvIssue, ToolState, ToolStatus, WindowsInfo } from "../bridge/types";
+import type { EnvCheck } from "../hooks/useEnvCheck";
 import { SpeedTestModal } from "../components/SpeedTestModal";
 import { Progress, stateChip, stateTone } from "../components/ui";
 
 interface Props {
   onToast: (level: "info" | "success" | "warning" | "danger", title: string, text?: string) => void;
   onGotoDevices: () => void;
+  /** 环境自检状态（App 持有，整个程序只自动自检一次）。 */
+  env: EnvCheck;
 }
 
-export function HomePage({ onToast, onGotoDevices }: Props) {
-  const [report, setReport] = useState<EnvReport | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [source, setSource] = useState<MirrorSource | null>(null);
+export function HomePage({ onToast, onGotoDevices, env }: Props) {
+  const { report, loading, source, reload, refreshSource } = env;
   const [showSpeedTest, setShowSpeedTest] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-
-  const load = useCallback(async (force = false) => {
-    setLoading(true);
-    try {
-      const rep = (await api.Env.Detect({ force, sdkRootOverride: "" })) as EnvReport;
-      setReport(rep);
-      const sources = (await api.Mirror.ListSources()) as MirrorSource[];
-      const settings = (await api.Settings.Get()) as { activeSourceId: string };
-      setSource(sources.find((s) => s.id === settings.activeSourceId) ?? sources[0] ?? null);
-    } catch (err) {
-      onToast("danger", "自检失败", errorText(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [onToast]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  useWailsEvent<EnvReport>(EVENTS.envChanged, (rep) => setReport(rep));
-  useWailsEvent<unknown>(EVENTS.sdkChanged, () => void load(true));
 
   const applyFix = async (tool: ToolStatus) => {
     const fix = tool.fix;
@@ -71,7 +52,7 @@ export function HomePage({ onToast, onGotoDevices }: Props) {
           if (dir) {
             await api.Settings.Update({ jdkPath: dir });
             onToast("success", "已设置 JDK 路径", dir);
-            await load(true);
+            await reload(true);
           }
           break;
         }
@@ -88,7 +69,7 @@ export function HomePage({ onToast, onGotoDevices }: Props) {
           if (dir) {
             await api.Settings.Update({ sdkRoot: dir });
             onToast("success", "已切换目录", dir);
-            await load(true);
+            await reload(true);
           }
           break;
         }
@@ -103,6 +84,15 @@ export function HomePage({ onToast, onGotoDevices }: Props) {
       onToast("danger", "操作失败", errorText(err));
     } finally {
       setBusy(null);
+    }
+  };
+
+  /** 在文件管理器中打开路径：目录直接打开，文件打开所在目录并选中。 */
+  const openPath = async (path: string) => {
+    try {
+      await api.Env.OpenInExplorer(path);
+    } catch (err) {
+      onToast("danger", "打开位置失败", errorText(err));
     }
   };
 
@@ -180,6 +170,9 @@ export function HomePage({ onToast, onGotoDevices }: Props) {
     }
   };
 
+  const blockers = report?.blockers ?? [];
+  const hints = report?.accel?.hints ?? [];
+
   return (
     <div className="page">
       <div className="pageheader">
@@ -195,7 +188,7 @@ export function HomePage({ onToast, onGotoDevices }: Props) {
           </div>
         </div>
         <div className="pageheader__actions">
-          <button className="btn btn--secondary" onClick={() => void load(true)} disabled={loading}>
+          <button className="btn btn--secondary" onClick={() => void reload(true)} disabled={loading}>
             {loading ? "检测中…" : "重新检测"}
           </button>
           <button className="btn btn--primary btn--lg" onClick={() => void prepareAll()}>
@@ -217,7 +210,7 @@ export function HomePage({ onToast, onGotoDevices }: Props) {
           </div>
         ) : (
           <>
-            {report && report.issues && report.issues.length > 0 ? (
+            {report?.issues && report.issues.length > 0 ? (
               <IssuesPanel issues={report.issues} onFix={(issue) => void applyIssueFix(issue)} />
             ) : null}
 
@@ -249,21 +242,21 @@ export function HomePage({ onToast, onGotoDevices }: Props) {
               </div>
             ) : null}
 
-            {report && report.blockers.length > 0 ? (
+            {blockers.length > 0 ? (
               <div className="banner">
                 <span className="banner__icon" aria-hidden>
                   ⚠
                 </span>
                 <div className="banner__body">
                   <div className="banner__title">
-                    还有 {report.blockers.length} 项需要处理，完成后即可创建并启动模拟器
+                    还有 {blockers.length} 项需要处理，完成后即可创建并启动模拟器
                   </div>
                   <div className="banner__text">
-                    {report.blockers
+                    {blockers
                       .map((b) => b.name)
                       .slice(0, 3)
                       .join("、")}
-                    {report.blockers.length > 3 ? " 等" : ""}
+                    {blockers.length > 3 ? " 等" : ""}
                   </div>
                 </div>
                 <button className="btn btn--primary" onClick={() => void prepareAll()}>
@@ -293,7 +286,13 @@ export function HomePage({ onToast, onGotoDevices }: Props) {
 
             <div className="grid grid--tools">
               {(report?.components ?? []).map((tool) => (
-                <ToolCard key={tool.id} tool={tool} busy={busy === tool.id} onFix={() => void applyFix(tool)} />
+                <ToolCard
+                  key={tool.id}
+                  tool={tool}
+                  busy={busy === tool.id}
+                  onFix={() => void applyFix(tool)}
+                  onOpen={(path) => void openPath(path)}
+                />
               ))}
             </div>
 
@@ -320,12 +319,12 @@ export function HomePage({ onToast, onGotoDevices }: Props) {
               </div>
             </div>
 
-            {report && report.accel.hints && report.accel.hints.length > 0 ? (
+            {hints.length > 0 ? (
               <div className="section">
                 <div className="section__title">硬件加速建议</div>
                 <div className="card" style={{ padding: 16 }}>
                   <ul style={{ margin: 0, paddingLeft: 18, color: "var(--text-secondary)", lineHeight: "22px" }}>
-                    {report.accel.hints.map((h, i) => (
+                    {hints.map((h, i) => (
                       <li key={i}>{h}</li>
                     ))}
                   </ul>
@@ -344,7 +343,8 @@ export function HomePage({ onToast, onGotoDevices }: Props) {
           onUseSource={async (id) => {
             await api.Mirror.SetActiveSource(id);
             onToast("success", "已切换镜像源");
-            await load(true);
+            // 换源不影响环境探测结果，只刷新镜像源卡片
+            await refreshSource();
           }}
         />
       ) : null}
@@ -441,7 +441,17 @@ function severityLabel(severity: string): string {
   }
 }
 
-function ToolCard({ tool, busy, onFix }: { tool: ToolStatus; busy: boolean; onFix: () => void }) {
+function ToolCard({
+  tool,
+  busy,
+  onFix,
+  onOpen,
+}: {
+  tool: ToolStatus;
+  busy: boolean;
+  onFix: () => void;
+  onOpen: (path: string) => void;
+}) {
   const chip = stateChip(tool.state as ToolState | undefined);
   const tone = stateTone(tool.state as ToolState | undefined);
   return (
@@ -479,8 +489,8 @@ function ToolCard({ tool, busy, onFix }: { tool: ToolStatus; busy: boolean; onFi
           {tool.path ? (
             <button
               className="btn btn--ghost"
-              onClick={() => void api.Env.OpenInExplorer(tool.path!)}
-              title="在文件管理器中打开"
+              onClick={() => onOpen(tool.path!)}
+              title="在文件管理器中打开（目录直接打开，文件打开所在目录）"
             >
               打开位置
             </button>

@@ -26,7 +26,7 @@ export function SdkPage({ onToast }: Props) {
 
   const loadInstalled = useCallback(async () => {
     try {
-      setInstalled(((await api.Sdk.ListInstalled()) as SdkPackage[]) ?? []);
+      setInstalled(api.asArray((await api.Sdk.ListInstalled()) as SdkPackage[]));
     } catch (err) {
       onToast("danger", "读取已安装包失败", errorText(err));
     }
@@ -46,7 +46,7 @@ export function SdkPage({ onToast }: Props) {
           refresh,
           onlyInstalled: false,
         })) as SystemImage[];
-        setImages(list ?? []);
+        setImages(api.asArray(list));
       } catch (err) {
         onToast("danger", "读取系统镜像失败", errorText(err));
       } finally {
@@ -66,7 +66,7 @@ export function SdkPage({ onToast }: Props) {
         refresh: false,
         sysImgTag: "",
       })) as SdkPackage[];
-      setRemote(list ?? []);
+      setRemote(api.asArray(list));
     } catch (err) {
       onToast("danger", "读取远程包列表失败", errorText(err));
     } finally {
@@ -93,7 +93,7 @@ export function SdkPage({ onToast }: Props) {
       if (ae?.code === "LICENSE_NOT_ACCEPTED") {
         onToast("warning", "需要接受许可协议", "正在打开许可确认…");
         try {
-          const lics = (await api.Sdk.ListLicenses(packages)) as Array<{ id: string; text: string }>;
+          const lics = api.asArray((await api.Sdk.ListLicenses(packages)) as Array<{ id: string; text: string }>);
           if (lics.length > 0 && window.confirm(`${lics[0].text.slice(0, 1200)}\n\n（是否同意该许可协议？）`)) {
             await api.Sdk.AcceptLicenses(lics.map((l) => l.id));
             const id = await api.Sdk.Install({

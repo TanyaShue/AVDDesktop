@@ -19,6 +19,7 @@ export * as App from "../../wailsjs/go/main/App";
 
 import { service as serviceModels } from "../../wailsjs/go/models";
 import type { domain } from "../../wailsjs/go/models";
+import type { EnvReport } from "./types";
 
 /**
  * 构造带嵌套字段的请求对象。
@@ -32,6 +33,30 @@ export const req = {
 };
 
 export { EventsOn, EventsOff, EventsEmit } from "../../wailsjs/runtime/runtime";
+
+/**
+ * 把可能为 null 的数组兜底成空数组。
+ *
+ * Wails 绑定层把 Go 的 nil 切片序列化成 null，前端一旦直接 `arr.length` / `arr.map(...)`
+ * 就会抛异常，React 会卸载整棵树（表现为整窗白屏）。契约见 docs/API-CONTRACT.md：
+ * 数组字段即使为空也必须是数组（后端也做了 NonNil 归一化，这里是第二道防线）。
+ */
+export function asArray<T>(value: readonly T[] | null | undefined): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+/** EnvReport 归一化：补齐全部数组字段，页面可以安全地当数组使用。 */
+export function normalizeEnvReport(report: EnvReport): EnvReport {
+  return {
+    ...report,
+    components: asArray(report.components),
+    blockers: asArray(report.blockers),
+    disks: asArray(report.disks),
+    issues: asArray(report.issues),
+    acceptedLicenses: asArray(report.acceptedLicenses),
+    accel: { ...report.accel, hints: asArray(report.accel?.hints) },
+  };
+}
 
 /** 事件名常量（与 docs/API-CONTRACT.md §6 一致）。 */
 export const EVENTS = {

@@ -25,7 +25,7 @@ export function SettingsPage({ onToast, onSettingsChanged }: Props) {
       ]);
       setSettings(s);
       setPaths(p);
-      setSources(m ?? []);
+      setSources(api.asArray(m));
     } catch (err) {
       onToast("danger", "读取设置失败", errorText(err));
     }
@@ -354,7 +354,18 @@ export function SettingsPage({ onToast, onSettingsChanged }: Props) {
               >
                 清理缓存与临时下载
               </button>
-              <button className="btn btn--ghost" onClick={() => void api.Env.OpenInExplorer(paths?.logDir ?? "")}>
+              <button
+                className="btn btn--ghost"
+                onClick={() =>
+                  void (async () => {
+                    try {
+                      await api.Diagnostics.OpenLogFolder();
+                    } catch (err) {
+                      onToast("danger", "打开日志目录失败", errorText(err));
+                    }
+                  })()
+                }
+              >
                 打开日志目录
               </button>
             </div>

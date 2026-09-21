@@ -117,7 +117,7 @@ func (s *EnvService) EnabledWindowsFeatures() (*domain.WindowsInfo, error) {
 
 // DetectSdkRoots 返回候选 SDK 根目录。
 func (s *EnvService) DetectSdkRoots() []domain.SdkRootCandidate {
-	return platform.DiscoverSdkRoots("")
+	return domain.NonNil(platform.DiscoverSdkRoots(""))
 }
 
 // DetectJava 只检测 JDK。
@@ -292,16 +292,16 @@ func (s *EnvService) SaveFile(req PickRequest) (string, error) {
 }
 
 // OpenInExplorer 在资源管理器中打开路径（Windows）/ 文件管理器中打开（其它平台）。
+//
+// 目录直接打开、文件打开所在目录并选中；路径为空返回 InvalidArgument，
+// 失败原因（例如系统拒绝启动文件管理器）会原样返回给前端展示。
 func (s *EnvService) OpenInExplorer(path string) error {
-	if path == "" {
+	if strings.TrimSpace(path) == "" {
 		return domain.Err(domain.CodeInvalidArgument, "路径为空")
 	}
-	if !platform.DirExists(path) && !platform.FileExists(path) {
-		if err := platform.EnsureDir(path); err != nil {
-			return domain.Err(domain.CodePathNotFound, "路径不存在: "+path)
-		}
+	if err := platform.OpenPath(path); err != nil {
+		return domain.Wrap(domain.CodeUnknown, "无法打开目录", err)
 	}
-	wailsruntime.BrowserOpenURL(s.rt.Context(), "file://"+filepath.ToSlash(path))
 	return nil
 }
 
@@ -329,22 +329,17 @@ type TerminalRequest struct {
 // OpenTerminal 在目标目录打开系统终端；命令会复制到剪贴板。
 func (s *EnvService) OpenTerminal(req TerminalRequest) error {
 	dir := req.Directory
-	if dir == "" {
+	if strings.TrimSpace(dir) == "" {
 		dir = s.rt.Components().Paths.SdkRoot
 	}
-	if !platform.DirExists(dir) {
-		if err := platform.EnsureDir(dir); err != nil {
-			return domain.Err(domain.CodePathNotFound, "目录不存在: "+dir)
-		}
+	if strings.TrimSpace(dir) == "" {
+		return domain.Err(domain.CodeInvalidArgument, "目录为空")
 	}
 	if req.Command != "" {
 		wailsruntime.ClipboardSetText(s.rt.Context(), req.Command)
 	}
-	switch runtime.GOOS {
-	case "windows":
-		wailsruntime.BrowserOpenURL(s.rt.Context(), "cmd://"+dir)
-	default:
-		wailsruntime.BrowserOpenURL(s.rt.Context(), "file://"+filepath.ToSlash(dir))
+	if err := platform.OpenTerminal(dir); err != nil {
+		return domain.Wrap(domain.CodeUnknown, "无法打开终端", err)
 	}
 	return nil
 }

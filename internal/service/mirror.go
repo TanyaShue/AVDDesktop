@@ -33,7 +33,7 @@ func (s *MirrorService) ListSources() []domain.MirrorSource {
 			sources[i].Grade = mirror.GradeFromResult(r)
 		}
 	}
-	return sources
+	return domain.NonNil(sources)
 }
 
 // AddSourceRequest 是新增自定义源的请求。
@@ -197,7 +197,7 @@ func (s *MirrorService) ProbeSource(id string) (*domain.SpeedResult, error) {
 
 // GetCachedResults 返回缓存的测速结果。
 func (s *MirrorService) GetCachedResults() []domain.SpeedResult {
-	return s.rt.engine.Cached()
+	return domain.NonNil(s.rt.engine.Cached())
 }
 
 // CancelTest 取消测速任务。

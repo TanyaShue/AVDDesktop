@@ -265,7 +265,7 @@ type JobService struct{ rt *Runtime }
 func NewJobService(rt *Runtime) *JobService { return &JobService{rt: rt} }
 
 // List 返回所有任务快照。
-func (s *JobService) List() []domain.JobInfo { return s.rt.jobs.List() }
+func (s *JobService) List() []domain.JobInfo { return domain.NonNil(s.rt.jobs.List()) }
 
 // Get 返回单个任务。
 func (s *JobService) Get(id string) (*domain.JobInfo, error) {
@@ -287,7 +287,7 @@ func (s *JobService) Logs(id string, tail int) ([]domain.LogLine, error) {
 	if tail > 0 && len(logs) > tail {
 		logs = logs[len(logs)-tail:]
 	}
-	return logs, nil
+	return domain.NonNil(logs), nil
 }
 
 // Cancel 取消任务。

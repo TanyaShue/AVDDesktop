@@ -48,10 +48,10 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
             presets: unknown;
           }>,
         ]);
-        setProfiles(p ?? []);
+        setProfiles(api.asArray(p));
         setMeta({ groupOrder: m?.groupOrder ?? [], groupLabels: m?.groupLabels ?? {} });
         const s = (await api.Avd.ListConfigSchema()) as HwConfigItem[];
-        setSchema(s ?? []);
+        setSchema(api.asArray(s));
       } catch (err) {
         onToast("warning", "设备档案加载失败", errorText(err));
       }
@@ -69,8 +69,8 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
           refresh: false,
           onlyInstalled: true,
         })) as SystemImage[];
-        setImages(list ?? []);
-        if (!imagePath && list && list.length > 0) setImagePath(list[0].path);
+        setImages(api.asArray(list));
+        if (!imagePath && list.length > 0) setImagePath(list[0].path);
       } catch (err) {
         onToast("warning", "无法读取已安装镜像", errorText(err));
       }

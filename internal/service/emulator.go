@@ -91,7 +91,7 @@ func (s *EmulatorService) ListRunning() []domain.EmulatorInstance {
 	comp := s.rt.Components()
 	items := comp.Launcher.List()
 	sort.Slice(items, func(i, j int) bool { return items[i].StartedAt > items[j].StartedAt })
-	return items
+	return domain.NonNil(items)
 }
 
 // GetLog 返回实例日志。
@@ -207,7 +207,7 @@ func (s *EmulatorService) Snapshots(avdName string) ([]domain.Snapshot, error) {
 		out = append(out, domain.Snapshot{Name: e.Name(), SizeBytes: size})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
+	return domain.NonNil(out), nil
 }
 
 // DeleteSnapshot 删除快照目录。
@@ -318,7 +318,7 @@ func (s *AdbService) Devices() ([]domain.AdbDevice, error) {
 			devices[i].InstanceID = id
 		}
 	}
-	return devices, nil
+	return domain.NonNil(devices), nil
 }
 
 // InstallApkRequest 是安装 APK 请求。
@@ -521,7 +521,7 @@ func (s *AdbService) LogcatSnapshot(serial, filter string, lines int) ([]string,
 	if err != nil {
 		return nil, err
 	}
-	return platform.SplitLines(out), nil
+	return domain.NonNil(platform.SplitLines(out)), nil
 }
 
 // detectLogLevel 根据 logcat 行内容粗略判断级别（用于 UI 着色）。

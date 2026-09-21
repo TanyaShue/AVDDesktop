@@ -3,8 +3,10 @@ import type { domain, service } from "../../wailsjs/go/models";
 
 export type { domain, service };
 
-export type EnvReport = domain.EnvReport;
-export type ToolStatus = domain.ToolStatus;
+// 注意：Wails 生成的 class 带实例方法 convertValues（只用于“发送”请求），
+// 前端消费的响应对象是纯数据，这里去掉该方法，便于用普通对象字面量构造/归一化。
+export type EnvReport = Omit<domain.EnvReport, "convertValues">;
+export type ToolStatus = Omit<domain.ToolStatus, "convertValues">;
 export type AccelInfo = domain.AccelInfo;
 export type DiskInfo = domain.DiskInfo;
 export type AvdHomeInfo = domain.AvdHomeInfo;

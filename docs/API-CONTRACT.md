@@ -71,11 +71,17 @@ func (s *EnvService) ValidateSdkRoot(path string) (*domain.SdkRootValidation, er
 // 宿主交互
 func (s *EnvService) PickDirectory(req PickRequest) (string, error)    // 原生目录选择框
 func (s *EnvService) PickFile(req PickRequest) (string, error)
-func (s *EnvService) OpenInExplorer(path string) error
+func (s *EnvService) OpenInExplorer(path string) error                 // 目录直接打开、文件打开所在目录并选中
 func (s *EnvService) OpenExternalURL(url string) error
 func (s *EnvService) CopyToClipboard(text string) error
 func (s *EnvService) OpenTerminal(req TerminalRequest) error           // 在 SDK/AVD 目录打开 cmd/pwsh
 ```
+
+> ⚠️ 宿主目录/终端的打开必须走 `internal/platform`（Windows 用 `explorer.exe` / `ShellExecute`，
+> macOS 用 `open`，Linux 用 `xdg-open`）。**不要**用 `wailsruntime.BrowserOpenURL` 拼 `file://`
+> URL：Wails v2.16 的 `ValidateAndSanitizeURL` 会拒绝 `file` 方案以及含空格/反斜杠的路径，
+> 而 `BrowserOpenURL` 没有返回值 —— 失败只写进 Wails 日志，界面上就是“点了没反应”。
+> 路径不存在时退到最近的已存在父目录（不报错、也不创建目录），失败原因通过返回值交给 UI 弹 toast。
 
 ```ts
 interface EnvReport {

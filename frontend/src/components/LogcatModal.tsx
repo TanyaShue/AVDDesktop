@@ -104,16 +104,16 @@ export function LogcatModal({ serial, avdName, onClose, onToast }: Props) {
 
   const snapshot = async () => {
     try {
-      const out = (await api.Adb.LogcatSnapshot(serial, filter, 300)) as string[];
+      const out = api.asArray((await api.Adb.LogcatSnapshot(serial, filter, 300)) as string[]);
       setLines(
-        (out ?? []).map((line) => ({
+        out.map((line) => ({
           at: Date.now(),
           level: / [EWF] /.test(line) ? "warn" : "info",
           source: "snapshot",
           message: line,
         })),
       );
-      onToast("success", `已抓取 ${out?.length ?? 0} 行日志快照`);
+      onToast("success", `已抓取 ${out.length} 行日志快照`);
     } catch (err) {
       onToast("danger", "抓取失败", errorText(err));
     }

@@ -247,6 +247,19 @@ AVDDesktop/
      └─ 4) 汇总为 EnvReport：每个组件 {状态, 版本, 路径, 问题, 修复建议, 修复动作}
 ```
 
+**自检时机**
+
+```
+启动 → App 启动推送（强制自检一次）+ 首页首次请求（命中单飞/TTL，不额外扫描）
+切标签页 / 返回首页 → 复用同一份 EnvReport，不再探测
+重新检测按钮 → Detect(force=true)
+sdk:changed（安装/卸载 SDK 包） → Detect(force=true)
+env:changed（后端推送报告） → 直接用推送结果，不重复探测
+```
+
+前端状态由应用壳持有（`frontend/src/hooks/useEnvCheck.ts`）：页面按 `page` 条件渲染，
+若把自检放在 `HomePage` 的 `useEffect` 里，每切回一次首页就会重跑一次自检。
+
 **组件状态机**
 
 ```

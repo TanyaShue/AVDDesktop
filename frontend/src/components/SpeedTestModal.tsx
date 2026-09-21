@@ -24,10 +24,10 @@ export function SpeedTestModal({ activeSourceId, onClose, onUseSource, onToast }
   const [newName, setNewName] = useState("");
 
   const load = useCallback(async () => {
-    const list = (await api.Mirror.ListSources()) as MirrorSource[];
-    setSources(list ?? []);
+    const list = api.asArray((await api.Mirror.ListSources()) as MirrorSource[]);
+    setSources(list);
     const map: Record<string, SpeedResult> = {};
-    for (const s of list ?? []) {
+    for (const s of list) {
       if (s.lastResult) map[s.id] = s.lastResult;
     }
     setResults(map);

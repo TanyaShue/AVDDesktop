@@ -209,6 +209,9 @@ func (d *Detector) scan(ctx context.Context, opts Options) *domain.EnvReport {
 	// 跨组件关联分析：加速引导、镜像与模拟器版本兼容性、长路径、运行中实例
 	report.Issues = buildIssues(report, images, opts)
 
+	// JSON 契约：数组字段即使为空也必须是 []（nil 切片会序列化成 null，前端 .length 会抛异常）
+	NormalizeReport(report)
+
 	// 逐个组件写日志：正常项用 debug，异常项用 warn，便于用户按级别排查
 	for _, c := range items {
 		fields := fmt.Sprintf("state=%s version=%q path=%q", c.State, c.Version, c.Path)
@@ -232,6 +235,18 @@ func (d *Detector) scan(ctx context.Context, opts Options) *domain.EnvReport {
 		}
 	}
 	return report
+}
+
+// NormalizeReport 保证报告里的数组字段是数组而不是 null（docs/API-CONTRACT.md）。
+//
+// Go 的 nil 切片会被 encoding/json 序列化成 null，而前端 `.length` / `.map(...)`
+// 会直接抛异常、React 卸载整棵树（表现为整窗白屏）。带 omitempty 的字段
+// （issues / hints / acceptedLicenses）为空时会被直接省略，前端按可选处理，
+// 因此这里只处理必须出现的三个数组字段。
+func NormalizeReport(report *domain.EnvReport) {
+	report.Components = domain.NonNil(report.Components)
+	report.Blockers = domain.NonNil(report.Blockers)
+	report.Disks = domain.NonNil(report.Disks)
 }
 
 // ---------------------------------------------------------------- 各组件探测

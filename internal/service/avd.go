@@ -40,7 +40,7 @@ func (s *AvdService) List() ([]domain.AvdSummary, error) {
 		}
 	}
 	// 把快照中已停止但仍在列表里的实例状态补齐
-	return items, nil
+	return domain.NonNil(items), nil
 }
 
 // Get 返回设备详情。
@@ -72,7 +72,7 @@ func (s *AvdService) ListProfiles(refresh bool) ([]domain.DeviceProfile, error) 
 		}
 		return profiles[i].Name < profiles[j].Name
 	})
-	return profiles, nil
+	return domain.NonNil(profiles), nil
 }
 
 // ListConfigSchema 返回 config.ini 配置项 schema（UI 动态渲染表单）。

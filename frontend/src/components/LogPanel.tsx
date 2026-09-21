@@ -114,7 +114,18 @@ export function LogPanel({ onToast }: Props) {
         <button className="btn btn--ghost" onClick={copyAll}>
           复制
         </button>
-        <button className="btn btn--ghost" onClick={() => void api.Diagnostics.OpenLogFolder()}>
+        <button
+          className="btn btn--ghost"
+          onClick={() =>
+            void (async () => {
+              try {
+                await api.Diagnostics.OpenLogFolder();
+              } catch (err) {
+                onToast("danger", "打开日志目录失败", errorText(err));
+              }
+            })()
+          }
+        >
           打开日志目录
         </button>
       </div>

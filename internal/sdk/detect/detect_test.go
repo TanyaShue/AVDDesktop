@@ -2,8 +2,11 @@ package detect
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
+
+	"AVDDesktop/internal/domain"
 )
 
 // TestDetectLive 在真实机器上执行一次完整自检（需要网络/外部进程，short 模式跳过）。
@@ -52,6 +55,30 @@ func TestDetectLive(t *testing.T) {
 	}
 	if len(report.Components) < 6 {
 		t.Errorf("组件数量异常: %d", len(report.Components))
+	}
+}
+
+// TestNormalizeReportJSONArrays 锁定“空数组必须序列化成 [] 而不是 null”的契约。
+//
+// 真实事故：健康环境（无阻塞项）下 EnvReport.Blockers 是 nil 切片，JSON 里成了 null，
+// 前端 `report.blockers.length` 直接抛异常 → React 卸载整棵树 → 首页整窗白屏。
+func TestNormalizeReportJSONArrays(t *testing.T) {
+	report := &domain.EnvReport{} // 零值：所有数组字段都是 nil 切片
+	NormalizeReport(report)
+
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("序列化报告失败: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("反序列化报告失败: %v", err)
+	}
+	for _, key := range []string{"components", "blockers", "disks"} {
+		if _, ok := decoded[key].([]any); !ok {
+			t.Errorf("%s 的 JSON 值是 %#v；契约要求空数组输出 []（null 会让前端 .length 抛异常）",
+				key, decoded[key])
+		}
 	}
 }
 

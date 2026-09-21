@@ -33,7 +33,7 @@ type ListRemoteRequest struct {
 // ListInstalled 返回本地已安装包。
 func (s *SdkService) ListInstalled() []domain.SdkPackage {
 	scanner := query.NewScanner(s.rt.Components().Paths.SdkRoot)
-	return scanner.Installed()
+	return domain.NonNil(scanner.Installed())
 }
 
 // ListRemote 返回远程可安装包（合并已安装状态）。
@@ -90,7 +90,7 @@ func (s *SdkService) ListRemote(req ListRemoteRequest) ([]domain.SdkPackage, err
 			})
 		}
 	}
-	return out, nil
+	return domain.NonNil(out), nil
 }
 
 // ListSystemImagesRequest 是系统镜像列表请求。
@@ -125,7 +125,7 @@ func (s *SdkService) SystemImageTags(req ListRemoteRequest) []SysImgTagAvailabil
 		}
 		out = append(out, item)
 	}
-	return out
+	return domain.NonNil(out)
 }
 
 // ListSystemImages 返回系统镜像包（远程 + 本地状态）。
@@ -189,7 +189,7 @@ func (s *SdkService) ListSystemImages(req ListSystemImagesRequest) ([]domain.Sys
 	if len(out) == 0 && lastErr != nil {
 		return nil, lastErr
 	}
-	return out, nil
+	return domain.NonNil(out), nil
 }
 
 // ListLicenses 返回指定包的许可（含是否已接受）。
@@ -222,7 +222,7 @@ func (s *SdkService) ListLicenses(packages []string) ([]domain.License, error) {
 			Accepted: licenses.IsAccepted(comp.Paths.Licenses, ref),
 		})
 	}
-	return out, nil
+	return domain.NonNil(out), nil
 }
 
 // AcceptLicenses 接受指定许可并记录到设置。

@@ -24,9 +24,9 @@ export function DevicesPage({ onToast }: Props) {
 
   const load = useCallback(async () => {
     try {
-      const list = (await api.Avd.List()) as AvdSummary[];
-      setDevices(list ?? []);
-      setInstances((await api.Emulator.ListRunning()) as EmulatorInstance[]);
+      const list = api.asArray((await api.Avd.List()) as AvdSummary[]);
+      setDevices(list);
+      setInstances(api.asArray((await api.Emulator.ListRunning()) as EmulatorInstance[]));
     } catch (err) {
       onToast("danger", "无法读取设备列表", errorText(err));
     }
@@ -65,6 +65,15 @@ export function DevicesPage({ onToast }: Props) {
       }
     });
   }, [devices, query, sortBy]);
+
+  /** 在文件管理器中打开设备目录（失败必须让用户看到，而不是“点了没反应”）。 */
+  const openFolder = async (device: AvdSummary) => {
+    try {
+      await api.Avd.OpenFolder(device.name);
+    } catch (err) {
+      onToast("danger", "打开目录失败", errorText(err));
+    }
+  };
 
   const startDevice = async (device: AvdSummary, options?: LaunchOptions) => {
     setBusyName(device.name);
@@ -365,7 +374,7 @@ export function DevicesPage({ onToast }: Props) {
                           ) : null}
                           <MenuItem
                             label="打开目录"
-                            onClick={() => void api.Avd.OpenFolder(device.name)}
+                            onClick={() => void openFolder(device)}
                           />
                           <MenuItem
                             label="复制启动命令"
