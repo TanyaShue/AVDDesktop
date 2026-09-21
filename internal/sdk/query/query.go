@@ -111,6 +111,13 @@ func ImageFromPackage(p domain.SdkPackage) domain.SystemImage {
 	if len(parts) >= 4 {
 		img.ABI = parts[3]
 	}
+	// Pkg.Dependencies 形如 emulator#35.4.9：用于“该镜像要求的最低模拟器版本”
+	for _, dep := range p.Dependencies {
+		kv := strings.SplitN(dep, "#", 2)
+		if len(kv) == 2 && kv[0] == "emulator" {
+			img.RequiresEmulator = kv[1]
+		}
+	}
 	return img
 }
 
@@ -160,10 +167,30 @@ func toPackage(pkgPath string, props map[string]string, dir string) domain.SdkPa
 		Revision:          rev,
 		InstalledRevision: rev,
 		Installed:         true,
-		SizeBytes:         platform.DirSize(dir),
+		SizeBytes:         platform.DirSizeCached(dir),
 		URL:               dir,
 		Channel:           props["Pkg.Channel"],
+		Dependencies:      splitDependencies(props["Pkg.Dependencies"]),
 	}
+}
+
+// RefreshDirSizeCache 在安装/卸载后清除包目录的大小缓存。
+func RefreshDirSizeCache(path string) { platform.InvalidateDirSize(path) }
+
+// splitDependencies 解析 `Pkg.Dependencies=emulator#35.4.9` 这类声明（逗号分隔）。
+func splitDependencies(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // readProps 读取目录下的 source.properties。

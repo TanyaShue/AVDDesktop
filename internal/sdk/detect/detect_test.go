@@ -27,13 +27,22 @@ func TestDetectLive(t *testing.T) {
 	t.Logf("AVD 目录 : %s（来源：%s，%d 个设备，可写=%v）",
 		report.AvdHome.Path, report.AvdHome.Source, report.AvdHome.Count, report.AvdHome.Writable)
 	t.Logf("硬件加速 : available=%v kind=%s", report.Accel.Available, report.Accel.Kind)
+	if w := report.Windows; w != nil {
+		t.Logf("Windows  : %s build=%s hypervisor=%v 固件虚拟化=%v SLAT=%v 长路径=%v HV服务=%v VMCompute=%v source=%s",
+			w.Caption, w.Build, w.HypervisorPresent, w.VirtFirmware, w.SLAT, w.LongPathsEnabled,
+			w.HyperVHostService, w.VMComputeService, w.Source)
+	}
 	for _, d := range report.Disks {
 		t.Logf("磁盘     : %s 剩余 %d GB / 共 %d GB", d.Path, d.FreeGB, d.TotalGB)
 	}
 	for _, c := range report.Components {
-		t.Logf("  [%-13s] %-8s %-12s %s", c.ID, c.State, c.Version, c.Name)
+		t.Logf("  [%-17s] %-8s %-12s %s", c.ID, c.State, c.Version, c.Name)
 	}
-	t.Logf("ready=%v 阻塞项=%d", report.Ready, len(report.Blockers))
+	for _, issue := range report.Issues {
+		t.Logf("  问题[%s] %s：%s｜修复=%s %s", issue.Severity, issue.Title, issue.Detail, issue.FixLabel, issue.FixCommand)
+	}
+	t.Logf("已接受许可 %d 项，运行中实例 %d 个", len(report.AcceptedLicenses), report.RunningInstances)
+	t.Logf("ready=%v 阻塞项=%d 问题=%d 耗时=%dms", report.Ready, len(report.Blockers), len(report.Issues), report.ScanMs)
 
 	if report.SdkRoot == "" {
 		t.Error("未能解析出 SDK 根目录")

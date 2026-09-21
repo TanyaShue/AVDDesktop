@@ -613,6 +613,74 @@ export namespace domain {
 	        this.ramMB = source["ramMB"];
 	    }
 	}
+	export class EnvIssue {
+	    id: string;
+	    severity: string;
+	    title: string;
+	    detail: string;
+	    fixLabel?: string;
+	    fixCommand?: string;
+	    fixKind?: string;
+	    fixPayload?: string;
+	    docsUrl?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new EnvIssue(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.severity = source["severity"];
+	        this.title = source["title"];
+	        this.detail = source["detail"];
+	        this.fixLabel = source["fixLabel"];
+	        this.fixCommand = source["fixCommand"];
+	        this.fixKind = source["fixKind"];
+	        this.fixPayload = source["fixPayload"];
+	        this.docsUrl = source["docsUrl"];
+	    }
+	}
+	export class WindowsInfo {
+	    available: boolean;
+	    hypervisorPresent: boolean;
+	    virtualizationFirmwareEnabled: boolean;
+	    slat: boolean;
+	    vmmMonitor: boolean;
+	    longPathsEnabled: boolean;
+	    hyperVHostService: boolean;
+	    vmComputeService: boolean;
+	    cpu?: string;
+	    productName?: string;
+	    caption?: string;
+	    version?: string;
+	    build?: string;
+	    source?: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WindowsInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.hypervisorPresent = source["hypervisorPresent"];
+	        this.virtualizationFirmwareEnabled = source["virtualizationFirmwareEnabled"];
+	        this.slat = source["slat"];
+	        this.vmmMonitor = source["vmmMonitor"];
+	        this.longPathsEnabled = source["longPathsEnabled"];
+	        this.hyperVHostService = source["hyperVHostService"];
+	        this.vmComputeService = source["vmComputeService"];
+	        this.cpu = source["cpu"];
+	        this.productName = source["productName"];
+	        this.caption = source["caption"];
+	        this.version = source["version"];
+	        this.build = source["build"];
+	        this.source = source["source"];
+	        this.error = source["error"];
+	    }
+	}
 	export class HostInfo {
 	    os: string;
 	    arch: string;
@@ -657,6 +725,8 @@ export namespace domain {
 	    kind: string;
 	    label: string;
 	    payload?: string;
+	    command?: string;
+	    docsUrl?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ToolFix(source);
@@ -667,6 +737,8 @@ export namespace domain {
 	        this.kind = source["kind"];
 	        this.label = source["label"];
 	        this.payload = source["payload"];
+	        this.command = source["command"];
+	        this.docsUrl = source["docsUrl"];
 	    }
 	}
 	export class ToolStatus {
@@ -725,6 +797,11 @@ export namespace domain {
 	    ready: boolean;
 	    blockers: ToolStatus[];
 	    scannedAt: number;
+	    windows?: WindowsInfo;
+	    issues?: EnvIssue[];
+	    runningInstances: number;
+	    acceptedLicenses?: string[];
+	    scanMs: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new EnvReport(source);
@@ -743,6 +820,11 @@ export namespace domain {
 	        this.ready = source["ready"];
 	        this.blockers = this.convertValues(source["blockers"], ToolStatus);
 	        this.scannedAt = source["scannedAt"];
+	        this.windows = this.convertValues(source["windows"], WindowsInfo);
+	        this.issues = this.convertValues(source["issues"], EnvIssue);
+	        this.runningInstances = source["runningInstances"];
+	        this.acceptedLicenses = source["acceptedLicenses"];
+	        this.scanMs = source["scanMs"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -838,6 +920,7 @@ export namespace domain {
 	        this.logsPath = source["logsPath"];
 	    }
 	}
+	
 	
 	
 	export class HwConfigItem {

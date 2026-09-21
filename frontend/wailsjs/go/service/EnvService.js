@@ -26,6 +26,10 @@ export function DiskSpace(arg1) {
   return window['go']['service']['EnvService']['DiskSpace'](arg1);
 }
 
+export function EnabledWindowsFeatures() {
+  return window['go']['service']['EnvService']['EnabledWindowsFeatures']();
+}
+
 export function HostInfo() {
   return window['go']['service']['EnvService']['HostInfo']();
 }

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import * as api from "../bridge/api";
 import { EVENTS, errorText } from "../bridge/api";
-import type { EnvReport, MirrorSource, ToolState, ToolStatus } from "../bridge/types";
+import type { EnvIssue, EnvReport, MirrorSource, ToolState, ToolStatus, WindowsInfo } from "../bridge/types";
 import { useWailsEvent } from "../hooks/useApp";
 import { SpeedTestModal } from "../components/SpeedTestModal";
 import { Progress, stateChip, stateTone } from "../components/ui";
@@ -141,6 +141,45 @@ export function HomePage({ onToast, onGotoDevices }: Props) {
     }
   };
 
+  /** 处理问题清单里的“修复”动作（与组件卡片的 fix 同源）。 */
+  const applyIssueFix = async (issue: EnvIssue) => {
+    if (issue.fixCommand) {
+      await api.Env.CopyToClipboard(issue.fixCommand);
+      onToast("success", "命令已复制", "请在管理员终端中执行，必要时重启电脑");
+      return;
+    }
+    switch (issue.fixKind) {
+      case "update":
+      case "install": {
+        if (!source) {
+          setShowSpeedTest(true);
+          return;
+        }
+        try {
+          const id = await api.Sdk.Install({
+            packages: issue.fixPayload ? [issue.fixPayload] : [],
+            sourceId: source.id,
+            allowFallbackToOfficial: true,
+            autoAcceptLicenses: true,
+          });
+          onToast("info", "已开始安装", `任务 ${id}`);
+        } catch (err) {
+          onToast("danger", "无法启动安装", errorText(err));
+        }
+        return;
+      }
+      case "downloadImage":
+        onToast("info", "请在 SDK 页面选择镜像", "推荐 Google APIs（可 root，体积适中）");
+        return;
+      default:
+        if (issue.docsUrl) {
+          await api.Env.OpenExternalURL(issue.docsUrl);
+        } else {
+          onGotoDevices();
+        }
+    }
+  };
+
   return (
     <div className="page">
       <div className="pageheader">
@@ -178,6 +217,38 @@ export function HomePage({ onToast, onGotoDevices }: Props) {
           </div>
         ) : (
           <>
+            {report && report.issues && report.issues.length > 0 ? (
+              <IssuesPanel issues={report.issues} onFix={(issue) => void applyIssueFix(issue)} />
+            ) : null}
+
+            {report?.windows?.available ? (
+              <div className="section">
+                <div className="section__title">系统环境</div>
+                <div className="card" style={{ padding: 16 }}>
+                  <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+                    <span className="chip">{report.windows.caption || "Windows"}</span>
+                    {report.windows.build ? <span className="chip">Build {report.windows.build}</span> : null}
+                    <span className={`chip${report.windows.hypervisorPresent ? " chip--success" : ""}`}>
+                      虚拟机监控程序：{report.windows.hypervisorPresent ? "运行中" : "未运行"}
+                    </span>
+                    <span className={`chip${report.windows.longPathsEnabled ? " chip--success" : " chip--warning"}`}>
+                      长路径支持：{report.windows.longPathsEnabled ? "已开启" : "未开启"}
+                    </span>
+                    {report.windows.hyperVHostService ? <span className="chip chip--sm">HvHost 服务</span> : null}
+                    {report.windows.vmComputeService ? <span className="chip chip--sm">vmcompute 服务</span> : null}
+                  </div>
+                  {report.windows.cpu ? (
+                    <div className="muted" style={{ marginTop: 10 }}>
+                      CPU：{report.windows.cpu}
+                    </div>
+                  ) : null}
+                  <div className="muted" style={{ marginTop: 4 }}>
+                    {explainVirtualization(report.windows)}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             {report && report.blockers.length > 0 ? (
               <div className="banner">
                 <span className="banner__icon" aria-hidden>
@@ -211,6 +282,7 @@ export function HomePage({ onToast, onGotoDevices }: Props) {
                   <div className="banner__text">
                     已安装 {report.components.find((c) => c.id === "system-images")?.version ?? "0 个"}系统镜像，
                     硬件加速 {report.accel.available ? `可用（${report.accel.kind.toUpperCase()}）` : "不可用（启动会较慢）"}
+                    {report.runningInstances > 0 ? `，${report.runningInstances} 个实例运行中` : ""}
                   </div>
                 </div>
                 <button className="btn btn--secondary" onClick={onGotoDevices}>
@@ -278,6 +350,95 @@ export function HomePage({ onToast, onGotoDevices }: Props) {
       ) : null}
     </div>
   );
+}
+
+function explainVirtualization(w: WindowsInfo): string {
+  if (w.hypervisorPresent) {
+    return "机器上已有虚拟机监控程序在运行（Hyper-V / WHPX / VBS 之一）。" +
+      "注意：这种状态下“固件虚拟化”会报未开启，属于正常现象 —— hypervisor 已接管 CPU 能力。";
+  }
+  if (w.virtualizationFirmwareEnabled || w.vmmMonitor) {
+    return "CPU 支持虚拟化，但当前没有 hypervisor 运行。启用 Windows 虚拟机监控程序平台后模拟器会明显更快。";
+  }
+  return "未检测到 CPU 虚拟化能力：请先在 BIOS/UEFI 中开启 VT-x（Intel）或 SVM/AMD-V（AMD）。";
+}
+
+/** 问题清单：严重程度排序 + 可复制修复命令。 */
+function IssuesPanel({ issues, onFix }: { issues: EnvIssue[]; onFix: (issue: EnvIssue) => void }) {
+  const order: Record<string, number> = { blocker: 0, warning: 1, info: 2 };
+  const sorted = [...issues].sort((a, b) => (order[a.severity] ?? 3) - (order[b.severity] ?? 3));
+  return (
+    <div className="section">
+      <div className="section__title">待处理事项（{issues.length}）</div>
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        {sorted.map((issue, i) => (
+          <div
+            key={issue.id}
+            className="row"
+            style={{
+              padding: "14px 16px",
+              alignItems: "flex-start",
+              gap: 12,
+              borderTop: i === 0 ? "none" : "1px solid var(--border-subtle)",
+            }}
+          >
+            <span className={`chip chip--sm${severityChip(issue.severity)}`} style={{ marginTop: 2 }}>
+              {severityLabel(issue.severity)}
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{issue.title}</div>
+              <div className="muted" style={{ marginTop: 4, lineHeight: "20px" }}>
+                {issue.detail}
+              </div>
+              {issue.fixCommand ? (
+                <div
+                  className="mono"
+                  style={{
+                    marginTop: 8,
+                    padding: "6px 10px",
+                    background: "var(--bg-subtle)",
+                    borderRadius: "var(--r-sm)",
+                    overflowX: "auto",
+                    whiteSpace: "nowrap",
+                  }}
+                  title={issue.fixCommand}
+                >
+                  {issue.fixCommand}
+                </div>
+              ) : null}
+            </div>
+            {issue.fixLabel ? (
+              <button className="btn btn--secondary" onClick={() => onFix(issue)}>
+                {issue.fixLabel}
+              </button>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function severityChip(severity: string): string {
+  switch (severity) {
+    case "blocker":
+      return " chip--danger";
+    case "warning":
+      return " chip--warning";
+    default:
+      return "";
+  }
+}
+
+function severityLabel(severity: string): string {
+  switch (severity) {
+    case "blocker":
+      return "阻塞";
+    case "warning":
+      return "建议";
+    default:
+      return "提示";
+  }
 }
 
 function ToolCard({ tool, busy, onFix }: { tool: ToolStatus; busy: boolean; onFix: () => void }) {

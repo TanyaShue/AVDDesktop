@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"AVDDesktop/internal/domain"
@@ -58,7 +59,7 @@ func EnsureDir(path string) error {
 
 // DirSize 递归统计目录大小（用于设备卡片显示占用空间）。
 //
-// 大目录可能较慢，调用方应放入后台任务。
+// 大目录可能较慢，调用方应放入后台任务或使用 DirSizeCached。
 func DirSize(path string) int64 {
 	var total int64
 	_ = filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
@@ -71,6 +72,61 @@ func DirSize(path string) int64 {
 		return nil
 	})
 	return total
+}
+
+// 目录大小缓存：AVD 与系统镜像目录可能上百 MB 到数 GB，
+// 每次刷新都重新遍历会让首页自检耗时数秒。
+type dirSizeEntry struct {
+	size     int64
+	computed time.Time
+}
+
+var (
+	dirSizeMu    sync.Mutex
+	dirSizeCache = map[string]dirSizeEntry{}
+)
+
+// dirSizeTTL 是目录大小缓存的有效期。
+const dirSizeTTL = 10 * time.Minute
+
+// DirSizeCached 返回带缓存的目录大小。
+//
+// 缓存未命中时会真的遍历目录（可能较慢），因此敏感路径请用 ListOptions 跳过。
+func DirSizeCached(path string) int64 {
+	if path == "" {
+		return 0
+	}
+	dirSizeMu.Lock()
+	if entry, ok := dirSizeCache[path]; ok && time.Since(entry.computed) < dirSizeTTL {
+		dirSizeMu.Unlock()
+		return entry.size
+	}
+	dirSizeMu.Unlock()
+
+	size := DirSize(path)
+
+	dirSizeMu.Lock()
+	dirSizeCache[path] = dirSizeEntry{size: size, computed: time.Now()}
+	dirSizeMu.Unlock()
+	return size
+}
+
+// InvalidateDirSize 在目录内容变化（安装/删除/启动）后清除缓存。
+func InvalidateDirSize(path string) {
+	dirSizeMu.Lock()
+	if path == "" {
+		dirSizeCache = map[string]dirSizeEntry{}
+	} else {
+		delete(dirSizeCache, path)
+		// 同时清除其子路径的缓存（例如删除某个包目录）
+		prefix := filepath.Clean(path) + string(filepath.Separator)
+		for key := range dirSizeCache {
+			if strings.HasPrefix(key, prefix) {
+				delete(dirSizeCache, key)
+			}
+		}
+	}
+	dirSizeMu.Unlock()
 }
 
 // DiskSpace 返回指定路径所在卷的总量与剩余空间（GB）。

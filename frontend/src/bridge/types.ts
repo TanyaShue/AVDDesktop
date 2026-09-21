@@ -10,9 +10,12 @@ export type DiskInfo = domain.DiskInfo;
 export type AvdHomeInfo = domain.AvdHomeInfo;
 export type SdkRootCandidate = domain.SdkRootCandidate;
 export type SdkRootValidation = domain.SdkRootValidation;
+export type WindowsInfo = domain.WindowsInfo;
+export type EnvIssue = domain.EnvIssue;
 
 // 以下别名型在 Go 侧是 `type X string`，Wails 会退化为 string，因此在前端显式声明联合类型。
 export type ToolState = "unknown" | "missing" | "present" | "outdated" | "broken" | "incompatible";
+export type IssueSeverity = "info" | "warning" | "blocker";
 export type MirrorGrade = "unknown" | "full" | "index-only" | "invalid" | "unreachable";
 export type AvdState = "stopped" | "starting" | "booting" | "running" | "stopping" | "error";
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";

@@ -22,6 +22,10 @@ const (
 	ToolAcceleration ToolID = "accel"
 	ToolDisk         ToolID = "disk"
 	ToolAvdHome      ToolID = "avd-home"
+	ToolLicenses     ToolID = "licenses"
+	ToolAvdHealth    ToolID = "avd-health"
+	// ToolRunningInstances 报告当前运行中的模拟器实例数（由 service 层注入）。
+	ToolRunningInstances ToolID = "running-instances"
 )
 
 // ToolState 描述组件状态，驱动首页卡片的状态徽标与修复入口。
@@ -56,6 +60,10 @@ type ToolFix struct {
 	Kind    FixKind `json:"kind"`
 	Label   string  `json:"label"`
 	Payload string  `json:"payload,omitempty"`
+	// Command 是可复制到管理员终端的修复命令（例如 dism 开功能）。
+	Command string `json:"command,omitempty"`
+	// DocsURL 是官方文档链接（UI 提供“查看文档”）。
+	DocsURL string `json:"docsUrl,omitempty"`
 }
 
 // ToolStatus 是一个组件的检测结果。
@@ -76,6 +84,50 @@ type AccelInfo struct {
 	Kind      string   `json:"kind"` // whpx | aehd | haxm | gvm | none | unknown
 	Raw       string   `json:"raw"`
 	Hints     []string `json:"hints,omitempty"`
+}
+
+// WindowsInfo 是 Windows 宿主的关键开关（非管理员可读）。
+//
+// 注意：当 HypervisorPresent=true 时，虚拟化能力位（VirtFirmware/SLAT/VMMonitor）
+// 会报 false，这是 hypervisor 已接管 CPU 的正常表现，不代表机器不支持虚拟化。
+type WindowsInfo struct {
+	Available         bool   `json:"available"`
+	HypervisorPresent bool   `json:"hypervisorPresent"`
+	VirtFirmware      bool   `json:"virtualizationFirmwareEnabled"`
+	SLAT              bool   `json:"slat"`
+	VMMonitor         bool   `json:"vmmMonitor"`
+	LongPathsEnabled  bool   `json:"longPathsEnabled"`
+	HyperVHostService bool   `json:"hyperVHostService"`
+	VMComputeService  bool   `json:"vmComputeService"`
+	CPU               string `json:"cpu,omitempty"`
+	ProductName       string `json:"productName,omitempty"`
+	Caption           string `json:"caption,omitempty"`
+	Version           string `json:"version,omitempty"`
+	Build             string `json:"build,omitempty"`
+	Source            string `json:"source,omitempty"`
+	Error             string `json:"error,omitempty"`
+}
+
+// IssueSeverity 是环境问题的严重程度。
+type IssueSeverity string
+
+const (
+	SeverityInfo    IssueSeverity = "info"
+	SeverityWarning IssueSeverity = "warning"
+	SeverityBlocker IssueSeverity = "blocker"
+)
+
+// EnvIssue 是一条可操作的环境问题（比 ToolStatus 更聚焦于“怎么修”）。
+type EnvIssue struct {
+	ID         string        `json:"id"`
+	Severity   IssueSeverity `json:"severity"`
+	Title      string        `json:"title"`
+	Detail     string        `json:"detail"`
+	FixLabel   string        `json:"fixLabel,omitempty"`
+	FixCommand string        `json:"fixCommand,omitempty"`
+	FixKind    FixKind       `json:"fixKind,omitempty"`
+	FixPayload string        `json:"fixPayload,omitempty"`
+	DocsURL    string        `json:"docsUrl,omitempty"`
 }
 
 // DiskInfo 描述一个分区/目录所在磁盘的空间。
@@ -140,6 +192,13 @@ type EnvReport struct {
 	Ready         bool         `json:"ready"`
 	Blockers      []ToolStatus `json:"blockers"`
 	ScannedAt     int64        `json:"scannedAt"`
+
+	// 新增：Windows 开关、可操作问题清单、运行中实例数
+	Windows          *WindowsInfo `json:"windows,omitempty"`
+	Issues           []EnvIssue   `json:"issues,omitempty"`
+	RunningInstances int          `json:"runningInstances"`
+	AcceptedLicenses []string     `json:"acceptedLicenses,omitempty"`
+	ScanMs           int64        `json:"scanMs"`
 }
 
 // ---------------------------------------------------------------- 镜像与测速

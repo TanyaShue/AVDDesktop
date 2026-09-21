@@ -15,6 +15,8 @@ export function DetectSdkRoots():Promise<Array<domain.SdkRootCandidate>>;
 
 export function DiskSpace(arg1:string):Promise<domain.DiskInfo>;
 
+export function EnabledWindowsFeatures():Promise<domain.WindowsInfo>;
+
 export function HostInfo():Promise<Record<string, string>>;
 
 export function OpenExternalURL(arg1:string):Promise<void>;

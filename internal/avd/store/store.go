@@ -38,6 +38,13 @@ type Store struct {
 	SdkRoot string
 }
 
+// ListOptions 控制列表扫描的成本。
+//
+// WithSize 为 false 时跳过目录大小统计（遍历数 GB 的 AVD 数据目录非常慢）。
+type ListOptions struct {
+	WithSize bool
+}
+
 // New 创建 Store。
 func New(avdHome string) *Store { return &Store{AvdHome: avdHome} }
 
@@ -89,8 +96,15 @@ func (s *Store) Resolve(name string) Layout {
 	}
 }
 
-// List 扫描 AVD 主目录，返回所有设备摘要。
+// List 扫描 AVD 主目录，返回所有设备摘要（含占用空间统计）。
 func (s *Store) List() ([]domain.AvdSummary, error) {
+	return s.ListWith(ListOptions{WithSize: true})
+}
+
+// ListWith 按指定选项扫描 AVD 主目录。
+//
+// 环境自检等“快路径”应传 WithSize=false。
+func (s *Store) ListWith(opts ListOptions) ([]domain.AvdSummary, error) {
 	entries, err := os.ReadDir(s.AvdHome)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -104,7 +118,7 @@ func (s *Store) List() ([]domain.AvdSummary, error) {
 			continue
 		}
 		name := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
-		summary, err := s.Summary(name)
+		summary, err := s.SummaryWith(name, opts)
 		if err != nil {
 			// 单个 AVD 损坏不影响其它设备展示
 			out = append(out, domain.AvdSummary{
@@ -137,8 +151,13 @@ func (s *Store) Exists(name string) bool {
 	return platform.DirExists(l.Dir) || platform.FileExists(l.IniPath)
 }
 
-// Summary 读取单个 AVD 的摘要信息。
+// Summary 读取单个 AVD 的摘要信息（含占用空间统计）。
 func (s *Store) Summary(name string) (domain.AvdSummary, error) {
+	return s.SummaryWith(name, ListOptions{WithSize: true})
+}
+
+// SummaryWith 按指定选项读取单个 AVD 的摘要。
+func (s *Store) SummaryWith(name string, opts ListOptions) (domain.AvdSummary, error) {
 	l := s.Resolve(name)
 	if !l.Exists {
 		return domain.AvdSummary{}, domain.Err(domain.CodeAvdNotFound, "设备不存在: "+name)
@@ -172,7 +191,9 @@ func (s *Store) Summary(name string) (domain.AvdSummary, error) {
 		GPUMode:           config["hw.gpu.mode"],
 		Playstore:         eqYes(getCI(config, "PlayStore.enabled")),
 		State:             domain.AvdStopped,
-		SizeBytes:         platform.DirSize(l.Dir),
+	}
+	if opts.WithSize {
+		sum.SizeBytes = platform.DirSizeCached(l.Dir)
 	}
 	if meta != nil {
 		sum.CreatedAt = meta.CreatedAt

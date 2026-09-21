@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -8,6 +9,7 @@ import (
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"AVDDesktop/internal/avd/store"
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/platform"
 	"AVDDesktop/internal/sdk/detect"
@@ -35,12 +37,82 @@ func (s *EnvService) Detect(req DetectRequest) (*domain.EnvReport, error) {
 	if sdkRoot == "" {
 		sdkRoot = settings.SdkRoot
 	}
-	return s.rt.detector.Detect(s.rt.Context(), detect.Options{
-		SdkRootOverride: sdkRoot,
-		JdkPathOverride: settings.JdkPath,
-		AvdHomeOverride: settings.AvdHome,
-		InjectEnv:       settings.InjectEnvForChild,
+
+	comp := s.rt.Components()
+	report, err := s.rt.detector.Detect(s.rt.Context(), detect.Options{
+		SdkRootOverride:  sdkRoot,
+		JdkPathOverride:  settings.JdkPath,
+		AvdHomeOverride:  settings.AvdHome,
+		InjectEnv:        settings.InjectEnvForChild,
+		RunningInstances: s.runningInstanceCount(),
+		AvdIssues:        s.avdHealthIssues(comp),
 	})
+	if err != nil {
+		return nil, err
+	}
+	return report, nil
+}
+
+// runningInstanceCount 统计处于活动状态的实例数。
+func (s *EnvService) runningInstanceCount() int {
+	count := 0
+	for _, inst := range s.rt.Components().Launcher.List() {
+		switch inst.State {
+		case domain.AvdStarting, domain.AvdBooting, domain.AvdRunning, domain.AvdStopping:
+			count++
+		}
+	}
+	return count
+}
+
+// avdHealthIssues 汇总设备配置问题（损坏配置、缺失镜像、.ini 缺失等）。
+//
+// 使用 WithSize=false 的快路径：遍历数 GB 的设备数据目录会让自检变慢数秒。
+func (s *EnvService) avdHealthIssues(comp *components) []string {
+	items, err := comp.Store.ListWith(store.ListOptions{WithSize: false})
+	if err != nil || len(items) == 0 {
+		return nil
+	}
+	var issues []string
+	for _, it := range items {
+		if strings.TrimSpace(it.Broken) != "" {
+			issues = append(issues, fmt.Sprintf("%s：%s", it.DisplayName, it.Broken))
+			continue
+		}
+		// 缺少 .ini 的 AVD 在重启后会被工具忽略，属于隐性问题
+		layout := comp.Store.Resolve(it.Name)
+		if layout.Exists && !platform.FileExists(layout.IniPath) {
+			if err := comp.Store.EnsureIni(it.Name); err == nil {
+				s.rt.Log().Warn("avd", "设备 %s 缺少 .ini，已自动补写", it.Name)
+			} else {
+				issues = append(issues, it.DisplayName+"：缺少 .ini 配置文件且无法自动修复")
+			}
+		}
+	}
+	return issues
+}
+
+// EnabledWindowsFeatures 返回 Windows 关键开关（虚拟化/长路径），供加速引导面板使用。
+func (s *EnvService) EnabledWindowsFeatures() (*domain.WindowsInfo, error) {
+	v := platform.VirtualizationInfoCached(s.rt.Context())
+	info := &domain.WindowsInfo{
+		Available:         v.Available,
+		HypervisorPresent: v.HypervisorPresent,
+		VirtFirmware:      v.VirtFirmware,
+		SLAT:              v.SLAT,
+		VMMonitor:         v.VMMonitor,
+		LongPathsEnabled:  v.LongPathsEnabled,
+		HyperVHostService: v.HyperVHostService,
+		VMComputeService:  v.VMComputeService,
+		CPU:               v.CPU,
+		ProductName:       v.ProductName,
+		Caption:           v.Caption,
+		Version:           v.Version,
+		Build:             v.Build,
+		Source:            v.Source,
+		Error:             v.Error,
+	}
+	return info, nil
 }
 
 // DetectSdkRoots 返回候选 SDK 根目录。
@@ -61,6 +133,19 @@ func (s *EnvService) DetectJava() (*domain.ToolStatus, error) {
 func (s *EnvService) CheckAcceleration() (*domain.AccelInfo, error) {
 	comp := s.rt.Components()
 	info := detect.CheckAcceleration(s.rt.Context(), comp.Paths.EmulatorExe, comp.Env)
+	// 用 Windows 开关信息补充“为什么不可用”的可操作建议
+	if !info.Available {
+		win := platform.VirtualizationInfoCached(s.rt.Context())
+		if win.Available && win.HypervisorPresent {
+			info.Hints = append(info.Hints,
+				"检测到机器已有 hypervisor 运行：请确认「Windows 虚拟机监控程序平台」已启用",
+				"开启命令：dism /online /enable-feature /featurename:HypervisorPlatform /all /norestart")
+		}
+		if win.Available && !win.HypervisorPresent && !win.VirtFirmware && !win.VMMonitor {
+			info.Hints = append(info.Hints,
+				"未检测到任何 hypervisor，且 CPU 虚拟化能力未上报：请先在 BIOS/UEFI 中开启 VT-x/AMD-V")
+		}
+	}
 	return &info, nil
 }
 
