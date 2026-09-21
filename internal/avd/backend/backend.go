@@ -22,10 +22,13 @@ import (
 
 // Deps 是创建 AVD 所需的依赖。
 type Deps struct {
-	Paths    platform.InstallPaths
-	Store    *store.Store
-	Env      []string
-	OnOutput func(stream, line string)
+	Paths platform.InstallPaths
+	Store *store.Store
+	Env   []string
+	// EnsureMetadata 确保 SDK 包元数据（<pkg>/package.xml）就绪，返回被补写的包路径。
+	// avdmanager 用它判断 emulator 与系统镜像是否已安装，缺失时会直接失败；nil 表示不修复。
+	EnsureMetadata func(ctx context.Context) []string
+	OnOutput       func(stream, line string)
 }
 
 // CreateResult 是创建结果。
@@ -80,6 +83,18 @@ func (b *AvdManagerBackend) Available() bool {
 // Create 执行 `avdmanager create avd` 并做后处理。
 func (b *AvdManagerBackend) Create(ctx context.Context, spec domain.AvdSpec, deps Deps) (CreateResult, error) {
 	res := CreateResult{Backend: b.Kind()}
+
+	// 前置自愈：avdmanager 要求 emulator 与系统镜像都是"本地已安装包"
+	// （AvdManagerCli.createAvd 用 getLocalPackage 校验 -k 的包路径，读取
+	// hardware-properties.ini 时也要求 emulator 包存在），缺 package.xml 会直接失败：
+	//   - 缺 emulator 元数据 → Error: "emulator" package must be installed!
+	//   - 缺镜像元数据   → Package path is not valid. Valid system image paths are: …
+	if deps.EnsureMetadata != nil && missingSDKMetadata(b.Paths, spec) {
+		if fixed := deps.EnsureMetadata(ctx); len(fixed) > 0 {
+			res.Warnings = append(res.Warnings, "已补写 SDK 包元数据："+strings.Join(fixed, "、"))
+		}
+	}
+
 	args := []string{"create", "avd", "-n", spec.Name, "-k", spec.SystemImagePath}
 	if spec.ProfileID != "" {
 		args = append(args, "-d", spec.ProfileID)
@@ -106,14 +121,40 @@ func (b *AvdManagerBackend) Create(ctx context.Context, spec domain.AvdSpec, dep
 	// avdmanager 成功时也可能返回非 0（例如 warning），以目录是否生成作为最终判据
 	layout := deps.Store.Resolve(spec.Name)
 	if !layout.Exists {
+		detail := runResult.Combined()
+		hint := "请检查系统镜像是否已安装、名称是否合法"
+		emulatorMeta := filepath.Join(b.Paths.Emulator, "package.xml")
+		switch {
+		case strings.Contains(detail, `"emulator" package must be installed`):
+			hint = "SDK 包元数据缺失：avdmanager 通过 " + emulatorMeta +
+				" 判断模拟器包是否安装。请重新创建（应用会自动补写），或到 SDK 页重新安装 emulator 组件"
+		case strings.Contains(detail, "Package path is not valid"):
+			hint = "SDK 包元数据缺失：系统镜像目录里缺少 package.xml（avdmanager 只认本地包元数据）。" +
+				"请重新创建（应用会自动补写），或在 SDK 页重新安装该镜像"
+		}
 		return res, domain.ErrDetail(domain.CodeProcessFailed,
-			"avdmanager 未能创建 AVD", runResult.Combined()).
-			WithHint("请检查系统镜像是否已安装、名称是否合法")
+			"avdmanager 未能创建 AVD", detail).
+			WithHint(hint)
 	}
 	if msg := strings.TrimSpace(runResult.Combined()); msg != "" && runResult.ExitCode != 0 {
 		res.Warnings = append(res.Warnings, "avdmanager 返回退出码 "+itoa(runResult.ExitCode))
 	}
 	return finalize(res, spec, deps)
+}
+
+// missingSDKMetadata 判断 avdmanager 需要的本地包元数据是否缺失。
+//
+// avdmanager 只认 <pkg>/package.xml（不认 source.properties），emulator 与所选系统镜像
+// 任一缺失都会导致创建失败（见 docs/RESEARCH-NOTES.md §10）。
+func missingSDKMetadata(paths platform.InstallPaths, spec domain.AvdSpec) bool {
+	if !platform.FileExists(filepath.Join(paths.Emulator, "package.xml")) {
+		return true
+	}
+	rel, err := SystemImageDir(spec.SystemImagePath)
+	if err != nil {
+		return false // 路径本身有问题，交给 avdmanager 报错
+	}
+	return !platform.FileExists(filepath.Join(paths.SdkRoot, rel, "package.xml"))
 }
 
 // ---------------------------------------------------------------- 直写后端

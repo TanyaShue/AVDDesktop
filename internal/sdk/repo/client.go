@@ -75,10 +75,14 @@ func KnownSysImgTagSet() map[string]SysImgTag {
 }
 
 // Revision 是包版本。
+//
+// Preview 对应索引里的 <preview>N</preview>（预览包，例如 ndk 的 29.0.13113456 rc1）；
+// 写回本地 package.xml 时必须保留，否则官方工具会把它当成正式版本。
 type Revision struct {
-	Major int `xml:"major" json:"major"`
-	Minor int `xml:"minor" json:"minor"`
-	Micro int `xml:"micro" json:"micro"`
+	Major   int `xml:"major" json:"major"`
+	Minor   int `xml:"minor" json:"minor"`
+	Micro   int `xml:"micro" json:"micro"`
+	Preview int `xml:"preview" json:"preview,omitempty"`
 }
 
 // String 返回 "37.2.10" 形式（0 段会被省略）。
@@ -103,8 +107,12 @@ type Archive struct {
 }
 
 // Dependency 是包依赖。
+//
+// 索引里最低版本写在子元素 <min-revision>；而 source.properties 的 Pkg.Dependencies
+// 写成 path="emulator#35.4.9"。两种形式都要能解析（见 localrepo 的依赖解析）。
 type Dependency struct {
-	Path string `xml:"path,attr" json:"path"`
+	Path        string    `xml:"path,attr" json:"path"`
+	MinRevision *Revision `xml:"min-revision" json:"minRevision,omitempty"`
 }
 
 // UsesLicense 是 <uses-license ref="…"/> 子元素。
@@ -127,18 +135,127 @@ type Package struct {
 	Archives     []Archive    `xml:"archives>archive" json:"archives"`
 	Dependencies []Dependency `xml:"dependencies>dependency" json:"dependencies"`
 
-	// 系统镜像专有（type-details）
-	APILevel       string `xml:"type-details>api-level" json:"apiLevel"`
-	ExtensionLevel string `xml:"type-details>extension-level" json:"extensionLevel"`
-	TagID          string `xml:"type-details>tag>id" json:"tagId"`
-	TagDisplay     string `xml:"type-details>tag>display" json:"tagDisplay"`
-	ABI            string `xml:"type-details>abi" json:"abi"`
-	VendorID       string `xml:"type-details>vendor>id" json:"vendorId"`
-	VendorDisplay  string `xml:"type-details>vendor>display" json:"vendorDisplay"`
-	IsBaseSDK      string `xml:"type-details>is-base-sdk" json:"isBaseSdk"`
+	// 专有字段（平台 / 系统镜像 / 附加组件）：不直接映射 XML，而是由 type-details 的
+	// 原始 XML 再解析填入（见 fillTypeDetails）——encoding/xml 不允许同一元素既有
+	// 子路径字段又有自定义 Unmarshaler，而原始 XML 必须保留给本地 package.xml 复用。
+	APILevel       string `xml:"-" json:"apiLevel"`
+	ExtensionLevel string `xml:"-" json:"extensionLevel"`
+	TagID          string `xml:"-" json:"tagId"`
+	TagDisplay     string `xml:"-" json:"tagDisplay"`
+	ABI            string `xml:"-" json:"abi"`
+	VendorID       string `xml:"-" json:"vendorId"`
+	VendorDisplay  string `xml:"-" json:"vendorDisplay"`
+	IsBaseSDK      string `xml:"-" json:"isBaseSdk"`
+
+	// TypeDetails 保留 <type-details> 的原始 XML（含 xsi:type 与子元素）。
+	// 写本地 package.xml 时要原样复用，不能只留解析出的几个字段（见 localrepo）。
+	TypeDetails *RawElement `xml:"type-details" json:"-"`
 
 	// 安装后填充
 	BaseURL string `xml:"-" json:"baseURL"`
+}
+
+// typeDetailsXML 是 type-details 的字段镜像（把保留的原始 XML 再解析为结构化字段）。
+type typeDetailsXML struct {
+	APILevel       string `xml:"api-level"`
+	ExtensionLevel string `xml:"extension-level"`
+	IsBaseSDK      string `xml:"is-base-sdk"`
+	TagID          string `xml:"tag>id"`
+	TagDisplay     string `xml:"tag>display"`
+	ABI            string `xml:"abi"`
+	VendorID       string `xml:"vendor>id"`
+	VendorDisplay  string `xml:"vendor>display"`
+}
+
+// fillTypeDetails 从保留的 type-details 原始 XML 里补齐专有字段。
+func (p *Package) fillTypeDetails() {
+	if p.TypeDetails == nil || strings.TrimSpace(p.TypeDetails.XML) == "" {
+		return
+	}
+	var td typeDetailsXML
+	if err := xml.Unmarshal([]byte(EnsureXSINamespace(p.TypeDetails.XML)), &td); err != nil {
+		return
+	}
+	p.APILevel, p.ExtensionLevel, p.IsBaseSDK = td.APILevel, td.ExtensionLevel, td.IsBaseSDK
+	p.TagID, p.TagDisplay = td.TagID, td.TagDisplay
+	p.ABI, p.VendorID, p.VendorDisplay = td.ABI, td.VendorID, td.VendorDisplay
+}
+
+// EnsureXSINamespace 确保元素自带 xsi 命名空间声明。
+//
+// 索引里的 xsi 前缀声明在根元素上，取出来的独立片段必须自己带上声明，
+// 否则重新解析（或写给官方工具）时前缀无处解析。
+func EnsureXSINamespace(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || strings.Contains(trimmed, "xmlns:xsi") {
+		return trimmed
+	}
+	return strings.Replace(trimmed, "<type-details", `<type-details xmlns:xsi="`+XSINamespace+`"`, 1)
+}
+
+// RawElement 保留任意子元素的原始 XML（属性 + 内容）。
+//
+// 用途：仓库索引的 <type-details xsi:type="generic:genericDetailsType"> 等元素，
+// 官方写入器（sdkmanager / Android Studio）会把它们连同命名空间原样写进本地
+// package.xml。本项目自研安装器必须做同样的事，否则官方工具解析不出包类型。
+type RawElement struct {
+	XML string `json:"xml,omitempty"`
+}
+
+// XSINamespace 是 xsi:type 属性所在的命名空间。
+const XSINamespace = "http://www.w3.org/2001/XMLSchema-instance"
+
+// UnmarshalXML 实现 xml.Unmarshaler：把子元素整体还原为字符串。
+func (r *RawElement) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	var inner struct {
+		Inner string `xml:",innerxml"`
+	}
+	if err := d.DecodeElement(&inner, &start); err != nil {
+		return err
+	}
+	var b strings.Builder
+	b.WriteByte('<')
+	b.WriteString(start.Name.Local)
+	for _, a := range start.Attr {
+		b.WriteByte(' ')
+		b.WriteString(attrName(a.Name))
+		b.WriteString(`="`)
+		b.WriteString(escapeAttr(a.Value))
+		b.WriteByte('"')
+	}
+	body := strings.TrimSpace(inner.Inner)
+	if body == "" {
+		b.WriteString("/>")
+	} else {
+		b.WriteByte('>')
+		b.WriteString(body)
+		b.WriteString("</")
+		b.WriteString(start.Name.Local)
+		b.WriteByte('>')
+	}
+	r.XML = b.String()
+	return nil
+}
+
+// attrName 还原属性的书写形式（命名空间声明与 xsi: 前缀要保留前缀，否则无法解析）。
+func attrName(n xml.Name) string {
+	switch {
+	case n.Space == "xmlns":
+		return "xmlns:" + n.Local
+	case n.Space == "" && n.Local == "xmlns":
+		return "xmlns"
+	case n.Space == XSINamespace:
+		return "xsi:" + n.Local
+	default:
+		return n.Local
+	}
+}
+
+// escapeAttr 转义属性值（与 encoding/xml 的转义规则一致）。
+func escapeAttr(s string) string {
+	var b strings.Builder
+	_ = xml.EscapeText(&b, []byte(s))
+	return b.String()
 }
 
 // LicenseID 返回该包声明的许可 id（例如 android-sdk-license）。
@@ -232,6 +349,7 @@ type indexXML struct {
 	// 不限定根元素名：repository2-3.xml 的根是 sdk-repository，
 	// 而 sys-img2-3.xml 的根是 sdk-sys-img（实测）。
 	XMLName        xml.Name    `xml:""`
+	RootAttrs      []xml.Attr  `xml:",any,attr"`
 	Licenses       []License   `xml:"license"`
 	RemotePackages []Package   `xml:"remotePackage"`
 	Channels       []channelXM `xml:"channel"`
@@ -249,7 +367,10 @@ type Index struct {
 	FetchedAt int64
 	Licenses  map[string]License
 	Packages  []Package
-	byPath    map[string]int
+	// Namespaces 是索引根元素上的 xmlns 声明（前缀 → URI）。
+	// 写本地 package.xml 时用它把 type-details 里的前缀改写成官方固定前缀。
+	Namespaces map[string]string
+	byPath     map[string]int
 }
 
 // Build 建立路径索引（解析后必须调用）。
@@ -302,18 +423,45 @@ func ParseIndex(data []byte, sourceURL string) (*Index, error) {
 			"仓库索引中没有可用包（该地址可能只是普通网页或镜像不完整）", sourceURL)
 	}
 	idx := &Index{
-		SourceURL: sourceURL,
-		BaseURL:   dirOf(sourceURL),
-		RootName:  raw.XMLName.Local,
-		FetchedAt: time.Now().UnixMilli(),
-		Licenses:  make(map[string]License, len(raw.Licenses)),
-		Packages:  raw.RemotePackages,
+		SourceURL:  sourceURL,
+		BaseURL:    dirOf(sourceURL),
+		RootName:   raw.XMLName.Local,
+		FetchedAt:  time.Now().UnixMilli(),
+		Licenses:   make(map[string]License, len(raw.Licenses)),
+		Packages:   raw.RemotePackages,
+		Namespaces: rootNamespaces(raw.RootAttrs),
+	}
+	for i := range idx.Packages {
+		idx.Packages[i].fillTypeDetails()
+	}
+	for i := range idx.Packages {
+		idx.Packages[i].fillTypeDetails()
 	}
 	for _, l := range raw.Licenses {
 		idx.Licenses[l.ID] = l
 	}
 	idx.Build()
 	return idx, nil
+}
+
+// rootNamespaces 提取根元素上的 xmlns 声明（前缀 → URI，默认命名空间的前缀为 ""）。
+func rootNamespaces(attrs []xml.Attr) map[string]string {
+	if len(attrs) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for _, a := range attrs {
+		switch {
+		case a.Name.Space == "xmlns":
+			out[a.Name.Local] = a.Value
+		case a.Name.Space == "" && a.Name.Local == "xmlns":
+			out[""] = a.Value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func dirOf(url string) string {

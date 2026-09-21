@@ -20,6 +20,7 @@ import (
 	"AVDDesktop/internal/logging"
 	"AVDDesktop/internal/platform"
 	"AVDDesktop/internal/sdk/licenses"
+	"AVDDesktop/internal/sdk/localrepo"
 	"AVDDesktop/internal/sdk/query"
 	"AVDDesktop/internal/sdk/repo"
 )
@@ -59,7 +60,7 @@ func New(paths platform.InstallPaths, cacheDir string, log logging.Interface) *I
 //
 // 规则：把 ';' 换成 '/'（实测映射见 ARCHITECTURE.md §6.3）。
 func PackageDir(pkgPath string) string {
-	return filepath.Join(strings.Split(pkgPath, ";")...)
+	return query.PackageDir(pkgPath)
 }
 
 // ResolveIndex 获取仓库索引（带缓存）。
@@ -359,6 +360,18 @@ func (in *Installer) installOne(ctx context.Context, source domain.MirrorSource,
 
 	if err := platform.EnsureDir(filepath.Dir(targetDir)); err != nil {
 		return domain.Wrap(domain.CodePermissionDenied, "无法创建包目录", err)
+	}
+	// 补写官方本地包元数据：sdkmanager / avdmanager / Android Studio 只看
+	// <pkg>/package.xml，缺它就会出现“文件在但官方工具认为没装”的故障
+	// （例如创建 AVD 时报 `"emulator" package must be installed!`）。
+	// 必须写在 rename 之前，保证与包内容一起原子生效。
+	meta := localrepo.FromPackage(pkg)
+	meta.ApplyIndex(idx)
+	if target, err := localrepo.Write(tmpDir, meta); err != nil {
+		in.log.Warn("install", "写入 %s 失败：%v（官方工具可能看不到该组件）",
+			filepath.Join(pkg.Path, localrepo.FileName), err)
+	} else {
+		in.log.Debug("install", "已写入本地包元数据 %s", target)
 	}
 	if err := archive.RenameAtomic(tmpDir, targetDir); err != nil {
 		return err

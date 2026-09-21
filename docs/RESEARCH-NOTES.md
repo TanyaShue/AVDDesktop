@@ -198,6 +198,10 @@ Pkg.BuildId=14472402
 ```
 
 > 注意：`Pkg.Path` 在 `cmdline-tools/latest/source.properties` 里是 `cmdline-tools;20.0`（**不是** `latest`），所以"已安装包路径"不能只靠 `Pkg.Path` 反推目录，需按目录结构映射后再用 `Pkg.Path` 修正显示名。
+>
+> 修正（实测，详见 §10）：`source.properties` 只能说明"目录里有这个包"，**官方工具（sdkmanager /
+avdmanager / Android Studio）判定"包已安装"的依据是包目录下的 `package.xml`**。两者必须同时存在：
+> 本项目的扫描/展示用 `source.properties`，写入 / 自愈用 `package.xml`（`internal/sdk/localrepo`）。
 
 ### 4.3 `emulator`
 
@@ -454,8 +458,8 @@ ready=true 阻塞项=0
 
 ## 9. 回归测试发现并修复的缺陷
 
-首次完整跑通时，E2E 套件（`internal/e2e`，构建标签 `e2e`）与运行时日志共抓出 5 个真实缺陷，
-全部已修复并补了单元测试：
+首次完整跑通时，E2E 套件（`internal/e2e`，构建标签 `e2e`）与运行时日志共抓出 5 个真实缺陷；
+用户实测又发现 1 个（#6），全部已修复并补了单元测试：
 
 | # | 缺陷 | 现象 | 修复 |
 | --- | --- | --- | --- |
@@ -464,6 +468,72 @@ ready=true 阻塞项=0
 | 3 | `ANDROID_AVD_HOME` 指到父目录 | avdmanager 把新建 AVD 放到错误位置，工具随即“看不到”设备 | 指向 avd 目录本身 |
 | 4 | 后端选择忽略显式开关 | `createWithAvdManager=false` 仍走 avdmanager（无 JDK 环境会失败） | 显式关闭时强制使用直写后端 |
 | 5 | 并发自检重复扫描（由运行时日志发现，非 E2E） | 启动推送与前端请求同时触发两次完整扫描（日志中出现两条“开始环境自检”） | 单飞（single-flight）+ TTL 缓存 |
+| 6 | 本地包元数据 `package.xml` 丢失（用户实测发现：创建设备失败） | 安装器整体替换包目录后官方工具认为包未安装，`avdmanager create avd` 报 `Error: "emulator" package must be installed!` | 安装时补写元数据 + 创建前自愈（详见 §10） |
 
 > 结论：路径拼接、归档布局、环境变量语义这三类问题几乎不可能靠代码审阅发现，
 > 必须用真实工具与真实归档跑一遍。这也是把 E2E 作为独立阶段交付的原因。
+
+---
+
+## 10. SDK 本地包元数据 `package.xml`（实测）
+
+### 10.1 现象与根因
+
+在本机（真实 SDK + 真实 AVD 目录）创建设备时 avdmanager 失败：
+
+```
+[avdmanager] Loading local repository...
+Auto-selecting single ABI x86_64
+[avdmanager] Error: "emulator" package must be installed!
+```
+
+而 `<sdk>/emulator/emulator.exe` 实际存在、`emulator -avd …` 也能正常启动。根因在于**官方
+工具判断“包是否已安装”的依据是包目录下的 `package.xml`，而不是 `source.properties`**
+（`source.properties` 只是版本载体）：
+
+| 证据 | 结果 |
+| --- | --- |
+| `emulator/` 有 `source.properties`（Pkg.Revision=37.1.11）但无 `package.xml` | `sdkmanager --list_installed` **不列** emulator；avdmanager 报错 |
+| `platform-tools/` 同时有 `package.xml` | `sdkmanager --list_installed` 正常列出 |
+| `cmdline-tools/latest/` 只有 `source.properties` | 同样不被列出 |
+| 系统镜像目录缺 `package.xml` | `avdmanager create avd` 报 `Package path is not valid. Valid system image paths are: …`（`-k` 的路径要过 `getLocalPackage` 校验） |
+
+`avdmanager` 的实现（`com.android.sdklib.tool.AvdManagerCli`）在创建 AVD 前调用
+`EmulatorPackages.getEmulatorPackage()`，它内部是 `AndroidSdkHandler.getLocalPackage("emulator")`；
+后者读的是本地仓库元数据（每个包目录的 `package.xml`）。取不到就抛出上面那句错误。
+
+为什么元数据会丢：本项目安装器（`internal/sdk/install`）直接解压官方归档并**整体替换包目录**，
+而官方归档里并不含 `package.xml`（该文件由 sdkmanager / Android Studio 在安装后写入）。
+日志里的时间线可以复现：15:50 下载 emulator 37.1.11 → 15:52 替换目录完成 → 与
+`package.xml` 一起被替换掉 → 此后 avdmanager 再也看不到模拟器包。
+
+### 10.2 修复
+
+1. **安装即补写**：`internal/sdk/localrepo` 复刻官方写入器的格式（固定命名空间 `ns2…ns18`、
+   `xsi:type` 归一到所属 schema 族的最新版本、`type-details` 从索引原始 XML 透传），
+   安装器在原子替换**之前**把 `package.xml` 写进临时目录，与包内容一起生效。
+2. **创建前自愈**：avdmanager 后端检测 `emulator` 与**所选系统镜像**的 `package.xml`，
+   缺哪个补哪个（通用包与系统镜像可完全离线从 `source.properties` 补写，
+   `platforms` / `sources` 回退到仓库索引）。
+3. **可观测**：自检新增问题项「SDK 包元数据缺失（package.xml）」；`VerifyPackage` 也会指出该缺失；
+   avdmanager 仍失败时错误提示直接指向缺失文件。
+
+### 10.3 补写元数据时踩到的两个坑（实测）
+
+自愈本身也不是“拼个 XML 就完事”，两个坑都能让官方工具静默丢包：
+
+| # | 坑 | 现象 | 处理 |
+| --- | --- | --- | --- |
+| 1 | `<uses-license ref="…">` 引用的 id **必须在同一个文件里定义** | `Warning: package.xml parsing problem. 未知 ID "android-sdk-license"` → 该包被丢弃，创建仍失败 | 写入时把索引里的许可文本一并写进根元素的 `<license id=… type="text">…</license>`（与官方文件一致） |
+| 2 | 系统镜像的 `type-details` **必须有 `<abis>`** | `avdmanager create avd` 只打印一行 `null` 并返回 1（sdklib 空消息 NPE，`SystemImage` 拿不到 ABI 列表） | 从主 ABI 自动补 `<abis>x86_64</abis>`；镜像站索引用旧版 sys-img2 schema 时正好缺这个字段 |
+
+顺带实测：`<translatedAbis>` 缺失不影响创建（去掉后仍成功）；
+系统镜像的 `type-details` 可以完全由本地 `source.properties` 重建
+（`AndroidVersion.ApiLevel` / `SystemImage.TagId` / `SystemImage.Abi` / `Addon.VendorId` …），
+因此镜像的自愈不需要联网，也不再依赖镜像站索引的完整性。
+
+验收（本机实测）：删掉 `<sdk>/emulator/package.xml` 与所选镜像的 `package.xml` 后创建，
+日志显示 `已补写 1 个组件的 SDK 元数据 package.xml`，avdmanager
+（`Auto-selecting single ABI x86_64`）返回 0 并生成设备目录；
+`sdkmanager --list_installed` 里 `emulator | 37.1.11 | Android Emulator`
+与 `cmdline-tools;latest | 20 | Android SDK Command-line Tools` 均正常列出。

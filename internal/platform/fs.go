@@ -155,6 +155,29 @@ func DiskSpace(path string) domain.DiskInfo {
 	return info
 }
 
+// ReadProperties 读取 key=value 形式的属性文件（例如 source.properties）。
+//
+// 第二个返回值为 false 表示文件不存在或不可读；格式错误的行被忽略。
+func ReadProperties(path string) (map[string]string, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	props := map[string]string{}
+	for _, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		i := strings.IndexByte(line, '=')
+		if i <= 0 {
+			continue
+		}
+		props[strings.TrimSpace(line[:i])] = strings.TrimSpace(line[i+1:])
+	}
+	return props, true
+}
+
 // WriteFileAtomic 原子写文件（写临时文件后 rename），避免半截配置。
 func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := EnsureDir(filepath.Dir(path)); err != nil {

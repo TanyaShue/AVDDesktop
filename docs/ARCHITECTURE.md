@@ -152,8 +152,9 @@ service  →  { mirror, sdk, avd, adb, settings }  →  { platform, proc, downlo
 | `internal/sdk/repo` | 仓库客户端 | 解析 `repository2-3.xml` / `sys-img*/sys-img2-3.xml` / `addon2-3.xml`；相对 URL 重写；依赖递归；channel（stable/beta/canary）；host-os/arch 选择 |
 | `internal/sdk/licenses` | 许可 | license id → hash 常量表（实测值）、写 `licenses/<id>`、许可文本读取 |
 | `internal/sdk/detect` | 工具链探测 | 组件扫描、`source.properties` 版本读取、工具可用性实跑校验（`--version` / `-list-avds` / `-accel-check`） |
-| `internal/sdk/query` | 本地包扫描 | 遍历 SDK 目录读 `source.properties` → 已安装包列表与可更新判定 |
-| `internal/sdk/install` | 安装编排 | 解析依赖树 → 生成安装计划 → 下载 → 校验 → 解压 → 落盘 → 写许可 → 记录（含 bootstrap 特例） |
+| `internal/sdk/query` | 本地包扫描 | 遍历 SDK 目录读 `source.properties` → 已安装包列表与可更新判定；检测缺失 `package.xml` 的包（官方工具不可见） |
+| `internal/sdk/localrepo` | 本地包元数据 | 写 `<pkg>/package.xml`（复刻官方命名空间与 `xsi:type` 规则、许可定义、系统镜像 `<abis>`），供 sdkmanager / avdmanager / Android Studio 识别 |
+| `internal/sdk/install` | 安装编排 | 解析依赖树 → 生成安装计划 → 下载 → 校验 → 解压 → 落盘 → 写 `package.xml` → 写许可 → 记录（含 bootstrap 特例） |
 | `internal/avd/profile` | 设备档案 | 解析 `avdmanager list device` 输出（含 `-c` 紧凑模式）与备用内置档案 |
 | `internal/avd/store` | AVD 存储 | AVD 主目录解析、`<name>.ini` / `<name>.avd/config.ini` 读写、硬件项 schema（类型/默认值/范围/中文说明）、命名校验、克隆（含 `hw.device.hash2` 处理） |
 | `internal/avd/backend` | AVD 操作后端 | `AvdBackend` 接口 + `AvdManagerBackend` + `DirectBackend` |
@@ -319,7 +320,9 @@ Install(pkgs []path, sourceID)
  ③ 许可：收集 plan 内所有 uses-license ref
     → 若 settings.autoAcceptLicenses 或用户点击"同意" → 写 licenses/<id>
     → 否则中断并返回许可文本（UI 展示）
- ④ 逐个包：下载（分片/续传/进度）→ SHA-1 校验 → 安全解压到 <sdk>/<path>.tmp → 原子替换
+ ④ 逐个包：下载（分片/续传/进度）→ SHA-1 校验 → 安全解压到 <sdk>/<path>.tmp → 补写 <pkg>/package.xml → 原子替换
+     为什么必须补 package.xml：sdkmanager / avdmanager / Android Studio 只凭它判定“包已安装”，
+     官方归档里没有该文件；缺失时创建设备会报 `Error: "emulator" package must be installed!`
      特例 bootstrap：commandlinetools-win-*_latest.zip 内层为 cmdline-tools/
         → 必须落到 <sdk>/cmdline-tools/latest/（并补 source.properties）
      特例 占用：emulator/ 下 exe 正被运行中的模拟器占用 → 先提示停止实例或延迟到退出后替换
@@ -335,6 +338,9 @@ Install(pkgs []path, sourceID)
 Create(spec AvdSpec)
  ① 校验：名称（^[A-Za-z0-9._-]{1,64}$、不与已有 AVD/目录冲突）、system image 已安装、目标目录可写
  ② 选后端：AvdManagerBackend（默认） / DirectBackend（无 JDK 或高级项）
+     前置自愈：avdmanager 要求 emulator 与所选系统镜像都是“本地已安装包”
+             （缺 emulator → "emulator" package must be installed!；缺镜像 → Package path is not valid），
+             缺失时先补写 package.xml（离线优先，见 docs/RESEARCH-NOTES.md §10）
  ③ AvdManagerBackend：
       avdmanager create avd -n <name> -k <sysimg> -d <profileId>
                  [-c <sdcardSize>] [--path <dir>] [-f]

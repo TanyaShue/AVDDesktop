@@ -11,6 +11,7 @@ import (
 	"AVDDesktop/internal/platform"
 	"AVDDesktop/internal/sdk/install"
 	"AVDDesktop/internal/sdk/licenses"
+	"AVDDesktop/internal/sdk/localrepo"
 	"AVDDesktop/internal/sdk/query"
 	"AVDDesktop/internal/sdk/repo"
 )
@@ -417,6 +418,11 @@ func (s *SdkService) VerifyPackage(pkgPath string) (*domain.VerifyResult, error)
 	if !platform.FileExists(path_Join(dir, "source.properties")) {
 		out.OK = false
 		out.Details = append(out.Details, "缺少 source.properties（安装可能不完整）")
+	}
+	// package.xml 是 sdkmanager / avdmanager / Android Studio 判定“包已安装”的依据。
+	// 缺它时官方工具看不到该包（创建设备会报 "emulator" package must be installed!）。
+	if !localrepo.HasMeta(dir) {
+		out.Details = append(out.Details, "缺少 "+localrepo.FileName+"（官方工具会认为该包未安装；应用会在创建设备时自动补写）")
 	}
 	scanner := query.NewScanner(comp.Paths.SdkRoot)
 	if _, ok := scanner.Find(pkgPath); !ok {

@@ -333,7 +333,7 @@ type JobInfo = {
 | `speedtest:result` | `SpeedResult` | 每源一条 |
 | `emulator:state` | `EmulatorInstance` | 状态机变化 |
 | `avd:changed` | `{action, name}` | AVD 增删改 |
-| `sdk:changed` | `{kind, path}` | 包安装/卸载 |
+| `sdk:changed` | `{installed?, skipped?, failed?, uninstalled?, repaired?}` | 包安装/卸载/元数据补写 |
 | `env:changed` | `EnvReport` | 自检结果变化（文件系统监听或手动触发） |
 | `logcat:line` | `{jobId, serial, line}` | 日志流 |
 

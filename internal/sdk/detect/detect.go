@@ -884,7 +884,27 @@ func buildIssues(report *domain.EnvReport, images []domain.SystemImage, opts Opt
 		})
 	}
 
-	// ⑥ AVD 配置健康问题（由 service 层传入）
+	// ⑥ SDK 包元数据缺失（package.xml）
+	//
+	// sdkmanager / avdmanager / Android Studio 只看包目录下的 package.xml，
+	// 手工解压或由本项目安装器替换过的包可能只有 source.properties，
+	// 对官方工具而言等于“没安装”（典型症状就是创建设备失败）。
+	if report.SdkRoot != "" {
+		if missing := query.NewScanner(report.SdkRoot).MetadataMissing(); len(missing) > 0 {
+			issues = append(issues, domain.EnvIssue{
+				ID:       "sdk-metadata-missing",
+				Severity: domain.SeverityWarning,
+				Title:    "SDK 包元数据缺失（package.xml）",
+				Detail: fmt.Sprintf("%s 等 %d 个组件的目录里没有 package.xml："+
+					"Android Studio / avdmanager / Gradle 会认为它们未安装，创建设备时可能报 "+
+					"`\"emulator\" package must be installed!`。",
+					strings.Join(limitStrings(missing, 3), "、"), len(missing)),
+				FixLabel: "创建设备或重新安装组件时会自动补写",
+			})
+		}
+	}
+
+	// ⑦ AVD 配置健康问题（由 service 层传入）
 	for i, msg := range limitStrings(opts.AvdIssues, 5) {
 		issues = append(issues, domain.EnvIssue{
 			ID:       fmt.Sprintf("avd-issue-%d", i),

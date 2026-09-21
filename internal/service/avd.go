@@ -127,10 +127,20 @@ func (s *AvdService) Create(spec domain.AvdSpec) (string, error) {
 		Subtitle: spec.SystemImagePath,
 	}, func(ctx context.Context, j *job.Job) error {
 		defer unlock()
+		// SDK 元数据自愈（缺 package.xml 时官方工具看不到该包）：通用包与系统镜像可离线补写，
+		// 少数包（platforms / sources）需要仓库索引，因此限时执行，避免网络问题拖慢创建。
+		ensureMetadata := func(ctx context.Context) []string {
+			repairCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+			defer cancel()
+			return s.rt.repairSDKMetadata(repairCtx, j.Logf)
+		}
 		be := backend.Select(spec, backend.Deps{
 			Paths: comp.Paths,
 			Store: comp.Store,
 			Env:   comp.Env,
+			// avdmanager 靠包目录下的 package.xml 判断"包是否已安装"（emulator 与系统镜像都需要），
+			// 缺失时先自愈一次，否则会以 "emulator" package must be installed! 等错误失败。
+			EnsureMetadata: ensureMetadata,
 			OnOutput: func(stream, line string) {
 				level := "info"
 				if stream == "stderr" {
@@ -141,9 +151,10 @@ func (s *AvdService) Create(spec domain.AvdSpec) (string, error) {
 		})
 		j.SetPhase("正在创建（后端：" + be.Kind() + "）")
 		res, err := be.Create(ctx, spec, backend.Deps{
-			Paths: comp.Paths,
-			Store: comp.Store,
-			Env:   comp.Env,
+			Paths:          comp.Paths,
+			Store:          comp.Store,
+			Env:            comp.Env,
+			EnsureMetadata: ensureMetadata,
 			OnOutput: func(stream, line string) {
 				j.Log("info", be.Kind(), line)
 			},

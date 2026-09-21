@@ -12,6 +12,7 @@ import (
 
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/platform"
+	"AVDDesktop/internal/sdk/localrepo"
 )
 
 // Scanner 扫描一个 SDK 根目录。
@@ -195,23 +196,27 @@ func splitDependencies(raw string) []string {
 
 // readProps 读取目录下的 source.properties。
 func readProps(dir string) (map[string]string, bool) {
-	data, err := os.ReadFile(filepath.Join(dir, "source.properties"))
-	if err != nil {
-		return nil, false
-	}
-	props := map[string]string{}
-	for _, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+	return platform.ReadProperties(filepath.Join(dir, "source.properties"))
+}
+
+// PackageDir 把包路径映射为 SDK 下的相对目录（emulator → emulator，
+// platforms;android-36 → platforms/android-36）。
+func PackageDir(pkgPath string) string {
+	return filepath.Join(strings.Split(pkgPath, ";")...)
+}
+
+// MetadataMissing 返回缺少 package.xml 的已安装包路径。
+//
+// package.xml 是 sdkmanager / avdmanager / Android Studio 判定“包已安装”的唯一依据；
+// 只有 source.properties 的包对官方工具等于不存在（详见 internal/sdk/localrepo）。
+func (s *Scanner) MetadataMissing() []string {
+	var out []string
+	for _, p := range s.Installed() {
+		if !localrepo.HasMeta(filepath.Join(s.SdkRoot, PackageDir(p.Path))) {
+			out = append(out, p.Path)
 		}
-		i := strings.IndexByte(line, '=')
-		if i <= 0 {
-			continue
-		}
-		props[strings.TrimSpace(line[:i])] = strings.TrimSpace(line[i+1:])
 	}
-	return props, true
+	return out
 }
 
 func listDirs(root string) []string {

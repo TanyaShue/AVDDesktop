@@ -410,6 +410,12 @@ func TestE2E_InstallPlatformTools(t *testing.T) {
 	if !platform.FileExists(filepath.Join(paths.PlatformTools, "source.properties")) {
 		t.Error("缺少 source.properties")
 	}
+	meta := filepath.Join(paths.PlatformTools, "package.xml")
+	if !platform.FileExists(meta) {
+		t.Error("缺少 package.xml（官方工具会认为包未安装）")
+	} else if data, err := os.ReadFile(meta); err != nil || !strings.Contains(string(data), `path="platform-tools"`) {
+		t.Errorf("package.xml 内容异常: %v %s", err, truncate(string(data), 200))
+	}
 	if !licenses.IsAccepted(paths.Licenses, "android-sdk-license") {
 		t.Error("许可文件未写入")
 	}
@@ -418,6 +424,9 @@ func TestE2E_InstallPlatformTools(t *testing.T) {
 	installed := query.NewScanner(targetSdk).Installed()
 	if len(installed) == 0 || installed[0].Path != "platform-tools" {
 		t.Errorf("本地扫描未识别到 platform-tools：%+v", installed)
+	}
+	if missing := query.NewScanner(targetSdk).MetadataMissing(); len(missing) != 0 {
+		t.Errorf("安装后不应有缺失元数据的包：%v", missing)
 	}
 	t.Logf("platform-tools 安装成功：version=%s size=%s", installed[0].InstalledRevision, platform.HumanSize(installed[0].SizeBytes))
 
@@ -464,6 +473,9 @@ func TestE2E_BootstrapCmdlineTools(t *testing.T) {
 	}
 	if !platform.FileExists(filepath.Join(paths.CmdlineTools, "source.properties")) {
 		t.Error("cmdline-tools 缺少 source.properties（解压层级可能不对）")
+	}
+	if !platform.FileExists(filepath.Join(paths.CmdlineTools, "package.xml")) {
+		t.Error("cmdline-tools 缺少 package.xml（sdkmanager/avdmanager 会看不到该组件）")
 	}
 
 	// 真的执行一次 sdkmanager（验证解压结构与 JDK 依赖都正确）
