@@ -70,8 +70,10 @@ func (s *AvdService) ListImages(installedOnly bool) ([]domain.SystemImage, error
 // Create 创建设备，返回 jobID。
 //
 // 流程：校验名称 → 镜像不存在时通过 sdkmanager 安装 → avdmanager 创建。
+// 与其它写 SDK/AVD 目录的任务共用同一把互斥锁（同一时刻只允许一个写任务）。
 func (s *AvdService) Create(spec domain.AvdSpec) (string, error) {
 	comp := s.rt.Components()
+	spec.Name = strings.TrimSpace(spec.Name)
 	if v := comp.Store.ValidateName(spec.Name); !v.Valid {
 		return "", domain.Err(domain.CodeAvdNameInvalid, v.Reason)
 	}
@@ -79,9 +81,10 @@ func (s *AvdService) Create(spec domain.AvdSpec) (string, error) {
 		return "", err
 	}
 
-	unlock, ok := s.rt.locks.TryLock("avd:" + comp.Store.AvdHome)
+	unlock, ok := s.rt.locks.TryLock("sdk:" + comp.Tools.SdkRoot)
 	if !ok {
-		return "", domain.Err(domain.CodeJobBusy, "已有创建/删除设备的任务正在进行")
+		return "", domain.Err(domain.CodeJobBusy, "已有 SDK 安装或设备写任务正在进行").
+			WithHint("请等待当前任务完成，或在底部任务区域取消它")
 	}
 
 	j := s.rt.jobs.Start(s.rt.Context(), job.Spec{
@@ -115,7 +118,8 @@ func (s *AvdService) Create(spec domain.AvdSpec) (string, error) {
 // Delete 删除设备（仍在运行的实例会先停止），返回 jobID。
 func (s *AvdService) Delete(name string) (string, error) {
 	comp := s.rt.Components()
-	if strings.TrimSpace(name) == "" {
+	name = strings.TrimSpace(name)
+	if name == "" {
 		return "", domain.Err(domain.CodeInvalidArgument, "未指定设备名称")
 	}
 	if !comp.Store.Exists(name) {
@@ -127,9 +131,10 @@ func (s *AvdService) Delete(name string) (string, error) {
 		}
 	}
 
-	unlock, ok := s.rt.locks.TryLock("avd:" + comp.Store.AvdHome)
+	unlock, ok := s.rt.locks.TryLock("sdk:" + comp.Tools.SdkRoot)
 	if !ok {
-		return "", domain.Err(domain.CodeJobBusy, "已有创建/删除设备的任务正在进行")
+		return "", domain.Err(domain.CodeJobBusy, "已有 SDK 安装或设备写任务正在进行").
+			WithHint("请等待当前任务完成，或在底部任务区域取消它")
 	}
 	j := s.rt.jobs.Start(s.rt.Context(), job.Spec{
 		Kind:  domain.JobAvdDelete,

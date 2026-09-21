@@ -127,16 +127,23 @@ func TestResolveUsesIniPath(t *testing.T) {
 }
 
 // TestResolveRelativePath 覆盖 path.rel 的相对路径解析。
+//
+// 官方语义：path.rel 相对 AVD 主目录的**父目录**（样本 x.ini 里 path.rel=avd/x.avd），
+// 因此它指向的正是 AVD 主目录内的 <avdHome>/<name>.avd。
 func TestResolveRelativePath(t *testing.T) {
 	s, home, _ := newTestStore(t)
-	writeAvd(t, home, "Rel", "avd.ini.encoding=UTF-8\npath.rel=avd/Rel.avd\n", sampleConfig)
+	dir := writeAvd(t, home, "Rel", "avd.ini.encoding=UTF-8\npath.rel=avd/Rel.avd\n", sampleConfig)
 
+	want := filepath.Join(filepath.Dir(home), "avd", "Rel.avd")
 	l := s.Resolve("Rel")
-	if l.Dir != filepath.Join(home, "avd", "Rel.avd") {
-		t.Fatalf("相对路径应基于 AVD 主目录解析: %q", l.Dir)
+	if l.Dir != want {
+		t.Fatalf("path.rel 应相对 AVD 主目录的父目录解析：期望 %q，实际 %q", want, l.Dir)
 	}
-	if l.Exists {
-		t.Fatal("该目录并不存在，Exists 应为 false")
+	if l.Dir != dir {
+		t.Fatalf("path.rel 应解析到 <avdHome>/<name>.avd：期望 %q，实际 %q", dir, l.Dir)
+	}
+	if !l.Exists {
+		t.Fatal("目录存在时 Exists 应为 true")
 	}
 
 	// 既没有 path 也没有 path.rel 时退化为 <name>.avd
@@ -247,6 +254,36 @@ func TestDeleteRemovesFiles(t *testing.T) {
 	var appErr *domain.AppError
 	if !errors.As(err, &appErr) || appErr.Code != domain.CodeAvdNotFound {
 		t.Fatalf("删除不存在的设备应返回 AVD_NOT_FOUND，实际 %v", err)
+	}
+}
+
+// TestDeleteRefusesOutsideAvdHome 覆盖删除护栏：
+// .ini 里的 path 指向 AVD 主目录之外时必须拒绝，避免误删软件目录外的数据。
+func TestDeleteRefusesOutsideAvdHome(t *testing.T) {
+	s, home, _ := newTestStore(t)
+	outside := filepath.Join(t.TempDir(), "outside.avd")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	keep := filepath.Join(outside, "userdata.img")
+	if err := os.WriteFile(keep, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ini := "avd.ini.encoding=UTF-8\npath=" + outside + "\n"
+	if err := os.WriteFile(filepath.Join(home, "Outside.ini"), []byte(ini), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := s.Delete("Outside")
+	var appErr *domain.AppError
+	if !errors.As(err, &appErr) || appErr.Code != domain.CodePermissionDenied {
+		t.Fatalf("目录越界时应返回 PERMISSION_DENIED，实际 %v", err)
+	}
+	if _, statErr := os.Stat(keep); statErr != nil {
+		t.Fatalf("越界目录内的文件不应被删除: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, "Outside.ini")); statErr != nil {
+		t.Fatalf(".ini 也不应在拒绝后删除: %v", statErr)
 	}
 }
 

@@ -49,7 +49,8 @@ func (s *Store) Resolve(name string) Layout {
 		if p := strings.TrimSpace(cfg["path"]); p != "" {
 			dir = p
 		} else if rel := strings.TrimSpace(cfg["path.rel"]); rel != "" {
-			dir = filepath.Join(s.AvdHome, rel)
+			// 官方约定：path.rel 相对 AVD 主目录的父目录（样本 <avdHome>/x.ini 里 path.rel=avd/x.avd）
+			dir = filepath.Join(filepath.Dir(s.AvdHome), rel)
 		}
 	}
 	switch {
@@ -118,12 +119,18 @@ func (s *Store) ReadConfig(name string) (map[string]string, error) {
 }
 
 // Delete 删除设备：同时删除 .avd 目录与 .ini 文件。
+//
+// 目录路径来自 .ini 的 path 字段，可能是任意路径，因此删除前必须先确认它真的位于
+// AVD 主目录内。
 func (s *Store) Delete(name string) error {
 	l := s.Resolve(name)
 	if !l.Exists && !platform.FileExists(l.IniPath) {
 		return domain.Err(domain.CodeAvdNotFound, "设备不存在: "+name)
 	}
 	if l.Exists {
+		if err := s.ensureInsideAvdHome(l.Dir); err != nil {
+			return err
+		}
 		if err := os.RemoveAll(l.Dir); err != nil {
 			return domain.Wrap(domain.CodePermissionDenied,
 				"无法删除设备目录（可能被运行中的模拟器占用）", err).
@@ -131,9 +138,24 @@ func (s *Store) Delete(name string) error {
 		}
 	}
 	if platform.FileExists(l.IniPath) {
+		if err := s.ensureInsideAvdHome(l.IniPath); err != nil {
+			return err
+		}
 		if err := os.Remove(l.IniPath); err != nil {
 			return domain.Wrap(domain.CodePermissionDenied, "无法删除 .ini 文件", err)
 		}
+	}
+	return nil
+}
+
+// ensureInsideAvdHome 确认路径位于 AVD 主目录内（防止 .ini 里的 path 指向目录之外时误删）。
+func (s *Store) ensureInsideAvdHome(path string) error {
+	rel, err := filepath.Rel(s.AvdHome, path)
+	if err != nil || filepath.IsAbs(rel) || rel == ".." ||
+		strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return domain.ErrDetail(domain.CodePermissionDenied,
+			"拒绝删除 AVD 主目录之外的路径", path).
+			WithHint("设备配置里的路径已超出 " + s.AvdHome + "，请手工确认后再处理")
 	}
 	return nil
 }
