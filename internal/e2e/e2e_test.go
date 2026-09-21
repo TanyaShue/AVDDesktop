@@ -289,6 +289,170 @@ func TestE2E_AvdCreate(t *testing.T) {
 	t.Logf("删除完成，设备已从软件列表与官方 avdmanager 中消失")
 }
 
+// TestE2E_EmulatorBoot 验证 Phase 3 的验收链路：
+// 复用/创建 AVD → 记录 emulator -accel-check 原始输出 → service 启动（无窗口）→
+// 轮询等待 running（有界 ≤10 分钟）→ 用软件自带 adb 确认设备为 device 且 sys.boot_completed=1
+// → Stop → 断言 stopped。
+func TestE2E_EmulatorBoot(t *testing.T) {
+	rt := newRuntime(t)
+	env := service.NewEnvService(rt)
+	avdSvc := service.NewAvdService(rt)
+	emuSvc := service.NewEmulatorService(rt)
+	tools := rt.Components().Tools
+
+	// 1. 环境必须就绪（缺则先自动准备）
+	report, err := env.Check()
+	if err != nil {
+		t.Fatalf("环境检查失败: %v", err)
+	}
+	if !report.Ready {
+		t.Logf("环境未就绪，先自动准备：%+v", report.Issues)
+		jobID, err := env.Prepare()
+		if err != nil {
+			t.Fatalf("启动自动准备失败: %v", err)
+		}
+		if err := waitJob(rt, jobID, 45*time.Minute); err != nil {
+			t.Fatalf("自动准备失败: %v", err)
+		}
+	}
+
+	// 2. 先记录硬件加速检查的原始结果（无加速时 x86_64 镜像无法启动）
+	accelRes, accelErr := proc.Run(rt.Context(), tools.Emulator, []string{"-accel-check"}, proc.Options{
+		Env: rt.Components().Env, Timeout: 2 * time.Minute,
+	})
+	t.Logf("emulator -accel-check：退出码=%d err=%v\n%s", accelRes.ExitCode, accelErr, accelRes.Combined())
+
+	// 3. 复用已有可用 AVD，没有则创建
+	name, created := ensureAvdForBoot(t, rt, avdSvc)
+	t.Logf("本次使用 AVD：%s（本次新建=%v）", name, created)
+
+	// 4. 启动（无窗口），轮询等待 running（有界 ≤10 分钟）
+	started := time.Now()
+	inst, err := emuSvc.Start(service.StartRequest{AvdName: name, NoWindow: true})
+	if err != nil {
+		t.Fatalf("启动模拟器失败（accel 输出见上）：%v", err)
+	}
+	t.Logf("启动请求已受理：id=%s serial=%s port=%d pid=%d 参数=%v",
+		inst.ID, inst.Serial, inst.Port, inst.PID, inst.Args)
+	running, err := waitInstanceState(emuSvc, inst.ID, domain.AvdRunning, 10*time.Minute)
+	if err != nil {
+		t.Fatalf("等待模拟器进入 running 失败：%v（应用日志目录 %s）", err, platform.LogDir())
+	}
+	t.Logf("模拟器进入 running，耗时 %s（serial=%s port=%d）",
+		time.Since(started).Round(time.Second), running.Serial, running.Port)
+
+	// 5. 用软件自带 adb 独立确认设备状态与开机完成
+	adbClient := rt.Components().Adb
+	devices, err := adbClient.Devices(rt.Context())
+	if err != nil {
+		t.Fatalf("adb devices 失败: %v", err)
+	}
+	found := false
+	for _, d := range devices {
+		if d.Serial == running.Serial && d.State == "device" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("软件自带 adb 未看到 %s 为 device：%+v", running.Serial, devices)
+	}
+	if err := adbClient.WaitForBoot(rt.Context(), running.Serial, time.Minute); err != nil {
+		t.Fatalf("adb 确认 sys.boot_completed=1 失败: %v", err)
+	}
+	t.Logf("adb 确认：%s 状态为 device，sys.boot_completed=1", running.Serial)
+
+	// 6. 停止并断言 stopped
+	stopped := time.Now()
+	if err := emuSvc.Stop(inst.ID, false); err != nil {
+		t.Fatalf("停止实例失败: %v", err)
+	}
+	final, err := waitInstanceState(emuSvc, inst.ID, domain.AvdStopped, time.Minute)
+	if err != nil {
+		t.Fatalf("停止后实例未进入 stopped：%v", err)
+	}
+	exitCode := -1
+	if final.ExitCode != nil {
+		exitCode = *final.ExitCode
+	}
+	if final.EndedAt == 0 {
+		t.Errorf("停止后应记录 EndedAt：%+v", final)
+	}
+	t.Logf("停止完成，耗时 %s，实例状态=stopped（退出码=%d EndedAt=%d）",
+		time.Since(stopped).Round(time.Second), exitCode, final.EndedAt)
+}
+
+// ensureAvdForBoot 复用已有的宿主 ABI 可用 AVD；没有时创建一个。
+func ensureAvdForBoot(t *testing.T, rt *service.Runtime, avdSvc *service.AvdService) (name string, created bool) {
+	t.Helper()
+	items, err := avdSvc.List()
+	if err != nil {
+		t.Fatalf("列出设备失败: %v", err)
+	}
+	for _, it := range items {
+		if it.Broken == "" && it.ABI == sdk.HostABI() && apiAtLeast(it.API, 30) {
+			return it.Name, false
+		}
+	}
+	images, err := avdSvc.ListImages(false)
+	if err != nil {
+		t.Fatalf("读取系统镜像列表失败: %v", err)
+	}
+	image := pickImage(t, images)
+	profileID := pickProfile(t, avdSvc)
+	name = "E2E_Boot_" + time.Now().Format("20060102_150405")
+	t.Logf("没有可复用的 AVD，新建 %s（镜像 %s，档案 %s）", name, image.Path, profileID)
+	jobID, err := avdSvc.Create(domain.AvdSpec{Name: name, SystemImagePath: image.Path, ProfileID: profileID})
+	if err != nil {
+		t.Fatalf("启动创建任务失败: %v", err)
+	}
+	if err := waitJob(rt, jobID, 60*time.Minute); err != nil {
+		t.Fatalf("创建 AVD 失败: %v", err)
+	}
+	return name, true
+}
+
+// pickProfile 返回可用的设备档案 ID（优先 medium_phone）。
+func pickProfile(t *testing.T, avdSvc *service.AvdService) string {
+	t.Helper()
+	profiles, err := avdSvc.ListProfiles(false)
+	if err != nil {
+		t.Fatalf("读取设备档案失败: %v", err)
+	}
+	if len(profiles) == 0 {
+		t.Fatal("avdmanager 未返回任何设备档案")
+	}
+	for _, p := range profiles {
+		if p.ID == "medium_phone" {
+			return p.ID
+		}
+	}
+	return profiles[0].ID
+}
+
+// waitInstanceState 有界轮询等待实例进入目标状态，并返回最后一次看到的快照。
+func waitInstanceState(emuSvc *service.EmulatorService, id string, want domain.AvdState, timeout time.Duration) (domain.EmulatorInstance, error) {
+	var last domain.EmulatorInstance
+	deadline := time.Now().Add(timeout)
+	for {
+		for _, inst := range emuSvc.ListRunning() {
+			if inst.ID == id {
+				last = inst
+				break
+			}
+		}
+		switch {
+		case last.State == want:
+			return last, nil
+		case last.State == domain.AvdError:
+			return last, testError("实例进入 error 状态：" + last.LastError)
+		case time.Now().After(deadline):
+			return last, testError("等待实例进入 " + string(want) + " 超时（最后状态 " + string(last.State) +
+				"，lastError=" + last.LastError + "）")
+		}
+		time.Sleep(time.Second)
+	}
+}
+
 // pickImage 选一个宿主 ABI 的 google_apis 镜像：已安装优先，否则 API 最低（下载最小）。
 func pickImage(t *testing.T, images []domain.SystemImage) domain.SystemImage {
 	t.Helper()

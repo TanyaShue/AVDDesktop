@@ -202,44 +202,25 @@ type NameValidation struct {
 
 // ---------------------------------------------------------------- 模拟器实例
 
-// LaunchOptions 是启动参数（向导与启动按钮共用）。
+// LaunchOptions 是启动参数（界面只暴露冷启动与无窗口两个开关；端口由启动器内部决定）。
 type LaunchOptions struct {
-	ColdBoot       bool     `json:"coldBoot"`
-	WipeData       bool     `json:"wipeData"`
-	NoWindow       bool     `json:"noWindow"`
-	NoAudio        bool     `json:"noAudio"`
-	NoBootAnim     bool     `json:"noBootAnim"`
-	GPUMode        string   `json:"gpuMode,omitempty"`
-	SnapshotName   string   `json:"snapshotName,omitempty"`
-	WritableSystem bool     `json:"writableSystem"`
-	NetSpeed       string   `json:"netSpeed,omitempty"`
-	NetDelay       string   `json:"netDelay,omitempty"`
-	DNSServers     []string `json:"dnsServers,omitempty"`
-	HTTPProxy      string   `json:"httpProxy,omitempty"`
-	Timezone       string   `json:"timezone,omitempty"`
-	Locale         string   `json:"locale,omitempty"`
-	MemoryMB       int      `json:"memoryMB,omitempty"`
-	Cores          int      `json:"cores,omitempty"`
-	Port           int      `json:"port,omitempty"`
-	Scale          string   `json:"scale,omitempty"`
-	ExtraArgs      []string `json:"extraArgs,omitempty"`
+	ColdBoot bool `json:"coldBoot"`
+	NoWindow bool `json:"noWindow"`
 }
 
-// EmulatorInstance 是一个运行中的模拟器实例。
+// EmulatorInstance 是一个模拟器实例（只保留界面展示与诊断需要的字段）。
 type EmulatorInstance struct {
-	ID              string   `json:"id"`
-	AvdName         string   `json:"avdName"`
-	Serial          string   `json:"serial"`
-	Port            int      `json:"port"`
-	ADBPort         int      `json:"adbPort"`
-	PID             int      `json:"pid"`
-	State           AvdState `json:"state"`
-	StartedAt       int64    `json:"startedAt"`
-	BootCompletedAt int64    `json:"bootCompletedAt,omitempty"`
-	ExitCode        *int     `json:"exitCode,omitempty"`
-	LastError       string   `json:"lastError,omitempty"`
-	Args            []string `json:"args"`
-	LogsPath        string   `json:"logsPath"`
+	ID        string   `json:"id"`
+	AvdName   string   `json:"avdName"`
+	Serial    string   `json:"serial"`
+	Port      int      `json:"port"`
+	PID       int      `json:"pid"`
+	State     AvdState `json:"state"`
+	StartedAt int64    `json:"startedAt"`
+	EndedAt   int64    `json:"endedAt,omitempty"`
+	ExitCode  *int     `json:"exitCode,omitempty"`
+	LastError string   `json:"lastError,omitempty"`
+	Args      []string `json:"args"`
 }
 
 // AdbDevice 是 `adb devices -l` 中的一行。

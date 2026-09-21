@@ -26,7 +26,6 @@ export type AvdSpec = domain.AvdSpec;
 
 export type AvdSummary = domain.AvdSummary;
 export type EmulatorInstance = domain.EmulatorInstance;
-export type LaunchOptions = domain.LaunchOptions;
 
 export type JobInfo = domain.JobInfo;
 export type LogLine = domain.LogLine;

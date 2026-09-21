@@ -12,20 +12,7 @@ export * as Logs from "../../wailsjs/go/service/LogService";
 export * as Jobs from "../../wailsjs/go/service/JobService";
 export * as Win from "../../wailsjs/go/service/WindowService";
 
-import { service as serviceModels } from "../../wailsjs/go/models";
-import type { domain } from "../../wailsjs/go/models";
 import type { EnvReport } from "./types";
-
-/**
- * 构造带嵌套字段的请求对象。
- *
- * Wails 为含嵌套结构的 Go struct 生成的 TS class 带有 convertValues 实例方法，
- * 因此普通对象字面量无法直接传入；统一用 createFrom 构造，保持类型安全。
- */
-export const req = {
-  startEmulator: (v: { avdName: string; options: domain.LaunchOptions }) =>
-    serviceModels.StartRequest.createFrom(v),
-};
 
 export { EventsOn, EventsOff, EventsEmit } from "../../wailsjs/runtime/runtime";
 
@@ -58,7 +45,6 @@ export const EVENTS = {
   jobDone: "job:done",
   jobFailed: "job:failed",
   emulatorState: "emulator:state",
-  emulatorLog: "emulator:log",
   avdChanged: "avd:changed",
   envChanged: "env:changed",
   logLine: "log:line",

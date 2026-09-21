@@ -185,15 +185,13 @@ export namespace domain {
 	    avdName: string;
 	    serial: string;
 	    port: number;
-	    adbPort: number;
 	    pid: number;
 	    state: string;
 	    startedAt: number;
-	    bootCompletedAt?: number;
+	    endedAt?: number;
 	    exitCode?: number;
 	    lastError?: string;
 	    args: string[];
-	    logsPath: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new EmulatorInstance(source);
@@ -205,15 +203,13 @@ export namespace domain {
 	        this.avdName = source["avdName"];
 	        this.serial = source["serial"];
 	        this.port = source["port"];
-	        this.adbPort = source["adbPort"];
 	        this.pid = source["pid"];
 	        this.state = source["state"];
 	        this.startedAt = source["startedAt"];
-	        this.bootCompletedAt = source["bootCompletedAt"];
+	        this.endedAt = source["endedAt"];
 	        this.exitCode = source["exitCode"];
 	        this.lastError = source["lastError"];
 	        this.args = source["args"];
-	        this.logsPath = source["logsPath"];
 	    }
 	}
 	export class EnvIssue {
@@ -441,54 +437,6 @@ export namespace domain {
 		    return a;
 		}
 	}
-	export class LaunchOptions {
-	    coldBoot: boolean;
-	    wipeData: boolean;
-	    noWindow: boolean;
-	    noAudio: boolean;
-	    noBootAnim: boolean;
-	    gpuMode?: string;
-	    snapshotName?: string;
-	    writableSystem: boolean;
-	    netSpeed?: string;
-	    netDelay?: string;
-	    dnsServers?: string[];
-	    httpProxy?: string;
-	    timezone?: string;
-	    locale?: string;
-	    memoryMB?: number;
-	    cores?: number;
-	    port?: number;
-	    scale?: string;
-	    extraArgs?: string[];
-	
-	    static createFrom(source: any = {}) {
-	        return new LaunchOptions(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.coldBoot = source["coldBoot"];
-	        this.wipeData = source["wipeData"];
-	        this.noWindow = source["noWindow"];
-	        this.noAudio = source["noAudio"];
-	        this.noBootAnim = source["noBootAnim"];
-	        this.gpuMode = source["gpuMode"];
-	        this.snapshotName = source["snapshotName"];
-	        this.writableSystem = source["writableSystem"];
-	        this.netSpeed = source["netSpeed"];
-	        this.netDelay = source["netDelay"];
-	        this.dnsServers = source["dnsServers"];
-	        this.httpProxy = source["httpProxy"];
-	        this.timezone = source["timezone"];
-	        this.locale = source["locale"];
-	        this.memoryMB = source["memoryMB"];
-	        this.cores = source["cores"];
-	        this.port = source["port"];
-	        this.scale = source["scale"];
-	        this.extraArgs = source["extraArgs"];
-	    }
-	}
 	export class LogLine {
 	    at: number;
 	    level: string;
@@ -601,7 +549,8 @@ export namespace service {
 	}
 	export class StartRequest {
 	    avdName: string;
-	    options: domain.LaunchOptions;
+	    coldBoot: boolean;
+	    noWindow: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new StartRequest(source);
@@ -610,26 +559,9 @@ export namespace service {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.avdName = source["avdName"];
-	        this.options = this.convertValues(source["options"], domain.LaunchOptions);
+	        this.coldBoot = source["coldBoot"];
+	        this.noWindow = source["noWindow"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 
 }

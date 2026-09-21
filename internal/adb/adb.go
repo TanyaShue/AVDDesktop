@@ -1,4 +1,6 @@
-// Package adb 封装 adb 客户端（实例状态、安装、shell、截图）。
+// Package adb 封装 adb 的必要使用部分：设备列表、等待设备上线与开机完成、优雅停止实例。
+//
+// 见 目标.md「六、ADB」：软件只保留检测模拟器是否已启动与获取设备状态所需的能力。
 package adb
 
 import (
@@ -42,10 +44,8 @@ func (c *Client) Devices(ctx context.Context) ([]domain.AdbDevice, error) {
 		return nil, err
 	}
 	devices := ParseDevices(out)
-	if c.log != nil {
-		c.log.Debug("adb", "adb devices -l 返回 %d 个设备（耗时 %s）",
-			len(devices), time.Since(started).Round(time.Millisecond))
-	}
+	c.log.Debug("adb", "adb devices -l 返回 %d 个设备（耗时 %s）",
+		len(devices), time.Since(started).Round(time.Millisecond))
 	return devices, nil
 }
 
@@ -87,22 +87,7 @@ func ParseDevices(out string) []domain.AdbDevice {
 // SerialForPort 返回端口对应的 adb 串号（console port = 5554 → emulator-5554）。
 func SerialForPort(port int) string { return "emulator-" + strconv.Itoa(port) }
 
-// AvdName 通过 `adb -s <serial> emu avd name` 查询实例对应的 AVD 名。
-func (c *Client) AvdName(ctx context.Context, serial string) (string, error) {
-	out, err := proc.Output(ctx, c.AdbPath, []string{"-s", serial, "emu", "avd", "name"}, proc.Options{
-		Env: c.Env, Timeout: 20 * time.Second,
-	})
-	if err != nil {
-		return "", err
-	}
-	lines := platform.SplitLines(out)
-	if len(lines) == 0 {
-		return "", domain.Err(domain.CodeProcessFailed, "无法获取实例的 AVD 名称")
-	}
-	return strings.TrimSpace(lines[0]), nil
-}
-
-// WaitForDevice 等待设备出现在 adb 列表中。
+// WaitForDevice 等待设备出现在 adb 列表中（有界）。
 func (c *Client) WaitForDevice(ctx context.Context, serial string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
@@ -120,7 +105,7 @@ func (c *Client) WaitForDevice(ctx context.Context, serial string, timeout time.
 		if time.Now().After(deadline) {
 			return domain.ErrDetail(domain.CodeProcessFailed,
 				"等待设备连接超时", "serial="+serial).
-				WithHint("模拟器可能启动失败，请查看实例日志")
+				WithHint("模拟器可能启动失败，请查看应用日志（模块 emulator）")
 		}
 		select {
 		case <-ctx.Done():
@@ -130,7 +115,7 @@ func (c *Client) WaitForDevice(ctx context.Context, serial string, timeout time.
 	}
 }
 
-// WaitForBoot 等待系统启动完成（sys.boot_completed = 1）。
+// WaitForBoot 等待系统启动完成（sys.boot_completed = 1，有界）。
 func (c *Client) WaitForBoot(ctx context.Context, serial string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
@@ -145,7 +130,8 @@ func (c *Client) WaitForBoot(ctx context.Context, serial string, timeout time.Du
 		}
 		if time.Now().After(deadline) {
 			return domain.ErrDetail(domain.CodeProcessFailed,
-				"等待系统启动完成超时", "serial="+serial)
+				"等待系统启动完成超时", "serial="+serial).
+				WithHint("设备已连接但系统未完成开机，请查看应用日志（模块 emulator）")
 		}
 		select {
 		case <-ctx.Done():
@@ -155,7 +141,7 @@ func (c *Client) WaitForBoot(ctx context.Context, serial string, timeout time.Du
 	}
 }
 
-// EmuKill 请求模拟器实例优雅退出。
+// EmuKill 请求模拟器实例优雅退出（有界）。
 func (c *Client) EmuKill(ctx context.Context, serial string) error {
 	c.log.Info("adb", "请求优雅停止 %s（adb emu kill）", serial)
 	_, err := proc.Output(ctx, c.AdbPath, []string{"-s", serial, "emu", "kill"}, proc.Options{
@@ -164,108 +150,5 @@ func (c *Client) EmuKill(ctx context.Context, serial string) error {
 	if err != nil {
 		c.log.Warn("adb", "%s 的 emu kill 失败（将回退到强制结束进程）：%v", serial, err)
 	}
-	return err
-}
-
-// Shell 执行 shell 命令。
-func (c *Client) Shell(ctx context.Context, serial, command string) (string, error) {
-	args := []string{}
-	if serial != "" {
-		args = append(args, "-s", serial)
-	}
-	args = append(args, "shell", command)
-	return proc.Output(ctx, c.AdbPath, args, proc.Options{Env: c.Env, Timeout: 60 * time.Second})
-}
-
-// Install 安装 APK（-r 覆盖安装，-g 授予全部权限）。
-func (c *Client) Install(ctx context.Context, serial, apkPath string, grantAll bool, onLine func(string, string)) error {
-	c.log.Info("adb", "安装 APK 到 %s：%s（授权全部权限=%v）", serial, apkPath, grantAll)
-	args := []string{}
-	if serial != "" {
-		args = append(args, "-s", serial)
-	}
-	args = append(args, "install", "-r")
-	if grantAll {
-		args = append(args, "-g")
-	}
-	args = append(args, apkPath)
-	res, err := proc.Run(ctx, c.AdbPath, args, proc.Options{
-		Env: c.Env, Timeout: 10 * time.Minute, OnLine: onLine,
-	})
-	if err != nil {
-		return err
-	}
-	if strings.Contains(strings.ToLower(res.Stdout), "failure") {
-		c.log.Error("adb", "APK 安装失败：%s", res.Combined())
-		return domain.ErrDetail(domain.CodeProcessFailed, "APK 安装失败", res.Combined())
-	}
-	c.log.Info("adb", "APK 安装成功：%s", apkPath)
-	return nil
-}
-
-// Push 推送文件到设备。
-func (c *Client) Push(ctx context.Context, serial, local, remote string, onLine func(string, string)) error {
-	args := []string{}
-	if serial != "" {
-		args = append(args, "-s", serial)
-	}
-	args = append(args, "push", local, remote)
-	_, err := proc.Output(ctx, c.AdbPath, args, proc.Options{
-		Env: c.Env, Timeout: 30 * time.Minute, OnLine: onLine,
-	})
-	return err
-}
-
-// Pull 从设备拉取文件。
-func (c *Client) Pull(ctx context.Context, serial, remote, local string, onLine func(string, string)) error {
-	args := []string{}
-	if serial != "" {
-		args = append(args, "-s", serial)
-	}
-	args = append(args, "pull", remote, local)
-	_, err := proc.Output(ctx, c.AdbPath, args, proc.Options{
-		Env: c.Env, Timeout: 30 * time.Minute, OnLine: onLine,
-	})
-	return err
-}
-
-// Root 以 root 重启 adbd（Play 镜像会失败）。
-func (c *Client) Root(ctx context.Context, serial string) (string, error) {
-	return c.Shell(ctx, serial, "adb root")
-}
-
-// Remount 以可写方式重新挂载 system/vendor（需要先以 -writable-system 启动）。
-func (c *Client) Remount(ctx context.Context, serial string) (string, error) {
-	args := []string{}
-	if serial != "" {
-		args = append(args, "-s", serial)
-	}
-	args = append(args, "remount")
-	return proc.Output(ctx, c.AdbPath, args, proc.Options{Env: c.Env, Timeout: 60 * time.Second})
-}
-
-// Screenshot 截屏并返回 PNG 字节。
-func (c *Client) Screenshot(ctx context.Context, serial string) ([]byte, error) {
-	args := []string{}
-	if serial != "" {
-		args = append(args, "-s", serial)
-	}
-	args = append(args, "exec-out", "screencap", "-p")
-	return proc.OutputBytes(ctx, c.AdbPath, args, proc.Options{Env: c.Env, Timeout: 60 * time.Second})
-}
-
-// StartServer 启动 adb 服务。
-func (c *Client) StartServer(ctx context.Context) error {
-	_, err := proc.Output(ctx, c.AdbPath, []string{"start-server"}, proc.Options{
-		Env: c.Env, Timeout: 60 * time.Second,
-	})
-	return err
-}
-
-// KillServer 关闭 adb 服务（用于重置异常状态）。
-func (c *Client) KillServer(ctx context.Context) error {
-	_, err := proc.Output(ctx, c.AdbPath, []string{"kill-server"}, proc.Options{
-		Env: c.Env, Timeout: 30 * time.Second,
-	})
 	return err
 }

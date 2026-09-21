@@ -8,7 +8,6 @@ package proc
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -204,43 +203,6 @@ func Output(ctx context.Context, name string, args []string, opts Options) (stri
 // Prepare 为**长驻**子进程（如 emulator.exe）设置隐藏控制台窗口与独立进程组。
 // 调用方负责 Start/Wait/Kill。
 func Prepare(cmd *exec.Cmd) { applySysProcAttr(cmd) }
-
-// OutputBytes 执行并返回 stdout 的**原始字节**（用于 screencap 等二进制输出）。
-//
-// 与 Run 的区别：不做行扫描与 UTF-8 解码，直接读取完整字节流。
-func OutputBytes(ctx context.Context, name string, args []string, opts Options) ([]byte, error) {
-	res := Result{Command: name, Args: args}
-	if name == "" {
-		return nil, domain.Err(domain.CodeInvalidArgument, "可执行文件路径为空")
-	}
-	runCtx := ctx
-	var cancel context.CancelFunc
-	if opts.Timeout > 0 {
-		runCtx, cancel = context.WithTimeout(ctx, opts.Timeout)
-		defer cancel()
-	}
-	cmd := exec.CommandContext(runCtx, name, args...)
-	cmd.Dir = opts.Dir
-	if opts.Env != nil {
-		cmd.Env = opts.Env
-	}
-	applySysProcAttr(cmd)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		return nil, domain.Wrap(domain.CodeProcessFailed, "无法启动进程 "+name, err)
-	}
-	waitErr := cmd.Wait()
-	if waitErr != nil {
-		detail := strings.TrimSpace(stderr.String())
-		return stdout.Bytes(), domain.ErrDetail(domain.CodeProcessFailed,
-			shortName(name)+" 执行失败", detail)
-	}
-	_ = res
-	return stdout.Bytes(), nil
-}
 
 // Available 判断可执行文件是否存在且可被调用（用于工具链探测的"实跑校验"）。
 func Available(ctx context.Context, name string, args ...string) (bool, string) {

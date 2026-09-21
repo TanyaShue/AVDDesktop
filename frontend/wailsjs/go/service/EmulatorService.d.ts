@@ -3,23 +3,7 @@
 import {domain} from '../models';
 import {service} from '../models';
 
-export function GetLog(arg1:string,arg2:number):Promise<Array<domain.LogLine>>;
-
 export function ListRunning():Promise<Array<domain.EmulatorInstance>>;
-
-export function Restart(arg1:string,arg2:domain.LaunchOptions):Promise<domain.EmulatorInstance>;
-
-export function Rotate(arg1:string,arg2:string):Promise<void>;
-
-export function Screenshot(arg1:string):Promise<string>;
-
-export function SendKey(arg1:string,arg2:string):Promise<void>;
-
-export function SetBattery(arg1:string,arg2:number,arg3:boolean):Promise<void>;
-
-export function SetGps(arg1:string,arg2:number,arg3:number):Promise<void>;
-
-export function SetNetwork(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function Shutdown(arg1:boolean):Promise<void>;
 

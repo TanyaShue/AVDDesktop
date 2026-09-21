@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import * as api from "../bridge/api";
 import { EVENTS, errorText } from "../bridge/api";
-import type { AvdSummary, EmulatorInstance, LaunchOptions } from "../bridge/types";
+import type { AvdSummary, EmulatorInstance } from "../bridge/types";
 import type { EnvCheck } from "../hooks/useEnvCheck";
 import { useWailsEvent } from "../hooks/useApp";
 import { DeviceWizard } from "./DeviceWizard";
@@ -63,24 +63,14 @@ export function DevicesPage({ onToast, env }: Props) {
     });
   }, [devices, query, sortBy]);
 
-  const startDevice = async (device: AvdSummary, options?: LaunchOptions) => {
+  const startDevice = async (device: AvdSummary, opts?: { coldBoot?: boolean; noWindow?: boolean }) => {
     setBusyName(device.name);
     try {
-      await api.Emulator.Start(
-        api.req.startEmulator({
-          avdName: device.name,
-          options:
-            options ??
-            ({
-              coldBoot: false,
-              wipeData: false,
-              noWindow: false,
-              noAudio: false,
-              noBootAnim: false,
-              writableSystem: false,
-            } as LaunchOptions),
-        }),
-      );
+      await api.Emulator.Start({
+        avdName: device.name,
+        coldBoot: opts?.coldBoot ?? false,
+        noWindow: opts?.noWindow ?? false,
+      });
       onToast("info", "正在启动 " + device.name, "首次启动可能需要几分钟");
       await load();
     } catch (err) {
@@ -286,11 +276,11 @@ export function DevicesPage({ onToast, env }: Props) {
                         >
                           <MenuItem
                             label="冷启动（不使用快照）"
-                            onClick={() => void startDevice(device, { coldBoot: true } as LaunchOptions)}
+                            onClick={() => void startDevice(device, { coldBoot: true })}
                           />
                           <MenuItem
                             label="无窗口启动"
-                            onClick={() => void startDevice(device, { noWindow: true } as LaunchOptions)}
+                            onClick={() => void startDevice(device, { noWindow: true })}
                           />
                           <MenuItem
                             label="复制启动命令"

@@ -10,7 +10,6 @@ import (
 
 	"AVDDesktop/internal/adb"
 	"AVDDesktop/internal/avd"
-	"AVDDesktop/internal/avd/launch"
 	"AVDDesktop/internal/config"
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/job"
@@ -41,7 +40,7 @@ type Runtime struct {
 type components struct {
 	Tools    platform.Tools
 	Store    *avd.Store
-	Launcher *launch.Launcher
+	Launcher *avd.Launcher
 	Adb      *adb.Client
 	Env      []string
 }
@@ -70,7 +69,7 @@ func NewRuntime(appName, version string, settings *config.Manager, log *logging.
 		Adb:   adb.New(tools.Adb, env, log),
 		Env:   env,
 	}
-	r.comp.Launcher = launch.New(tools, env, st, r.comp.Adb, r.Emit, log)
+	r.comp.Launcher = avd.NewLauncher(tools, env, st, r.comp.Adb, r.Emit, log)
 	r.jobs = job.NewManager(r.Emit, log)
 	return r, nil
 }
