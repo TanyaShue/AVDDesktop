@@ -60,7 +60,7 @@ export default function App() {
         {/* key 让切换页面时自动丢弃上一个页面的错误状态 */}
         <ErrorBoundary key={page} scope={PAGE_TITLES[page]}>
           {page === "devices" ? (
-            <DevicesPage onToast={push} env={env} />
+            <DevicesPage onToast={push} env={env} confirmBeforeDelete={settings?.confirmBeforeDelete ?? true} />
           ) : (
             <SettingsPage
               onToast={push}

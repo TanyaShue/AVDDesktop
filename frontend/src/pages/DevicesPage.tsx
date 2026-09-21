@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import * as api from "../bridge/api";
 import { EVENTS, errorText } from "../bridge/api";
-import type { AvdSummary, EmulatorInstance } from "../bridge/types";
+import type { AvdState, AvdSummary, EmulatorInstance } from "../bridge/types";
 import type { EnvCheck } from "../hooks/useEnvCheck";
 import { useWailsEvent } from "../hooks/useApp";
 import { DeviceWizard } from "./DeviceWizard";
@@ -10,9 +10,11 @@ import { DeviceWizard } from "./DeviceWizard";
 interface Props {
   onToast: (level: "info" | "success" | "warning" | "danger", title: string, text?: string) => void;
   env: EnvCheck;
+  /** 来自设置页：关闭后删除设备不再弹确认框。 */
+  confirmBeforeDelete: boolean;
 }
 
-export function DevicesPage({ onToast, env }: Props) {
+export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
   const [devices, setDevices] = useState<AvdSummary[]>([]);
   const [instances, setInstances] = useState<EmulatorInstance[]>([]);
   const [query, setQuery] = useState("");
@@ -38,15 +40,20 @@ export function DevicesPage({ onToast, env }: Props) {
   useWailsEvent<EmulatorInstance>(EVENTS.emulatorState, () => void load());
   useWailsEvent<unknown>(EVENTS.avdChanged, () => void load());
 
-  const running = useMemo(() => {
+  // active 的实例（进程仍活着，含 starting/booting/stopping/error）才提供停止按钮：
+  // 后端对同一 AVD 的重复启动会直接返回 FILE_IN_USE，误显示「启动」会让用户白撞。
+  const active = useMemo(() => {
     const map = new Map<string, EmulatorInstance>();
     instances.forEach((inst) => {
-      if (inst.state === "running" || inst.state === "booting" || inst.state === "starting") {
-        map.set(inst.avdName, inst);
-      }
+      if (instanceAlive(inst)) map.set(inst.avdName, inst);
     });
     return map;
   }, [instances]);
+
+  const runningCount = useMemo(
+    () => instances.filter((inst) => inst.state === "running").length,
+    [instances],
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -71,7 +78,7 @@ export function DevicesPage({ onToast, env }: Props) {
         coldBoot: opts?.coldBoot ?? false,
         noWindow: opts?.noWindow ?? false,
       });
-      onToast("info", "正在启动 " + device.name, "首次启动可能需要几分钟");
+      onToast("info", "正在启动 " + device.name, "首次启动可能需要几分钟，进度显示在底部任务区域");
       await load();
     } catch (err) {
       onToast("danger", "启动失败", errorText(err));
@@ -94,12 +101,14 @@ export function DevicesPage({ onToast, env }: Props) {
   };
 
   const deleteDevice = async (device: AvdSummary) => {
-    const ok = window.confirm(
-      `确认删除设备「${device.name}」？
+    if (confirmBeforeDelete) {
+      const ok = window.confirm(
+        `确认删除设备「${device.name}」？
 
 将删除该设备的全部数据，此操作不可撤销。`,
-    );
-    if (!ok) return;
+      );
+      if (!ok) return;
+    }
     try {
       const id = await api.Avd.Delete(device.name);
       onToast("info", "正在删除设备", `任务 ${id}`);
@@ -115,7 +124,7 @@ export function DevicesPage({ onToast, env }: Props) {
           <div className="pageheader__title">设备</div>
           <div className="pageheader__subtitle">
             <span>
-              共 {devices.length} 个设备，{running.size} 个运行中
+              共 {devices.length} 个设备，{runningCount} 个运行中
             </span>
           </div>
         </div>
@@ -191,8 +200,9 @@ export function DevicesPage({ onToast, env }: Props) {
         ) : (
           <div className={view === "grid" ? "grid grid--devices" : "grid"} style={{ gridTemplateColumns: view === "list" ? "1fr" : undefined }}>
             {filtered.map((device) => {
-              const inst = running.get(device.name);
-              const isRunning = !!inst;
+              const inst = active.get(device.name);
+              // Wails 把 Go 的 AvdState 生成为 string，这里收敛回联合类型后再交给状态展示函数
+              const state = inst?.state as AvdState | undefined;
               return (
                 <div key={device.name} className="card card--hover device">
                   <div className="device__thumb" aria-hidden>
@@ -211,13 +221,8 @@ export function DevicesPage({ onToast, env }: Props) {
                     </div>
                     <div className="device__meta nums">
                       <span className="device__state">
-                        <span
-                          className="dot"
-                          style={{
-                            background: isRunning ? "var(--success)" : "var(--text-disabled)",
-                          }}
-                        />
-                        {stateLabel(inst?.state, isRunning)}
+                        <span className="dot" style={{ background: stateColor(state) }} />
+                        {stateLabel(state)}
                       </span>
                       {inst ? (
                         <>
@@ -235,7 +240,7 @@ export function DevicesPage({ onToast, env }: Props) {
 
                   <div className="device__actions">
                     <div className="device__row-actions">
-                      {isRunning ? (
+                      {inst ? (
                         <button
                           className="btn btn--circle btn--circle-stop"
                           title="停止"
@@ -325,8 +330,30 @@ function MenuItem({ label, onClick, danger }: { label: string; onClick: () => vo
   );
 }
 
-function stateLabel(state: string | undefined, isRunning: boolean): string {
-  if (!isRunning) return "已停止";
+/** 实例进程是否仍活着：stopped 表示已退出；error 状态只有在进程退出（有退出码）后才算结束。 */
+function instanceAlive(inst: EmulatorInstance): boolean {
+  if (inst.state === "stopped") return false;
+  if (inst.state === "error") return inst.exitCode == null;
+  return true;
+}
+
+/** 状态点颜色：与后端状态机一致，异常用红色、过渡状态用橙色。 */
+function stateColor(state: AvdState | undefined): string {
+  switch (state) {
+    case "running":
+      return "var(--success)";
+    case "error":
+      return "var(--danger)";
+    case "starting":
+    case "booting":
+    case "stopping":
+      return "var(--warning)";
+    default:
+      return "var(--text-disabled)";
+  }
+}
+
+function stateLabel(state: AvdState | undefined): string {
   switch (state) {
     case "starting":
       return "启动中";

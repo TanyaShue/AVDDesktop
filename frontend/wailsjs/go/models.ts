@@ -503,28 +503,6 @@ export namespace domain {
 
 export namespace service {
 	
-	export class AppInfo {
-	    name: string;
-	    version: string;
-	    appRoot: string;
-	    sdkRoot: string;
-	    avdHome: string;
-	    logLevel: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new AppInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.version = source["version"];
-	        this.appRoot = source["appRoot"];
-	        this.sdkRoot = source["sdkRoot"];
-	        this.avdHome = source["avdHome"];
-	        this.logLevel = source["logLevel"];
-	    }
-	}
 	export class ResolvedPaths {
 	    appRoot: string;
 	    sdkRoot: string;

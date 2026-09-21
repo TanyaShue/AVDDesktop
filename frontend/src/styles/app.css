@@ -302,11 +302,6 @@ select {
   background: var(--bg-hover);
 }
 
-.btn--danger {
-  background: var(--danger);
-  color: #fff;
-}
-
 .btn--danger-ghost {
   background: transparent;
   color: var(--danger);
@@ -384,21 +379,11 @@ select {
   gap: var(--sp-4);
 }
 
-.grid--tools {
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-}
-
 .grid--devices {
   grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
 }
 
-/* ---------------------------------------------------------------- 状态卡片 */
-
-.tool {
-  padding: var(--sp-4);
-  display: flex;
-  gap: var(--sp-3);
-}
+/* ---------------------------------------------------------------- 状态图标 */
 
 .tool__icon {
   width: 40px;
@@ -425,45 +410,6 @@ select {
 .tool__icon--bad {
   background: var(--danger-soft);
   color: var(--danger);
-}
-
-.tool__main {
-  flex: 1;
-  min-width: 0;
-}
-
-.tool__head {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
-.tool__name {
-  font-size: 14px;
-  font-weight: 600;
-  flex: 1;
-  min-width: 0;
-}
-
-.tool__path {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-tertiary);
-  margin-top: var(--sp-2);
-  cursor: pointer;
-}
-
-.tool__detail {
-  font-size: 13px;
-  color: var(--text-secondary);
-  margin-top: var(--sp-2);
-  line-height: 20px;
-}
-
-.tool__actions {
-  margin-top: var(--sp-3);
-  display: flex;
-  gap: var(--sp-2);
 }
 
 /* ---------------------------------------------------------------- chip */
@@ -869,19 +815,6 @@ select {
   }
 }
 
-.scorebar {
-  width: 64px;
-  height: 4px;
-  border-radius: var(--r-full);
-  background: var(--bg-pressed);
-  overflow: hidden;
-}
-
-.scorebar__fill {
-  height: 100%;
-  border-radius: var(--r-full);
-}
-
 /* ---------------------------------------------------------------- 任务抽屉 */
 
 .drawer {
@@ -1124,29 +1057,6 @@ select {
   to {
     transform: rotate(360deg);
   }
-}
-
-.skeleton {
-  background: var(--bg-hover);
-  border-radius: var(--r-sm);
-  animation: shimmer 1.2s infinite;
-}
-
-@keyframes shimmer {
-  50% {
-    opacity: 0.55;
-  }
-}
-
-.answer-actions {
-  display: flex;
-  gap: var(--sp-2);
-  margin-top: var(--sp-3);
-}
-
-.logo-mark {
-  font-weight: 700;
-  letter-spacing: 0.4px;
 }
 
 /* ------------------------------------------------------- 错误边界兜底页面 */

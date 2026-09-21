@@ -1,8 +1,6 @@
 package service
 
 import (
-	"strings"
-
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"AVDDesktop/internal/domain"
@@ -81,29 +79,3 @@ func (s *WindowService) IsMaximised() bool { return wailsruntime.WindowIsMaximis
 
 // Close 关闭窗口。
 func (s *WindowService) Close() { wailsruntime.Quit(s.rt.Context()) }
-
-// ------------------------------------------------------------------ AppInfo
-
-// AppInfo 返回应用级信息（设置页关于区使用）。
-type AppInfo struct {
-	Name     string `json:"name"`
-	Version  string `json:"version"`
-	AppRoot  string `json:"appRoot"`
-	SdkRoot  string `json:"sdkRoot"`
-	AvdHome  string `json:"avdHome"`
-	LogLevel string `json:"logLevel"`
-}
-
-// Info 返回应用信息。
-func (s *SettingsService) Info() AppInfo {
-	settings := s.rt.settings.Get()
-	paths := s.rt.Resolved()
-	return AppInfo{
-		Name:     s.rt.AppName,
-		Version:  s.rt.Version,
-		AppRoot:  paths.AppRoot,
-		SdkRoot:  paths.SdkRoot,
-		AvdHome:  paths.AvdHome,
-		LogLevel: strings.TrimSpace(settings.LogLevel),
-	}
-}

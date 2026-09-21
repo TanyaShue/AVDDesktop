@@ -6,10 +6,6 @@ export function Get() {
   return window['go']['service']['SettingsService']['Get']();
 }
 
-export function Info() {
-  return window['go']['service']['SettingsService']['Info']();
-}
-
 export function Path() {
   return window['go']['service']['SettingsService']['Path']();
 }

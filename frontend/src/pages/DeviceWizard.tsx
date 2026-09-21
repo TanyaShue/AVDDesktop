@@ -24,6 +24,7 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
   });
   const [images, setImages] = useState<SystemImage[]>([]);
   const [allImagesLoaded, setAllImagesLoaded] = useState(false);
+  const [imagesError, setImagesError] = useState("");
   const [imagePath, setImagePath] = useState("");
   const [loadingImages, setLoadingImages] = useState(true);
   const [profiles, setProfiles] = useState<DeviceProfile[]>([]);
@@ -36,10 +37,14 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
       try {
         const list = api.asArray((await api.Avd.ListImages(installedOnly)) as SystemImage[]);
         setImages(list);
-        if (installedOnly) setAllImagesLoaded(false);
+        setImagesError("");
+        // 只有全量列表真的加载成功才锁住按钮：失败后用户可以重试
+        if (!installedOnly) setAllImagesLoaded(true);
         setImagePath((current) => (list.some((i) => i.path === current) ? current : (list[0]?.path ?? "")));
       } catch (err) {
-        onToast("danger", installedOnly ? "读取已安装镜像失败" : "读取可用镜像失败", errorText(err));
+        const text = errorText(err);
+        setImagesError(text);
+        onToast("danger", installedOnly ? "读取已安装镜像失败" : "读取可用镜像失败", text);
       } finally {
         setLoadingImages(false);
       }
@@ -157,21 +162,20 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
               </option>
             ))}
           </select>
-          <div className="field__hint">
-            {selected && !selected.installed
-              ? "该镜像尚未安装，创建时会自动通过 sdkmanager 下载（约 1-2 GB）"
-              : "镜像由官方 sdkmanager 安装到软件自己的 SDK 目录"}
+          <div className={`field__hint${imagesError ? " field__hint--error" : ""}`}>
+            {imagesError
+              ? `读取镜像失败：${imagesError}（可重试「加载全部可用镜像」）`
+              : selected && !selected.installed
+                ? "该镜像尚未安装，创建时会自动通过 sdkmanager 下载（约 1-2 GB）"
+                : "镜像由官方 sdkmanager 安装到软件自己的 SDK 目录"}
           </div>
         </div>
         <button
           className="btn btn--ghost"
           disabled={loadingImages || allImagesLoaded}
-          onClick={() => {
-            setAllImagesLoaded(true);
-            void loadImages(false);
-          }}
+          onClick={() => void loadImages(false)}
         >
-          {allImagesLoaded ? "已加载全部" : "加载全部可用镜像"}
+          {allImagesLoaded ? "已加载全部" : loadingImages ? "加载中…" : "加载全部可用镜像"}
         </button>
       </div>
 

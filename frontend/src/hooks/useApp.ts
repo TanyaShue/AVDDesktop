@@ -55,7 +55,7 @@ export function useJobs() {
     });
   });
 
-  return { jobs, logs, upsert };
+  return { jobs, logs };
 }
 
 let toastSeq = 0;

@@ -8,13 +8,12 @@ export * as Env from "../../wailsjs/go/service/EnvService";
 export * as Avd from "../../wailsjs/go/service/AvdService";
 export * as Emulator from "../../wailsjs/go/service/EmulatorService";
 export * as Settings from "../../wailsjs/go/service/SettingsService";
-export * as Logs from "../../wailsjs/go/service/LogService";
 export * as Jobs from "../../wailsjs/go/service/JobService";
 export * as Win from "../../wailsjs/go/service/WindowService";
 
 import type { EnvReport } from "./types";
 
-export { EventsOn, EventsOff, EventsEmit } from "../../wailsjs/runtime/runtime";
+export { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
 
 /**
  * 把可能为 null 的数组兜底成空数组。
@@ -47,7 +46,6 @@ export const EVENTS = {
   emulatorState: "emulator:state",
   avdChanged: "avd:changed",
   envChanged: "env:changed",
-  logLine: "log:line",
 } as const;
 
 /** 把 AppError 渲染成可读文本。 */

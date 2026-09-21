@@ -3,10 +3,16 @@ package service
 import (
 	"context"
 	"sort"
+	"strings"
+	"time"
 
 	"AVDDesktop/internal/domain"
+	"AVDDesktop/internal/job"
 	"AVDDesktop/internal/platform"
 )
+
+// startTrackInterval 是启动任务跟随实例状态的轮询间隔。
+const startTrackInterval = 500 * time.Millisecond
 
 // EmulatorService 管理模拟器实例：启动、停止、列表与应用退出时的统一清理。
 type EmulatorService struct{ rt *Runtime }
@@ -38,8 +44,80 @@ func (s *EmulatorService) Start(req StartRequest) (*domain.EmulatorInstance, err
 	if err != nil {
 		return nil, err
 	}
+	s.trackStart(inst)
 	s.rt.Emit("avd:changed", map[string]any{"action": "started", "name": req.AvdName})
 	return inst, nil
+}
+
+// trackStart 把一次启动登记为任务：跟随实例状态，把关键节点写进底部统一任务日志。
+//
+// 任务在实例进入 running（成功）、error（失败）或就绪前退出（已取消）时结束，
+// 使「启动模拟器」与其它耗时链路一样，进度与日志只出现在底部任务区域。
+func (s *EmulatorService) trackStart(inst *domain.EmulatorInstance) {
+	launcher := s.rt.Components().Launcher
+	s.rt.jobs.Start(s.rt.Context(), job.Spec{
+		Kind:     domain.JobEmulatorStart,
+		Title:    "启动模拟器 " + inst.AvdName,
+		Subtitle: inst.Serial,
+	}, func(ctx context.Context, j *job.Job) error {
+		j.Logf("info", "emulator", "已启动 emulator 进程：pid=%d port=%d", inst.PID, inst.Port)
+		j.Logf("info", "emulator", "参数：%s", strings.Join(inst.Args, " "))
+		ticker := time.NewTicker(startTrackInterval)
+		defer ticker.Stop()
+		seen := domain.AvdState("")
+		for {
+			cur, ok := launcher.Get(inst.ID)
+			if !ok {
+				return domain.Err(domain.CodeUnknown, "实例记录已丢失")
+			}
+			if cur.State != seen {
+				seen = cur.State
+				text := startStateText(cur.State)
+				j.SetPhase(text)
+				j.Logf("info", "emulator", "%s：%s", inst.Serial, text)
+				switch cur.State {
+				case domain.AvdRunning:
+					return nil
+				case domain.AvdError:
+					return domain.Err(domain.CodeProcessFailed, startFailureText(cur))
+				case domain.AvdStopped:
+					// 就绪前退出（通常是用户主动停止）：按已取消结束，避免误报失败
+					return context.Canceled
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+			}
+		}
+	})
+}
+
+// startStateText 把实例状态翻译成启动任务的阶段文案。
+func startStateText(state domain.AvdState) string {
+	switch state {
+	case domain.AvdStarting:
+		return "正在启动模拟器进程"
+	case domain.AvdBooting:
+		return "等待开机完成"
+	case domain.AvdRunning:
+		return "模拟器已就绪"
+	case domain.AvdStopping:
+		return "启动被中止：实例正在停止"
+	case domain.AvdStopped:
+		return "启动被中止：实例已停止"
+	default:
+		return "启动异常"
+	}
+}
+
+// startFailureText 取实例的失败原因；没有细节时给出可操作提示。
+func startFailureText(inst domain.EmulatorInstance) string {
+	if msg := strings.TrimSpace(inst.LastError); msg != "" {
+		return msg
+	}
+	return "模拟器在就绪前退出，详情见应用日志（模块 emulator）"
 }
 
 // Stop 停止实例。
