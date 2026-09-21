@@ -17,7 +17,6 @@ const (
 	ToolAvdmanager   ToolID = "avdmanager"
 	ToolAdb          ToolID = "adb"
 	ToolEmulator     ToolID = "emulator"
-	ToolSystemImages ToolID = "system-images"
 	ToolAcceleration ToolID = "accel"
 )
 
@@ -25,9 +24,8 @@ const (
 type ToolState string
 
 const (
-	StateMissing  ToolState = "missing"
-	StatePresent  ToolState = "present"
-	StateOutdated ToolState = "outdated"
+	StateMissing ToolState = "missing"
+	StatePresent ToolState = "present"
 )
 
 // FixKind 是环境检查项上的修复动作类型。
@@ -131,7 +129,6 @@ type EnvReport struct {
 	ElapsedMs int64      `json:"elapsedMs"`
 }
 
-// ---------------------------------------------------------------- 镜像与测速
 // ---------------------------------------------------------------- System Image
 
 // SystemImage 是可以用来创建 AVD 的系统镜像（数据来自官方 sdkmanager 的包列表）。
@@ -147,7 +144,6 @@ type SystemImage struct {
 
 // ---------------------------------------------------------------- AVD
 
-// DeviceProfile 是 avdmanager 提供的设备档案。
 // DeviceProfile 是 avdmanager 提供的设备档案。
 type DeviceProfile struct {
 	ID    string `json:"id"`
@@ -169,7 +165,6 @@ const (
 	AvdError    AvdState = "error"
 )
 
-// AvdSummary 是设备列表卡片的数据。
 // AvdSummary 是设备列表里的一行（只保留界面真正展示的信息）。
 type AvdSummary struct {
 	Name            string   `json:"name"`
@@ -232,7 +227,6 @@ type AdbDevice struct {
 	Device      string `json:"device,omitempty"`
 	TransportID string `json:"transportId,omitempty"`
 	IsEmulator  bool   `json:"isEmulator"`
-	InstanceID  string `json:"instanceId,omitempty"`
 }
 
 // ---------------------------------------------------------------- 任务与设置
@@ -241,18 +235,11 @@ type AdbDevice struct {
 type JobKind string
 
 const (
-	JobSpeedTest     JobKind = "speedtest"
-	JobDownload      JobKind = "download"
 	JobInstall       JobKind = "install"
 	JobBootstrap     JobKind = "bootstrap"
 	JobAvdCreate     JobKind = "avd-create"
 	JobAvdDelete     JobKind = "avd-delete"
-	JobAvdClone      JobKind = "avd-clone"
-	JobSnapshot      JobKind = "snapshot"
 	JobEmulatorStart JobKind = "emulator-start"
-	JobLogcat        JobKind = "logcat"
-	JobExport        JobKind = "export"
-	JobDiagnostics   JobKind = "diagnostics"
 )
 
 // JobStatus 任务状态。
@@ -272,7 +259,6 @@ type JobInfo struct {
 	Kind       JobKind   `json:"kind"`
 	Title      string    `json:"title"`
 	Subtitle   string    `json:"subtitle,omitempty"`
-	Group      string    `json:"group,omitempty"`
 	Status     JobStatus `json:"status"`
 	Phase      string    `json:"phase,omitempty"`
 	Percent    float64   `json:"percent"`
@@ -280,8 +266,6 @@ type JobInfo struct {
 	BytesTotal int64     `json:"bytesTotal"`
 	SpeedBps   int64     `json:"speedBps"`
 	ETASeconds int       `json:"etaSeconds"`
-	ItemsDone  int       `json:"itemsDone"`
-	ItemsTotal int       `json:"itemsTotal"`
 	StartedAt  int64     `json:"startedAt"`
 	EndedAt    int64     `json:"endedAt,omitempty"`
 	Error      *AppError `json:"error,omitempty"`

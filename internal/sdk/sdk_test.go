@@ -108,20 +108,6 @@ func TestSplitImageAndDir(t *testing.T) {
 	}
 }
 
-func TestTagLabel(t *testing.T) {
-	cases := map[string]string{
-		"google_apis":           "Google APIs",
-		"google_apis_playstore": "Google Play",
-		"default":               "AOSP",
-		"unknown_tag":           "unknown_tag",
-	}
-	for in, want := range cases {
-		if got := TagLabel(in); got != want {
-			t.Errorf("TagLabel(%q) = %q，期望 %q", in, got, want)
-		}
-	}
-}
-
 func TestCmdlineToolsArchive(t *testing.T) {
 	name, sha1sum, err := CmdlineToolsArchive()
 	if err != nil {

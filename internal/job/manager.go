@@ -1,7 +1,7 @@
 // Package job 是统一的长任务管理器。
 //
-// 设计（见 ARCHITECTURE.md ADR-03 / §7）：
-//   - 所有耗时操作（测速、下载、安装、创建 AVD、启动模拟器）都登记为 Job
+// 设计：
+//   - 所有耗时操作（下载、安装、创建 AVD、启动模拟器）都登记为 Job
 //   - 绑定方法立即返回 jobID，进度与日志通过事件流推送
 //   - 进度事件节流到 10Hz，日志按 200ms 节流推送，避免 Wails 序列化抖动
 //   - 同类型资源互斥由调用方通过 KeyedMutex 保证（SDK 写锁 / AVD 写锁）
@@ -23,7 +23,7 @@ import (
 // Sink 是事件出口（由 service 层桥接到 Wails runtime.EventsEmit）。
 type Sink func(event string, payload any)
 
-// 事件名（与 docs/API-CONTRACT.md §6 一致）。
+// 事件名（前端在 bridge/api.ts 的 EVENTS 中订阅）。
 const (
 	EventCreated  = "job:created"
 	EventProgress = "job:progress"
@@ -42,12 +42,9 @@ const (
 
 // Spec 描述一个任务。
 type Spec struct {
-	Kind       domain.JobKind
-	Title      string
-	Subtitle   string
-	Group      string
-	ItemsTotal int
-	BytesTotal int64
+	Kind     domain.JobKind
+	Title    string
+	Subtitle string
 }
 
 // Runner 是任务主体；返回 nil 表示成功。
@@ -86,14 +83,6 @@ func (j *Job) SetPhase(phase string) {
 	j.dirty = true
 }
 
-// SetSubtitle 更新副标题。
-func (j *Job) SetSubtitle(s string) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	j.info.Subtitle = s
-	j.dirty = true
-}
-
 // SetPercent 直接设置百分比（0-100，内部裁剪）。
 func (j *Job) SetPercent(p float64) {
 	j.mu.Lock()
@@ -123,15 +112,6 @@ func (j *Job) SetBytes(done, total int64, speedBps int64) {
 	if speedBps > 0 && total > done {
 		j.info.ETASeconds = int((total - done) / speedBps)
 	}
-	j.dirty = true
-}
-
-// SetItems 更新子任务计数（例如第 3/5 个包）。
-func (j *Job) SetItems(done, total int) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	j.info.ItemsDone = done
-	j.info.ItemsTotal = total
 	j.dirty = true
 }
 
@@ -209,15 +189,12 @@ func (m *Manager) Start(parent context.Context, spec Spec, runner Runner) *Job {
 		spec:   spec,
 		cancel: cancel,
 		info: domain.JobInfo{
-			ID:         id,
-			Kind:       spec.Kind,
-			Title:      spec.Title,
-			Subtitle:   spec.Subtitle,
-			Group:      spec.Group,
-			Status:     domain.JobQueued,
-			ItemsTotal: spec.ItemsTotal,
-			BytesTotal: spec.BytesTotal,
-			StartedAt:  time.Now().UnixMilli(),
+			ID:        id,
+			Kind:      spec.Kind,
+			Title:     spec.Title,
+			Subtitle:  spec.Subtitle,
+			Status:    domain.JobQueued,
+			StartedAt: time.Now().UnixMilli(),
 		},
 		dirty: true,
 	}

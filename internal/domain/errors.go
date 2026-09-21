@@ -4,31 +4,19 @@ import "fmt"
 
 // 稳定错误码：前端按 Code 决定 UI，不依赖 Message 文案。
 const (
-	CodeUnknown            = "UNKNOWN"
-	CodePathNotFound       = "PATH_NOT_FOUND"
-	CodeToolMissing        = "TOOL_MISSING"
-	CodeJDKMissing         = "JDK_MISSING"
-	CodeJDKTooOld          = "JDK_TOO_OLD"
-	CodePermissionDenied   = "PERMISSION_DENIED"
-	CodeDiskFull           = "DISK_FULL"
-	CodeMirrorUnreachable  = "MIRROR_UNREACHABLE"
-	CodeMirrorIndexOnly    = "MIRROR_INDEX_ONLY"
-	CodeChecksumMismatch   = "CHECKSUM_MISMATCH"
-	CodeDownloadFailed     = "DOWNLOAD_FAILED"
-	CodeArchiveFailed      = "ARCHIVE_FAILED"
-	CodeFileInUse          = "FILE_IN_USE"
-	CodeAccelUnavailable   = "ACCEL_UNAVAILABLE"
-	CodePortExhausted      = "PORT_EXHAUSTED"
-	CodeAvdNameInvalid     = "AVD_NAME_INVALID"
-	CodeAvdExists          = "AVD_EXISTS"
-	CodeAvdNotFound        = "AVD_NOT_FOUND"
-	CodeImageNotInstalled  = "IMAGE_NOT_INSTALLED"
-	CodeJobCanceled        = "JOB_CANCELED"
-	CodeJobBusy            = "JOB_BUSY"
-	CodeNotImplemented     = "NOT_IMPLEMENTED"
-	CodeProcessFailed      = "PROCESS_FAILED"
-	CodeInvalidArgument    = "INVALID_ARGUMENT"
-	CodeLicenseNotAccepted = "LICENSE_NOT_ACCEPTED"
+	CodeUnknown          = "UNKNOWN"
+	CodePathNotFound     = "PATH_NOT_FOUND"
+	CodeToolMissing      = "TOOL_MISSING"
+	CodePermissionDenied = "PERMISSION_DENIED"
+	CodeArchiveFailed    = "ARCHIVE_FAILED"
+	CodeFileInUse        = "FILE_IN_USE"
+	CodePortExhausted    = "PORT_EXHAUSTED"
+	CodeAvdNameInvalid   = "AVD_NAME_INVALID"
+	CodeAvdNotFound      = "AVD_NOT_FOUND"
+	CodeJobCanceled      = "JOB_CANCELED"
+	CodeJobBusy          = "JOB_BUSY"
+	CodeProcessFailed    = "PROCESS_FAILED"
+	CodeInvalidArgument  = "INVALID_ARGUMENT"
 )
 
 // AppError 是跨 Wails 边界的统一错误。
@@ -68,9 +56,6 @@ func ErrDetail(code, message, detail string) *AppError {
 // WithHint 追加建议。
 func (e *AppError) WithHint(hint string) *AppError { e.Hint = hint; return e }
 
-// WithDetail 追加上下文输出。
-func (e *AppError) WithDetail(detail string) *AppError { e.Detail = detail; return e }
-
 // WithAction 追加可执行动作。
 func (e *AppError) WithAction(kind, label, payload string) *AppError {
 	e.Actions = append(e.Actions, Action{Kind: kind, Label: label, Payload: payload})
@@ -83,16 +68,4 @@ func Wrap(code, message string, err error) *AppError {
 		return nil
 	}
 	return &AppError{Code: code, Message: message, Detail: err.Error()}
-}
-
-// IsNotImplemented 判断是否为占位实现返回的错误。
-func IsNotImplemented(err error) bool {
-	ae, ok := err.(*AppError)
-	return ok && ae.Code == CodeNotImplemented
-}
-
-// NotImplemented 是骨架阶段的占位错误；实现后必须删除对应用法。
-func NotImplemented(what string) *AppError {
-	return Err(CodeNotImplemented, fmt.Sprintf("%s 尚未实现", what)).
-		WithHint("这是框架骨架的占位实现")
 }

@@ -1,7 +1,7 @@
 // Package proc 统一外部进程调用：隐藏控制台窗口、UTF-8 解码、实时行回调、
 // 超时与取消、进程树终止。
 //
-// 设计约束（见 ARCHITECTURE.md §12-安全）：
+// 设计约束：
 //   - 只允许白名单可执行文件（emulator / adb / java / sdkmanager / avdmanager）
 //   - 一律 exec.CommandContext(name, args...) 传数组，绝不拼接 shell 字符串
 package proc
@@ -27,7 +27,6 @@ type Options struct {
 	Timeout    time.Duration             // 0 = 无超时
 	StdinLines []string                  // 依次写入 stdin 的行（用于 avdmanager 的交互确认）
 	OnLine     func(stream, line string) // 实时输出回调（stream: stdout|stderr）
-	LogTag     string                    // 日志前缀（可选）
 }
 
 // Result 是一次进程调用的结果。
@@ -55,14 +54,6 @@ func (r Result) Combined() string {
 	default:
 		return out + "\n" + errOut
 	}
-}
-
-// Cmdline 返回等价命令行（用于 UI 上的"查看等效命令"）。
-func (r Result) Cmdline() string {
-	if len(r.Args) == 0 {
-		return r.Command
-	}
-	return r.Command + " " + strings.Join(r.Args, " ")
 }
 
 // Run 执行外部程序（隐藏窗口、行流式回调、可选超时与取消）。

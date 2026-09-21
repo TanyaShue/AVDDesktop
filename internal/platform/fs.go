@@ -116,15 +116,6 @@ func WriteJSON(path string, v any) error {
 	return WriteFileAtomic(path, append(data, '\n'), 0o644)
 }
 
-// ReadJSON 读取 JSON；文件不存在时返回 os.ErrNotExist。
-func ReadJSON(path string, v any) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, v)
-}
-
 // HumanSize 把字节数格式化为人类可读（用于日志与错误信息）。
 func HumanSize(n int64) string {
 	const unit = 1024
@@ -193,51 +184,6 @@ func SplitLines(s string) []string {
 		}
 	}
 	return out
-}
-
-// VersionAtLeast 比较形如 "17.0.6" / "37.2.10" 的版本号，判断 a >= b。
-func VersionAtLeast(a, b string) bool {
-	am, an, ap := parseVersion(a)
-	bm, bn, bp := parseVersion(b)
-	if am != bm {
-		return am > bm
-	}
-	if an != bn {
-		return an > bn
-	}
-	return ap >= bp
-}
-
-func parseVersion(v string) (int, int, int) {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return 0, 0, 0
-	}
-	// 只取前导数字段
-	parts := strings.FieldsFunc(v, func(r rune) bool { return r == '.' || r == '-' || r == '_' || r == '+' || r == ' ' })
-	nums := make([]int, 0, 3)
-	for _, p := range parts {
-		n := 0
-		got := false
-		for _, r := range p {
-			if r < '0' || r > '9' {
-				break
-			}
-			n = n*10 + int(r-'0')
-			got = true
-		}
-		if !got {
-			break
-		}
-		nums = append(nums, n)
-		if len(nums) == 3 {
-			break
-		}
-	}
-	for len(nums) < 3 {
-		nums = append(nums, 0)
-	}
-	return nums[0], nums[1], nums[2]
 }
 
 // NowMs 返回当前 Unix 毫秒。

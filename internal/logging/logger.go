@@ -1,6 +1,6 @@
 // Package logging 提供结构化、按天+按大小滚动的应用日志。
 //
-// 设计要点（见 docs/ARCHITECTURE.md §12）：
+// 设计要点：
 //   - Interface 是各领域包依赖的最小接口，避免 internal 包之间互相引用具体类型
 //   - 领域包通过构造函数注入日志器，未注入时使用 Nop()，保证可测试性
 //   - Sink 把每条日志实时推给 UI（诊断面板），文件仍按天+大小滚动保留
@@ -12,7 +12,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -218,20 +217,6 @@ func (l *Logger) Error(module, format string, args ...any) {
 	l.log(LevelError, module, format, args...)
 }
 
-// Recover 捕获 fn 中的 panic 并记录堆栈，用于后台任务与协程。
-//
-// 返回 true 表示发生了 panic。
-func (l *Logger) Recover(module, context string, fn func()) (recovered bool) {
-	defer func() {
-		if r := recover(); r != nil {
-			recovered = true
-			l.Error(module, "panic: %v（%s）\n%s", r, context, truncateStack(debug.Stack()))
-		}
-	}()
-	fn()
-	return false
-}
-
 // Tail 返回内存中最近 n 条日志。
 func (l *Logger) Tail(n int) []Entry {
 	if l == nil {
@@ -420,15 +405,4 @@ func (l *Logger) cleanup() {
 func formatLine(at time.Time, level Level, module, message string) string {
 	return fmt.Sprintf("%s [%s] %-14s %s\n",
 		at.Format("2006-01-02 15:04:05.000"), level, module, message)
-}
-
-// today 返回当天日期字符串（测试用）。
-func today() string { return time.Now().Format("20060102") }
-
-func truncateStack(stack []byte) string {
-	const max = 4096
-	if len(stack) > max {
-		return string(stack[:max]) + "\n…（堆栈已截断）"
-	}
-	return string(stack)
 }

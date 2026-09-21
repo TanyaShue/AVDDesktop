@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestLevelFilteringAndRing(t *testing.T) {
@@ -32,7 +33,7 @@ func TestLevelFilteringAndRing(t *testing.T) {
 		t.Errorf("模块名不正确：%q", ring[1].Module)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "app-"+today()+".log"))
+	data, err := os.ReadFile(filepath.Join(dir, "app-"+time.Now().Format("20060102")+".log"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,32 +169,6 @@ func TestSizeRotation(t *testing.T) {
 	}
 }
 
-func TestRecoverCapturesPanic(t *testing.T) {
-	dir := t.TempDir()
-	l, err := New(Options{Dir: dir, Level: "debug"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = l.Close() }()
-
-	recovered := l.Recover("job", "任务测试", func() {
-		panic("boom")
-	})
-	if !recovered {
-		t.Fatal("Recover 应返回 true")
-	}
-	entries := l.Tail(5)
-	found := false
-	for _, e := range entries {
-		if e.Level == "ERROR" && strings.Contains(e.Message, "boom") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("panic 未被记录：%+v", entries)
-	}
-}
-
 func TestNopLoggerIsSafe(t *testing.T) {
 	var l Interface = Nop()
 	l.Debug("m", "d")
@@ -204,9 +179,9 @@ func TestNopLoggerIsSafe(t *testing.T) {
 }
 
 func TestEntryJSONShape(t *testing.T) {
-	// 前端 LogPanel 依赖这些字段名
+	// 前端统一日志面板依赖这些字段名
 	e := Entry{At: 1, Level: "INFO", Module: "detect", Message: "x"}
 	if e.At != 1 || e.Module != "detect" {
-		t.Fatal("Entry 字段被改动，请同步更新 frontend/src/components/LogPanel.tsx")
+		t.Fatal("Entry 字段被改动，请同步更新 frontend/src/hooks/useApp.ts 与 TaskDrawer")
 	}
 }

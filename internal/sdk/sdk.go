@@ -308,28 +308,6 @@ func ImageDir(pkgPath string) (string, error) {
 	return filepath.Join(parts[0], parts[1], parts[2], parts[3]), nil
 }
 
-// TagLabel 返回系统镜像 tag 的展示名（仅用于界面显示）。
-func TagLabel(tag string) string {
-	switch tag {
-	case "google_apis":
-		return "Google APIs"
-	case "google_apis_playstore":
-		return "Google Play"
-	case "default":
-		return "AOSP"
-	case "aosp_atd":
-		return "AOSP ATD"
-	case "google_atd":
-		return "Google APIs ATD"
-	case "android-desktop":
-		return "Desktop"
-	case "google_apis_ps16k":
-		return "Google APIs 16K"
-	default:
-		return tag
-	}
-}
-
 // ToolVersion 运行外部工具并返回版本文本（失败返回空串，不阻塞环境检查）。
 //
 // 注意：`java -version` 把版本写到 stderr，因此这里用合并输出。

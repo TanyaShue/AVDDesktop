@@ -1,5 +1,5 @@
 /* ============================================================================
- * AVDDesktop 组件与布局样式（对应 docs/UI-SPEC.md）
+ * AVDDesktop 组件与布局样式
  * 零第三方依赖：纯 CSS + 设计令牌
  * ========================================================================== */
 
@@ -483,12 +483,6 @@ select {
   position: relative;
 }
 
-.device__thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
 .device__body {
   flex: 1;
   min-width: 0;
@@ -653,20 +647,8 @@ select {
   animation: pop var(--dur) var(--ease);
 }
 
-.modal--sm {
-  width: 480px;
-}
-
 .modal--md {
   width: 640px;
-}
-
-.modal--lg {
-  width: 880px;
-}
-
-.modal--xl {
-  width: 1040px;
 }
 
 .modal__head {

@@ -128,6 +128,7 @@ func (a *App) shutdown(ctx context.Context) {
 	a.log.Info("app", "应用退出")
 	_ = a.log.Close()
 }
+
 // beforeClose 用于确认是否存在运行中的模拟器。
 func (a *App) beforeClose(ctx context.Context) bool {
 	running := a.Emulator.ListRunning()

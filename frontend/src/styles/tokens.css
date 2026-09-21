@@ -1,14 +1,12 @@
 /* ============================================================================
  * AVDDesktop 设计令牌
  * 视觉基线：assets/ 下的参考截图（浅色、留白、圆角卡片、蓝色主操作）
- * 完整规范见 docs/UI-SPEC.md §3
  * ========================================================================== */
 
 :root {
   /* 品牌 / 强调 */
   --primary: #2f7cf6;
   --primary-hover: #1e6be8;
-  --primary-active: #1758c4;
   --primary-soft: #eaf2fe;
   --primary-border: #bbd5fc;
 
@@ -40,11 +38,6 @@
   --neutral: #86909c;
   --neutral-soft: #f2f3f5;
 
-  /* 速度/评分条 */
-  --speed-fast: #00b42a;
-  --speed-mid: #ff7d00;
-  --speed-slow: #f53f3f;
-
   /* 字体 */
   --font-sans: -apple-system, "Segoe UI Variable Text", "Segoe UI", "PingFang SC",
     "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
@@ -57,10 +50,8 @@
   --sp-4: 16px;
   --sp-5: 20px;
   --sp-6: 24px;
-  --sp-8: 32px;
 
   /* 圆角 */
-  --r-xs: 4px;
   --r-sm: 6px;
   --r-md: 8px;
   --r-lg: 12px;
@@ -87,7 +78,6 @@
 [data-theme="dark"] {
   --primary: #4c90ff;
   --primary-hover: #6ba4ff;
-  --primary-active: #3a7fe0;
   --primary-soft: #12233d;
   --primary-border: #2a4a7a;
 

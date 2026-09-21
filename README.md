@@ -1,139 +1,72 @@
 # AVDDesktop
 
-不装 Android Studio，也能在 Windows 上把 Android 模拟器跑起来的桌面工具。
+管理**软件自带**的 Android SDK、系统镜像与 AVD，并启动 Android 模拟器；不需要安装 Android Studio，
+也不使用系统里的 sdkmanager / avdmanager / emulator / adb。
 
-- **环境自检**：一屏看清 JDK / sdkmanager / avdmanager / adb / emulator / 系统镜像 / 硬件加速 / 磁盘的状态与版本
-- **镜像测速**：内置常见镜像站与官方源，实测延迟、下载速度、可用性并给出评分，一键切换
-- **从镜像安装**：直接解析 `repository2-3.xml` 与 `sys-img2-3.xml`，下载 → SHA-1 校验 → 原子解压 → 写许可，支持断点续传
-- **AVD 管理**：图形化创建向导（设备档案 + 系统镜像 + 全量硬件配置）、启动/停止/多开、克隆、清除数据、快照、adb 集成
-- **无 JDK 也能用**：`emulator.exe` 是原生的，AVD 配置可由本工具直接写入（`AvdBackend` 双实现）
+- **自带 SDK**：所有内容放在软件自己的目录里，与系统 Android SDK 完全隔离
+- **首次运行自动准备**：发现自带 SDK 不存在时，自动下载官方命令行工具、接受许可、安装 platform-tools 与 emulator
+- **系统镜像**：列出官方仓库提供的镜像，按需通过 `sdkmanager` 安装
+- **AVD 管理**：列出 / 创建 / 删除设备，启动与停止模拟器并显示运行状态
+- **统一日志与任务**：底部区域显示长任务进度与日志
 
-技术栈：Wails v2 + Go 1.26 + React 19 + TypeScript + Vite 7（零第三方前端依赖）
+技术栈：Wails v2 + Go + React 19 + TypeScript + Vite。
 
 ---
 
-## 快速开始
+## 目录结构
+
+软件的数据目录（下称 `<Root>`）解析顺序：环境变量 `AVDDESKTOP_HOME` → 可执行文件所在目录（可写且不是
+临时目录或 macOS `.app` 包内）→ 用户数据目录。目录内容：
+
+```text
+<Root>/sdk       自带 Android SDK（cmdline-tools/latest、platform-tools、emulator、system-images）
+<Root>/avd       自带 AVD（<name>.ini 与 <name>.avd/config.ini）
+<Root>/config    设置文件 settings.json
+<Root>/logs      应用日志（按天 + 按大小滚动）
+<Root>/cache     下载临时文件
+```
+
+## 首次运行行为
+
+1. 创建上述目录并写入默认设置；
+2. 自检：探测自带工具链与 JDK（java），检查硬件加速与磁盘空间；
+3. 若自带 SDK 还没有 `sdkmanager`，自动准备：下载官方 cmdline-tools → 解压 → 接受许可 →
+   安装 `platform-tools` 与 `emulator`（需要网络，进度显示在底部任务区域）；
+4. 在「设备」页选择系统镜像创建 AVD，然后启动模拟器。镜像尚未安装时，界面会引导用 `sdkmanager` 安装。
+
+## 环境要求
+
+- **JDK 17 或更高版本**：`sdkmanager` / `avdmanager` 依赖它，需要设置 `JAVA_HOME`（或把 `java` 加入 `PATH`）。
+  `emulator` / `adb` 是原生程序，不需要 JDK。
+- Windows 10/11 或 macOS / Linux（Windows 使用 WebView2，系统自带）。
+- 构建与测试：Go 1.25+、Node 20+、Wails CLI v2.16+。
+
+## 构建与测试
 
 ```powershell
-# 开发模式（热重载；设置 WAILS_DEV 会把日志同时输出到控制台）
-wails dev
+# 前端构建
+cd frontend; npm install; npm run build; cd ..
 
 # 构建可执行文件 → build/bin/AVDDesktop.exe
 wails build
 
-# 单元测试（含连接真实镜像与外部工具的集成测试）
+# 单元测试（全部 hermetic，不需要网络与本机 SDK）
 go test ./...
-go test -short ./...          # 跳过需要网络/外部进程的集成测试
 
-# 端到端回归（走真实的下载、解压、建机、开机、adb）
-.\scripts\e2e.ps1             # 轻量：自检 + 索引 + 测速 + AVD 生命周期 + 导出导入
-.\scripts\e2e.ps1 -Heavy      # 追加：从镜像真实下载安装 cmdline-tools / platform-tools
-.\scripts\e2e.ps1 -Boot       # 追加：无窗口启动模拟器并验证 adb / 截图 / logcat
-.\scripts\e2e.ps1 -All        # 全部（耗时最长）
+# 端到端测试（真实网络 + 真实 SDK/AVD 目录，耗时较长）
+$env:AVDDESKTOP_E2E_HOME = "E:\avddesktop-e2e"
+go test -tags e2e -count=1 -timeout 60m ./internal/e2e/ -v
 ```
 
-要求：Go 1.25+、Node 20+、Wails CLI v2.16+。
+## 常见问题
 
-环境变量：
+- **下载失败 / 卡住**：软件自身不代理，下载走系统代理环境变量（`HTTPS_PROXY` / `HTTP_PROXY`）。
+  若公司网络拦截 `dl.google.com`，请先配置代理后重试；失败的任务可以在底部任务区域取消后重跑。
+- **提示找不到 JDK / java**：安装 JDK 17+ 并设置 `JAVA_HOME`，重启应用后重新自检。
+- **没有硬件加速**：自检会给出原因。Windows 可启用「Windows 虚拟机监控程序平台」（WHPX）或在 BIOS/UEFI
+  中开启 VT-x / AMD-V；没有加速时模拟器仍能启动，但明显变慢。
+- **磁盘空间不足**：系统镜像单个约 1–2 GB，建议 SDK 所在分区至少保留 12 GB。
 
-| 变量 | 作用 |
-| --- | --- |
-| `AVDDESKTOP_LOG_LEVEL` | 启动阶段日志级别（debug/info/warn/error），设置页可随时覆盖 |
-| `AVDDESKTOP_LOG_STDOUT=0` | 禁用开发模式下的控制台日志输出 |
-| `AVDDESKTOP_NO_UI_DIALOG=1` | 已运行实例的提示改为写标准错误（自动化场景） |
+## 文档
 
----
-
-## 设计文档
-
-| 文档 | 内容 |
-| --- | --- |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 总体架构、模块划分、关键决策（ADR）、核心流程、风险与兜底、里程碑 |
-| [docs/API-CONTRACT.md](docs/API-CONTRACT.md) | 前后端接口契约：服务方法、事件协议、数据结构、错误码 |
-| [docs/UI-SPEC.md](docs/UI-SPEC.md) | UI 设计规范：设计令牌、组件规格、页面布局（对齐 `assets/` 参考图） |
-| [docs/RESEARCH-NOTES.md](docs/RESEARCH-NOTES.md) | 实测调研：镜像可用性、仓库索引结构、许可哈希、CLI 输出格式、AVD 配置 |
-
----
-
-## 代码结构
-
-```
-main.go / app.go             # Wails 装配：无边框窗口、生命周期、服务绑定
-internal/
-  domain/                    # 领域模型（纯数据，零依赖）
-  config/                    # settings.json（原子写 + 校验 + 迁移）
-  logging/                   # 按天滚动日志 + 内存环形缓冲
-  platform/                  # 路径解析（SDK/AVD/JDK）、磁盘、代理、应用目录
-  proc/                      # 外部进程：隐藏窗口、行流式输出、超时与取消
-  download/                  # 下载器：Range 分片 / 顺序续传 / 降级三模式
-  archive/                   # 安全 zip 解压、SHA-1 校验、原子替换
-  job/                       # 任务管理器 + 事件节流 + 按资源键互斥
-  mirror/                    # 内置源表 + 并发测速引擎 + 评分
-  sdk/
-    repo/                    # repository2-3.xml / sys-img2-3.xml 解析与镜像重写
-    licenses/                # 许可哈希常量表（实测值）
-    detect/                  # 环境自检（组件、版本、加速）
-    query/                   # 本地已安装包扫描（source.properties）
-    install/                 # 安装编排：依赖 → 下载 → 校验 → 解压 → 许可
-  avd/
-    profile/                 # avdmanager list device 解析（含内置兜底档案）
-    store/                   # config.ini 读写、硬件配置 schema、克隆、元数据
-    backend/                 # AvdBackend：avdmanager / 直写配置文件
-    launch/                  # 端口分配、启动参数、状态机、停止
-  adb/                       # adb 客户端（设备/安装/推送/shell/截图）
-  service/                   # Wails 绑定层（薄）：Env/Mirror/Sdk/Avd/Emulator/Adb/Settings/Diagnostics/Jobs/Window
-frontend/
-  src/app/                   # 应用壳（标题栏 + 导航 + 页面路由）
-  src/bridge/                # 绑定包装与类型别名（页面只从这里调后端）
-  src/components/            # UI 组件（弹窗、任务抽屉、测速表、设备卡片）
-  src/pages/                 # 首页自检 / 设备 / SDK / 设置 / 创建向导
-  src/styles/                # 设计令牌 + 组件样式（纯 CSS）
-  wailsjs/                   # 自动生成，勿手改
-```
-
----
-
-## 实现状态
-
-| 能力 | 状态 |
-| --- | --- |
-| 环境自检（路径、JDK、工具链、加速、磁盘、许可、设备健康） | ✅ 已在真机验证（`ready=true`，含单飞与缓存） |
-| Windows 开关与虚拟化归因（WHPX/AEHD/BIOS 三种情况区分） | ✅ 已在真机验证（含中文系统名称编码修正） |
-| 问题清单（每条带可复制的修复命令） | ✅ 已实现 |
-| 镜像源管理 + 并发测速 + 评分 | ✅ 已连真实镜像验证（8 个源，可用性分级正确） |
-| 仓库索引解析（含系统镜像的目录相对 URL 规则） | ✅ 有真实索引样本测试 |
-| 下载（分片/续传/限速/代理）+ 安全解压 + SHA-1 校验 | ✅ 已实现（含官方归档包装目录剥离） |
-| 从镜像安装组件（含 cmdline-tools bootstrap） | ✅ E2E 验证：空目录安装并成功运行 sdkmanager/avdmanager |
-| 许可写入（常量哈希表） | ✅ 已实现 |
-| AVD 存储层（config.ini 读写、schema、克隆、元数据） | ✅ E2E 验证 |
-| 设备档案解析（`avdmanager list device`） | ✅ 已实现（88-96 个档案与分类） |
-| 创建 AVD（avdmanager 后端 + 无 JDK 直写后端） | ✅ E2E 验证两种后端选择语义正确 |
-| 启动 / 停止 / 多开（端口分配、状态机、日志） | ✅ E2E 验证：无窗口开机完成 + 优雅停止 |
-| 设备导出 / 导入（zip，含重名自动改名） | ✅ E2E 验证 |
-| adb 集成：设备列表 / shell / 安装 APK / 推送 / 截图 | ✅ E2E 验证（截图 1.7MB base64） |
-| logcat 实时流（长驻进程 + 事件推送） | ✅ E2E 验证（3 秒收到 500 行） |
-| 日志：分级、按天+按大小滚动、实时面板、任务日志转写 | ✅ 已实现（7 个单测） |
-| 单实例保护 | ✅ 已验证（第二实例提示后退出） |
-| 界面：首页自检 / 设备卡片 / 创建向导 / SDK 管理 / 设置 / 任务抽屉 / 测速弹窗 / 日志面板 / logcat 面板 | ✅ 已实现（前端可构建） |
-| 快照保存/恢复 | 🚧 列表与删除已实现，保存/恢复走模拟器控制台 |
-| 批量操作 / 排列窗口 | 🚧 未实现（界面已占位并标注） |
-| i18n（中英切换） | 🚧 文案已集中，尚未接入切换 |
-| 安装包（NSIS / MSI）与签名 | 🚧 M7 |
-
----
-
-## 重要设计取舍（详见 ADR）
-
-1. **自研下载器而非只调用 `sdkmanager`**：镜像只能通过替换 base URL 生效（sdkmanager 仅支持 HTTP 代理换源）；自研还能不依赖 JDK、支持分片续传与精确进度。
-2. **`AvdBackend` 抽象**：`avdmanager` 官方已标注废弃，且需要 JDK。抽象层让“无 JDK 也能创建并启动模拟器”成为可能（`emulator.exe` 是原生程序）。
-3. **所有长任务走 Job + 事件流**：系统镜像单包约 2 GB，必须能后台继续、能取消、能看进度。
-4. **镜像兼容性分级**：实测只有 Google 官方与腾讯云能完整镜像 SDK 仓库，其它常见镜像返回 403/404。因此内置源表区分“启用/停用 + 实测备注”，并支持自定义源与自动回退官方源。
-5. **日志依赖注入而非全局单例**：领域包接受 `logging.Interface`，未注入时用 `Nop()`，保证可测试；同时通过 `Sink` 向前端实时推送。
-6. **端到端测试优先于手测**：E2E 发现并修复了 4 个真实缺陷（镜像目录拼接、归档包装目录、`ANDROID_AVD_HOME`、后端选择语义），另有 1 个（并发重复扫描）由运行时日志发现 —— 详见 `docs/RESEARCH-NOTES.md` §9。
-
----
-
-## 授权与致谢
-
-- Android SDK 相关内容版权归 Google；本工具只做下载与本地编排，**不会**自动替用户同意许可协议（除用户在设置中显式开启）。
-- AEHD 驱动将于 2026-12-31 停止支持，界面引导优先推荐 Windows 自带的 WHPX。
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：模块划分、数据流、SDK / AVD / emulator 三块的关键约束与超时策略。

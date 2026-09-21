@@ -380,7 +380,6 @@ export namespace domain {
 	    kind: string;
 	    title: string;
 	    subtitle?: string;
-	    group?: string;
 	    status: string;
 	    phase?: string;
 	    percent: number;
@@ -388,8 +387,6 @@ export namespace domain {
 	    bytesTotal: number;
 	    speedBps: number;
 	    etaSeconds: number;
-	    itemsDone: number;
-	    itemsTotal: number;
 	    startedAt: number;
 	    endedAt?: number;
 	    error?: AppError;
@@ -404,7 +401,6 @@ export namespace domain {
 	        this.kind = source["kind"];
 	        this.title = source["title"];
 	        this.subtitle = source["subtitle"];
-	        this.group = source["group"];
 	        this.status = source["status"];
 	        this.phase = source["phase"];
 	        this.percent = source["percent"];
@@ -412,8 +408,6 @@ export namespace domain {
 	        this.bytesTotal = source["bytesTotal"];
 	        this.speedBps = source["speedBps"];
 	        this.etaSeconds = source["etaSeconds"];
-	        this.itemsDone = source["itemsDone"];
-	        this.itemsTotal = source["itemsTotal"];
 	        this.startedAt = source["startedAt"];
 	        this.endedAt = source["endedAt"];
 	        this.error = this.convertValues(source["error"], AppError);
