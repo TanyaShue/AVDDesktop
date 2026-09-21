@@ -16,7 +16,7 @@ func TestDetectLive(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
-	d := NewDetector()
+	d := NewDetector(nil)
 	report, err := d.Detect(ctx, Options{InjectEnv: true})
 	if err != nil {
 		t.Fatal(err)

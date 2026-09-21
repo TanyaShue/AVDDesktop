@@ -17,6 +17,7 @@ import (
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/download"
 	"AVDDesktop/internal/job"
+	"AVDDesktop/internal/logging"
 	"AVDDesktop/internal/platform"
 	"AVDDesktop/internal/sdk/licenses"
 	"AVDDesktop/internal/sdk/query"
@@ -41,14 +42,16 @@ type Installer struct {
 	Paths        platform.InstallPaths
 	Fetcher      *repo.Fetcher
 	OfficialBase string // 回退用的官方源（默认 dl.google.com）
+	log          logging.Interface
 }
 
-// New 创建安装器。
-func New(paths platform.InstallPaths, cacheDir string) *Installer {
+// New 创建安装器。log 为 nil 时使用空日志器。
+func New(paths platform.InstallPaths, cacheDir string, log logging.Interface) *Installer {
 	return &Installer{
 		Paths:        paths,
 		Fetcher:      repo.NewFetcher(cacheDir, 90*time.Second),
 		OfficialBase: "https://dl.google.com/android/repository/",
+		log:          logging.Or(log),
 	}
 }
 
@@ -65,7 +68,16 @@ func (in *Installer) ResolveIndex(ctx context.Context, source domain.MirrorSourc
 	if err != nil {
 		return nil, err
 	}
-	return in.Fetcher.GetIndex(ctx, cacheKey(source.ID), base+repo.IndexRepository, force)
+	started := time.Now()
+	idx, err := in.Fetcher.GetIndex(ctx, cacheKey(source.ID), base+repo.IndexRepository, force)
+	if err != nil {
+		in.log.Warn("repo", "获取仓库索引失败：源=%s url=%s%s err=%v",
+			source.Name, base+repo.IndexRepository, forceHint(force), err)
+		return nil, err
+	}
+	in.log.Debug("repo", "仓库索引可用：源=%s 包数=%d 许可=%d 耗时=%s",
+		source.Name, len(idx.Packages), len(idx.Licenses), time.Since(started).Round(time.Millisecond))
+	return idx, nil
 }
 
 // ResolveSysImgIndex 获取指定 tag 的系统镜像索引。
@@ -147,6 +159,9 @@ func (in *Installer) Plan(ctx context.Context, source domain.MirrorSource, packa
 	if len(plan.Steps) == 0 {
 		plan.Warnings = append(plan.Warnings, "没有需要安装的包")
 	}
+	in.log.Info("install", "生成安装计划：待安装 %d 项，共 %s（源=%s）",
+		countAction(plan.Steps, "install")+countAction(plan.Steps, "update"),
+		platform.HumanSize(plan.TotalBytes), source.Name)
 	return plan, nil
 }
 
@@ -188,6 +203,8 @@ func (in *Installer) Install(ctx context.Context, source domain.MirrorSource, pa
 		j.SetItems(0, len(order))
 		j.Logf("info", "install", "共 %d 个包待处理（源：%s）", len(order), source.Name)
 	}
+	in.log.Info("install", "开始安装：包=%v 源=%s SDK=%s 并发=%d 回退官方=%v",
+		order, source.Name, in.Paths.SdkRoot, opts.Concurrency, opts.AllowFallbackToOfficial)
 
 	for i, pkgPath := range order {
 		if err := ctx.Err(); err != nil {
@@ -208,8 +225,10 @@ func (in *Installer) Install(ctx context.Context, source domain.MirrorSource, pa
 				if j != nil {
 					j.Logf("info", "install", "跳过 %s（已安装 %s）", pkgPath, cur.InstalledRevision)
 				}
+				in.log.Debug("install", "跳过已安装包 %s（当前 %s）", pkgPath, cur.InstalledRevision)
 				continue
 			}
+			in.log.Info("install", "更新 %s：%s -> %s", pkgPath, cur.InstalledRevision, pkg.Revision)
 		}
 
 		if err := in.installOne(ctx, source, idx, pkg, opts, j); err != nil {
@@ -217,11 +236,13 @@ func (in *Installer) Install(ctx context.Context, source domain.MirrorSource, pa
 			if j != nil {
 				j.Logf("error", "install", "安装 %s 失败：%v", pkgPath, err)
 			}
+			in.log.Error("install", "安装 %s 失败：%v", pkgPath, err)
 			// 官方回退：镜像文件缺失/校验失败时尝试官方源
 			if opts.AllowFallbackToOfficial && isMirrorProblem(err) {
 				if j != nil {
 					j.Logf("warn", "install", "切换到 Google 官方源重试 %s", pkgPath)
 				}
+				in.log.Warn("install", "镜像异常，改用 Google 官方源重试 %s", pkgPath)
 				official := domain.MirrorSource{ID: "google-official", Name: "Google 官方",
 					BaseURL: in.OfficialBase, Kind: domain.MirrorOfficial}
 				offIdx, oErr := in.ResolveIndex(ctx, official, false)
@@ -229,6 +250,7 @@ func (in *Installer) Install(ctx context.Context, source domain.MirrorSource, pa
 					if offPkg, ok := offIdx.Find(pkgPath); ok {
 						if err := in.installOne(ctx, official, offIdx, offPkg, opts, j); err == nil {
 							result.Installed = append(result.Installed, pkgPath)
+							in.log.Info("install", "已通过 Google 官方源完成 %s", pkgPath)
 							continue
 						}
 					}
@@ -242,6 +264,8 @@ func (in *Installer) Install(ctx context.Context, source domain.MirrorSource, pa
 	if j != nil {
 		j.SetItems(len(order), len(order))
 	}
+	in.log.Info("install", "安装结束：成功=%d 跳过=%d 失败=%d",
+		len(result.Installed), len(result.Skipped), len(result.Failed))
 	return result, nil
 }
 
@@ -268,16 +292,19 @@ func (in *Installer) installOne(ctx context.Context, source domain.MirrorSource,
 	fileName := filepath.Base(arch.URL)
 	localPath := filepath.Join(opts.DownloadDir, fileName)
 
+	in.log.Info("download", "开始下载 %s（%s）", fileName, platform.HumanSize(arch.Size))
 	if j != nil {
 		j.Logf("info", "download", "下载 %s（%s）", fileName, platform.HumanSize(arch.Size))
 	}
-	_, err = download.Fetch(ctx, url, download.Options{
+	started := time.Now()
+	dlRes, err := download.Fetch(ctx, url, download.Options{
 		Dest:        localPath,
 		Concurrency: opts.Concurrency,
 		Timeout:     0, // 由 ctx 控制
 		ProxyURL:    opts.ProxyURL,
 		Resume:      true,
 		SpeedLimit:  opts.SpeedLimitKBps,
+		Logger:      in.log,
 		OnProgress: func(p download.Progress) {
 			if j == nil {
 				return
@@ -288,10 +315,19 @@ func (in *Installer) installOne(ctx context.Context, source domain.MirrorSource,
 	if err != nil {
 		return err
 	}
+	elapsed := time.Since(started)
+	var speed float64
+	if elapsed > 0 {
+		speed = float64(dlRes.Bytes) / (1 << 20) / elapsed.Seconds()
+	}
+	in.log.Info("download", "下载完成 %s：%s 耗时=%s 平均=%.2fMB/s 续传=%v Range=%v",
+		fileName, platform.HumanSize(dlRes.Bytes), elapsed.Round(time.Millisecond), speed, dlRes.Resumed, dlRes.RangeSupported)
 	if err := archive.VerifySHA1(localPath, arch.SHA1); err != nil {
 		_ = os.Remove(localPath)
+		in.log.Error("download", "%s 校验失败：%v", fileName, err)
 		return err
 	}
+	in.log.Debug("download", "%s SHA-1 校验通过", fileName)
 
 	targetDir := filepath.Join(in.Paths.SdkRoot, PackageDir(pkg.Path))
 	tmpDir := targetDir + ".tmp"
@@ -327,6 +363,7 @@ func (in *Installer) installOne(ctx context.Context, source domain.MirrorSource,
 	if err := archive.RenameAtomic(tmpDir, targetDir); err != nil {
 		return err
 	}
+	in.log.Info("install", "%s 安装完成（版本 %s）", pkg.Path, pkg.Revision)
 	if j != nil {
 		j.Logf("info", "install", "%s 安装完成（%s）", pkg.Path, pkg.Revision.String())
 	}
@@ -484,4 +521,21 @@ func isMirrorProblem(err error) bool {
 	default:
 		return false
 	}
+}
+
+func forceHint(force bool) string {
+	if force {
+		return "（强制刷新）"
+	}
+	return "（命中缓存或首次）"
+}
+
+func countAction(steps []domain.PlanStep, action string) int {
+	n := 0
+	for _, s := range steps {
+		if s.Action == action {
+			n++
+		}
+	}
+	return n
 }

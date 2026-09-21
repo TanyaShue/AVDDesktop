@@ -11,15 +11,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
 
 	"AVDDesktop/internal/domain"
+	"AVDDesktop/internal/logging"
 )
 
 // Sink 是事件出口（由 service 层桥接到 Wails runtime.EventsEmit）。
 type Sink func(event string, payload any)
+
+// LogHook 把任务日志同时转写到应用日志（便于用户离开界面后仍能回溯）。
+//
+// 参数：jobID、jobKind、level、source、message。
+type LogHook func(jobID, kind, level, source, message string)
 
 // 事件名（与 docs/API-CONTRACT.md §6 一致）。
 const (
@@ -176,6 +183,10 @@ func (j *Job) Logs() []domain.LogLine {
 // Manager 管理所有任务。
 type Manager struct {
 	sink Sink
+	log  logging.Interface
+
+	hookMu  sync.Mutex
+	logHook LogHook
 
 	mu   sync.Mutex
 	jobs map[string]*Job
@@ -186,10 +197,17 @@ type Manager struct {
 }
 
 // NewManager 创建任务管理器并启动节流推送协程。
-func NewManager(sink Sink) *Manager {
-	m := &Manager{sink: sink, jobs: map[string]*Job{}, stopCh: make(chan struct{})}
+func NewManager(sink Sink, log logging.Interface) *Manager {
+	m := &Manager{sink: sink, log: logging.Or(log), jobs: map[string]*Job{}, stopCh: make(chan struct{})}
 	go m.ticker()
 	return m
+}
+
+// SetLogHook 设置任务日志转写钩子。
+func (m *Manager) SetLogHook(hook LogHook) {
+	m.hookMu.Lock()
+	m.logHook = hook
+	m.hookMu.Unlock()
 }
 
 // Stop 停止后台协程（应用退出时调用）。
@@ -223,6 +241,10 @@ func (m *Manager) Start(parent context.Context, spec Spec, runner Runner) *Job {
 		},
 		dirty: true,
 	}
+	// 任务日志同时转写到应用日志，便于用户关闭界面后回溯。
+	j.onThread = func(line domain.LogLine) {
+		m.dispatchHook(id, string(spec.Kind), line.Level, line.Source, line.Message)
+	}
 	m.jobs[id] = j
 	m.mu.Unlock()
 
@@ -234,19 +256,30 @@ func (m *Manager) Start(parent context.Context, spec Spec, runner Runner) *Job {
 		j.dirty = true
 		j.mu.Unlock()
 		m.emit(EventProgress, j.Info())
+		m.log.Info("job", "开始任务 %s（%s）：%s", id, spec.Kind, spec.Title)
 
-		err := runner(ctx, j)
+		start := time.Now()
+		var runErr error
+		// 任务运行在独立 goroutine 中，必须兵底捕获 panic，否则会直接拖垮整个应用。
+		if recovered := withRecover(func() { runErr = runner(ctx, j) }, func(r any, stack []byte) {
+			runErr = domain.ErrDetail(domain.CodeUnknown,
+				"任务发生内部错误（panic），已中止",
+				fmt.Sprintf("%v\n%s", r, truncate(stack)))
+			m.log.Error("job", "任务 %s panic: %v\n%s", id, r, truncate(stack))
+		}); recovered {
+			// 具体错误已由上面的回调构造
+		}
 
 		j.mu.Lock()
 		now := time.Now().UnixMilli()
 		j.info.EndedAt = now
 		j.ended = true
-		if err != nil {
-			if errors.Is(err, context.Canceled) || ctx.Err() == context.Canceled {
+		if runErr != nil {
+			if errors.Is(runErr, context.Canceled) || ctx.Err() == context.Canceled {
 				j.info.Status = domain.JobCanceled
 			} else {
 				j.info.Status = domain.JobFailed
-				j.info.Error = toAppError(err)
+				j.info.Error = toAppError(runErr)
 			}
 		} else {
 			j.info.Status = domain.JobSucceeded
@@ -256,9 +289,15 @@ func (m *Manager) Start(parent context.Context, spec Spec, runner Runner) *Job {
 		j.mu.Unlock()
 
 		m.flushLogs(j, true)
-		if info.Status == domain.JobFailed {
+		switch info.Status {
+		case domain.JobFailed:
+			m.log.Error("job", "任务 %s 失败（%s）：%v", id, spec.Kind, info.Error)
 			m.emit(EventFailed, info)
-		} else {
+		case domain.JobCanceled:
+			m.log.Warn("job", "任务 %s 已取消（%s）", id, spec.Kind)
+			m.emit(EventDone, info)
+		default:
+			m.log.Info("job", "任务 %s 完成（%s，耗时 %s）", id, spec.Kind, time.Since(start).Round(time.Millisecond))
 			m.emit(EventDone, info)
 		}
 	}()
@@ -424,6 +463,36 @@ func (m *Manager) emit(event string, payload any) {
 	if m.sink != nil {
 		m.sink(event, payload)
 	}
+}
+
+// dispatchHook 把任务日志转写到应用日志。
+func (m *Manager) dispatchHook(jobID, kind, level, source, message string) {
+	m.hookMu.Lock()
+	hook := m.logHook
+	m.hookMu.Unlock()
+	if hook != nil {
+		hook(jobID, kind, level, source, message)
+	}
+}
+
+// withRecover 执行 fn 并捕获 panic；onPanic 在发生 panic 时被调用。
+func withRecover(fn func(), onPanic func(r any, stack []byte)) (recovered bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			recovered = true
+			onPanic(r, debug.Stack())
+		}
+	}()
+	fn()
+	return false
+}
+
+func truncate(b []byte) string {
+	const max = 2048
+	if len(b) > max {
+		return string(b[:max]) + "\n…（堆栈已截断）"
+	}
+	return string(b)
 }
 
 func toAppError(err error) *domain.AppError {

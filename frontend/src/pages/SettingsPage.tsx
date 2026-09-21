@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import * as api from "../bridge/api";
 import { errorText } from "../bridge/api";
 import type { AppSettings, MirrorSource, ResolvedPaths } from "../bridge/types";
+import { LogPanel } from "../components/LogPanel";
 
 interface Props {
   onToast: (level: "info" | "success" | "warning" | "danger", title: string, text?: string) => void;
@@ -297,6 +298,11 @@ export function SettingsPage({ onToast, onSettingsChanged }: Props) {
               </div>
             </div>
           </div>
+        </div>
+
+        <div className="section">
+          <div className="section__title">运行日志</div>
+          <LogPanel onToast={onToast} />
         </div>
 
         <div className="section">

@@ -47,6 +47,7 @@ export const EVENTS = {
   sdkChanged: "sdk:changed",
   envChanged: "env:changed",
   diagnosticsChecks: "diagnostics:checks",
+  logLine: "log:line",
 } as const;
 
 /** 把 AppError 渲染成可读文本。 */

@@ -13,6 +13,7 @@ import (
 
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/job"
+	"AVDDesktop/internal/logging"
 	"AVDDesktop/internal/platform"
 	"AVDDesktop/internal/sdk/detect"
 )
@@ -39,6 +40,14 @@ func (s *SettingsService) Update(patch map[string]any) (*domain.AppSettings, err
 	if after.SdkRoot != before.SdkRoot || after.AvdHome != before.AvdHome ||
 		after.JdkPath != before.JdkPath || after.InjectEnvForChild != before.InjectEnvForChild {
 		s.rt.InvalidateComponents()
+	}
+	// 日志级别变化 → 立即生效
+	if after.LogLevel != before.LogLevel {
+		s.rt.Log().SetLevel(after.LogLevel)
+		s.rt.Log().Info("settings", "日志级别已切换为 %s", after.LogLevel)
+	}
+	if after.ProxyMode != before.ProxyMode || after.ProxyURL != before.ProxyURL {
+		s.rt.Log().Info("settings", "代理设置已更新：mode=%s url=%s", after.ProxyMode, after.ProxyURL)
 	}
 	out := after
 	return &out, nil
@@ -138,6 +147,13 @@ func (s *DiagnosticsService) RunSelfCheck() (string, error) {
 			}
 			j.Logf(level, "selfcheck", "%s：%s（%s）", c.Name, boolText(c.OK), c.Detail)
 		}
+		failed := 0
+		for _, c := range checks {
+			if !c.OK {
+				failed++
+			}
+		}
+		s.rt.Log().Info("diagnostics", "自检完成：%d/%d 项通过", len(checks)-failed, len(checks))
 		s.rt.Emit("diagnostics:checks", checks)
 		return nil
 	})
@@ -177,34 +193,36 @@ func (s *DiagnosticsService) ExportReport() (string, error) {
 	return target, nil
 }
 
-// ReadAppLog 读取应用日志尾部。
+// ReadAppLog 读取日志尾部：优先内存环形缓冲（实时、跨文件），缓存未命中时回退读文件。
 func (s *DiagnosticsService) ReadAppLog(tail int) ([]domain.LogLine, error) {
-	dir := platform.SubDir(s.rt.AppName, "logs")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
+	if tail <= 0 {
+		tail = 200
+	}
+	if entries := s.rt.Log().Tail(tail); len(entries) > 0 {
+		return entriesToLines(entries), nil
+	}
+	return s.readLogFile(tail)
+}
+
+// maxReadBytes 限制一次性读取的日志文件大小，避免超大文件把 UI 卡死。
+const maxReadBytes = 4 << 20
+
+func (s *DiagnosticsService) readLogFile(tail int) ([]domain.LogLine, error) {
+	dir := s.rt.Log().Dir()
+	if dir == "" {
+		dir = platform.SubDir(s.rt.AppName, "logs")
+	}
+	files := s.rt.Log().Files()
+	if len(files) == 0 {
 		return nil, nil
 	}
-	var newest string
-	var newestTime time.Time
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().After(newestTime) {
-			newestTime = info.ModTime()
-			newest = filepath.Join(dir, e.Name())
-		}
-	}
-	if newest == "" {
-		return nil, nil
-	}
+	newest := files[0]
 	data, err := os.ReadFile(newest)
 	if err != nil {
 		return nil, domain.Wrap(domain.CodePermissionDenied, "无法读取日志文件", err)
+	}
+	if len(data) > maxReadBytes {
+		data = data[len(data)-maxReadBytes:]
 	}
 	lines := platform.SplitLines(string(data))
 	if tail > 0 && len(lines) > tail {
@@ -217,8 +235,55 @@ func (s *DiagnosticsService) ReadAppLog(tail int) ([]domain.LogLine, error) {
 	return out, nil
 }
 
+// SetLogLevel 切换日志级别（设置页控制）。
+func (s *DiagnosticsService) SetLogLevel(level string) error {
+	switch level {
+	case "debug", "info", "warn", "error":
+	default:
+		return domain.Err(domain.CodeInvalidArgument, "日志级别必须是 debug/info/warn/error")
+	}
+	if _, err := s.rt.settings.Update(map[string]any{"logLevel": level}); err != nil {
+		return err
+	}
+	s.rt.Log().SetLevel(level)
+	s.rt.Log().Info("logging", "日志级别已切换为 %s", level)
+	return nil
+}
+
+// LogLevel 返回当前日志级别。
+func (s *DiagnosticsService) LogLevel() string { return s.rt.Log().Level() }
+
+// LogDir 返回日志目录。
+func (s *DiagnosticsService) LogDir() string {
+	if dir := s.rt.Log().Dir(); dir != "" {
+		return dir
+	}
+	return platform.SubDir(s.rt.AppName, "logs")
+}
+
+// LogFiles 返回保留的日志文件列表（新→旧）。
+func (s *DiagnosticsService) LogFiles() []string { return s.rt.Log().Files() }
+
+// TestLog 向日志写入一条测试消息（验证日志链路与实时推送）。
+func (s *DiagnosticsService) TestLog(message string) string {
+	if message == "" {
+		message = "这是一条测试日志"
+	}
+	s.rt.Log().Info("diagnostics", "%s", message)
+	return s.LogLevel()
+}
+
+func entriesToLines(entries []logging.Entry) []domain.LogLine {
+	out := make([]domain.LogLine, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, domain.LogLine{At: e.At, Level: e.Level, Source: e.Module, Message: e.Message})
+	}
+	return out
+}
+
 // ClearCache 清理缓存与临时下载文件。
 func (s *DiagnosticsService) ClearCache() error {
+	freed := int64(0)
 	for _, dir := range []string{
 		platform.SubDir(s.rt.AppName, "cache"),
 		s.rt.downloadDir(),
@@ -228,16 +293,18 @@ func (s *DiagnosticsService) ClearCache() error {
 			continue
 		}
 		for _, e := range entries {
-			_ = os.RemoveAll(filepath.Join(dir, e.Name()))
+			path := filepath.Join(dir, e.Name())
+			freed += platform.DirSize(path)
+			_ = os.RemoveAll(path)
 		}
 	}
+	s.rt.Log().Info("diagnostics", "缓存已清理：释放约 %s", platform.HumanSize(freed))
 	return nil
 }
 
 // OpenLogFolder 打开日志目录。
 func (s *DiagnosticsService) OpenLogFolder() error {
-	dir := platform.SubDir(s.rt.AppName, "logs")
-	wailsruntime.BrowserOpenURL(s.rt.Context(), "file://"+filepath.ToSlash(dir))
+	wailsruntime.BrowserOpenURL(s.rt.Context(), "file://"+filepath.ToSlash(s.LogDir()))
 	return nil
 }
 

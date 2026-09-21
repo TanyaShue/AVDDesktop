@@ -9,6 +9,7 @@ package detect
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"AVDDesktop/internal/domain"
+	"AVDDesktop/internal/logging"
 	"AVDDesktop/internal/platform"
 	"AVDDesktop/internal/proc"
 	"AVDDesktop/internal/sdk/query"
@@ -37,15 +39,17 @@ type Options struct {
 
 // Detector 执行环境自检（带短 TTL 缓存）。
 type Detector struct {
+	log logging.Interface
+
 	mu       sync.Mutex
 	cached   *domain.EnvReport
 	cachedAt time.Time
 	ttl      time.Duration
 }
 
-// NewDetector 创建探测器。
-func NewDetector() *Detector {
-	return &Detector{ttl: 3 * time.Second}
+// NewDetector 创建探测器。log 为 nil 时使用空日志器。
+func NewDetector(log logging.Interface) *Detector {
+	return &Detector{ttl: 3 * time.Second, log: logging.Or(log)}
 }
 
 // Detect 执行全量自检。
@@ -75,12 +79,16 @@ func (d *Detector) Invalidate() {
 }
 
 func (d *Detector) scan(ctx context.Context, opts Options) *domain.EnvReport {
+	started := time.Now()
 	sdkRes := platform.ResolveSdkRoot(opts.SdkRootOverride)
 	avdRes := platform.ResolveAvdHome(opts.AvdHomeOverride)
 	paths := platform.NewInstallPaths(sdkRes.Path)
 	childEnv := platform.ChildEnv(sdkRes.Path, avdRes.Path, opts.InjectEnv)
 
 	javaPath := platform.FindJava(opts.JdkPathOverride)
+
+	d.log.Info("detect", "开始环境自检：SDK=%s（%s） AVD=%s（%s） JDK=%s",
+		sdkRes.Path, sdkRes.Source, avdRes.Path, avdRes.Source, nonEmptyOr(javaPath, "未找到"))
 
 	report := &domain.EnvReport{
 		SdkRoot:       sdkRes.Path,
@@ -131,6 +139,21 @@ func (d *Detector) scan(ctx context.Context, opts Options) *domain.EnvReport {
 	report.Components = items
 	report.Blockers = collectBlockers(items, len(images))
 	report.Ready = len(report.Blockers) == 0
+
+	// 逐个组件写日志：正常项用 debug，异常项用 warn，便于用户按级别排查
+	for _, c := range items {
+		fields := fmt.Sprintf("state=%s version=%q path=%q", c.State, c.Version, c.Path)
+		switch c.State {
+		case domain.StatePresent:
+			d.log.Debug("detect", "%s：正常（%s）", c.ID, fields)
+		case domain.StateMissing:
+			d.log.Warn("detect", "%s：未安装（%s）%s", c.ID, fields, c.Detail)
+		default:
+			d.log.Warn("detect", "%s：%s（%s）%s", c.ID, c.State, fields, c.Detail)
+		}
+	}
+	d.log.Info("detect", "自检完成：ready=%v 阻塞项=%d 组件=%d 耗时=%s",
+		report.Ready, len(report.Blockers), len(items), time.Since(started).Round(time.Millisecond))
 	return report
 }
 
@@ -584,6 +607,14 @@ func boolStr(v bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// nonEmptyOr 返回非空值或替代文本（仅供日志可读性使用）。
+func nonEmptyOr(v, fallback string) string {
+	if strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	return v
 }
 
 func itoa(v int) string { return itoa64(int64(v)) }

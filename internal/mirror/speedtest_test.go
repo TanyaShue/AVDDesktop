@@ -15,7 +15,7 @@ func TestEngineLive(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short 模式跳过网络测试")
 	}
-	engine := NewEngine(t.TempDir())
+	engine := NewEngine(t.TempDir(), nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 

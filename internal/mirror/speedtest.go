@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"AVDDesktop/internal/domain"
+	"AVDDesktop/internal/logging"
 	"AVDDesktop/internal/sdk/repo"
 )
 
@@ -47,14 +48,17 @@ func (o TestOptions) WithDefaults() TestOptions {
 
 // Engine 执行镜像测速（无状态，可并发调用）。
 type Engine struct {
+	log logging.Interface
+
 	mu      sync.RWMutex
 	results map[string]domain.SpeedResult
 	fetcher *repo.Fetcher
 }
 
-// NewEngine 创建测速引擎。
-func NewEngine(cacheDir string) *Engine {
+// NewEngine 创建测速引擎。log 为 nil 时使用空日志器。
+func NewEngine(cacheDir string, log logging.Interface) *Engine {
 	return &Engine{
+		log:     logging.Or(log),
 		results: map[string]domain.SpeedResult{},
 		fetcher: repo.NewFetcher(cacheDir, 90*time.Second),
 	}
@@ -84,6 +88,7 @@ func (e *Engine) SetCached(results []domain.SpeedResult) {
 func (e *Engine) Test(ctx context.Context, src domain.MirrorSource, opts TestOptions) domain.SpeedResult {
 	opts = opts.WithDefaults()
 	res := domain.SpeedResult{SourceID: src.ID, At: time.Now().UnixMilli()}
+	started := time.Now()
 
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
@@ -96,6 +101,7 @@ func (e *Engine) Test(ctx context.Context, src domain.MirrorSource, opts TestOpt
 		return res
 	}
 	indexURL := base + repo.IndexRepository
+	e.log.Debug("speedtest", "开始测速 %s（%s）", src.Name, indexURL)
 
 	u, err := url.Parse(indexURL)
 	if err != nil {
@@ -123,6 +129,7 @@ func (e *Engine) Test(ctx context.Context, src domain.MirrorSource, opts TestOpt
 		res.Error = "域名解析失败: " + dnsErr.Error()
 		res.Grade = "unusable"
 		e.store(res)
+		e.log.Warn("speedtest", "%s 域名解析失败：%v", src.Name, dnsErr)
 		return res
 	}
 
@@ -132,8 +139,9 @@ func (e *Engine) Test(ctx context.Context, src domain.MirrorSource, opts TestOpt
 	res.ConnectMs = time.Since(connStart).Milliseconds()
 	if connErr != nil {
 		res.Error = "连接失败: " + connErr.Error()
-		res.Grade = "unusable"
+		res.Grade = "unreachable"
 		e.store(res)
+		e.log.Warn("speedtest", "%s 连接失败（%s）：%v", src.Name, host, connErr)
 		return res
 	}
 	_ = conn.Close()
@@ -185,6 +193,13 @@ func (e *Engine) Test(ctx context.Context, src domain.MirrorSource, opts TestOpt
 	res.Score = score(res)
 	res.Grade = scoreGrade(res)
 	_ = bodyBytes
+
+	e.log.Info("speedtest", "%s 测速完成：等级=%s 评分=%d TTFB=%dms 下载=%.2fMB/s 抖动=%dms Range=%v 耗时=%s",
+		src.Name, res.Grade, res.Score, res.TTFBMs, res.ThroughputMBps, res.JitterMs,
+		res.RangeSupported, time.Since(started).Round(time.Millisecond))
+	if res.Error != "" {
+		e.log.Warn("speedtest", "%s 存在问题：%s", src.Name, res.Error)
+	}
 
 	e.store(res)
 	return res

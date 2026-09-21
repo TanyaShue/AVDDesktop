@@ -22,6 +22,7 @@ import (
 	"AVDDesktop/internal/adb"
 	"AVDDesktop/internal/avd/store"
 	"AVDDesktop/internal/domain"
+	"AVDDesktop/internal/logging"
 	"AVDDesktop/internal/platform"
 	"AVDDesktop/internal/proc"
 )
@@ -39,6 +40,7 @@ type Launcher struct {
 	Store *store.Store
 	Adb   *adb.Client
 
+	log  logging.Interface
 	sink func(event string, payload any)
 
 	mu        sync.Mutex
@@ -58,14 +60,15 @@ type instance struct {
 // EventState 是实例状态变化事件名。
 const EventState = "emulator:state"
 
-// New 创建启动器。
-func New(paths platform.InstallPaths, env []string, st *store.Store, adbClient *adb.Client, sink func(string, any)) *Launcher {
+// New 创建启动器。log 为 nil 时使用空日志器。
+func New(paths platform.InstallPaths, env []string, st *store.Store, adbClient *adb.Client, sink func(string, any), log logging.Interface) *Launcher {
 	return &Launcher{
 		Paths:     paths,
 		Env:       env,
 		Store:     st,
 		Adb:       adbClient,
 		sink:      sink,
+		log:       logging.Or(log),
 		instances: map[string]*instance{},
 	}
 }
@@ -207,6 +210,7 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 		return nil, domain.Wrap(domain.CodeProcessFailed, "无法捕获模拟器错误输出", err)
 	}
 	if err := cmd.Start(); err != nil {
+		l.log.Error("emulator", "启动 %s 失败：%v（可执行文件 %s）", avdName, err, l.Paths.EmulatorExe)
 		return nil, domain.Wrap(domain.CodeProcessFailed, "无法启动模拟器", err).
 			WithHint("请确认模拟器未被杀毒软件拦截，且路径没有特殊字符")
 	}
@@ -241,6 +245,8 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 	if l.Store != nil {
 		l.Store.TouchLastUsed(avdName)
 	}
+	l.log.Info("emulator", "已启动 %s：pid=%d serial=%s port=%d\n  参数：%s %s",
+		avdName, cmd.Process.Pid, serial, port, l.Paths.EmulatorExe, strings.Join(args, " "))
 	l.emit(inst.Snapshot())
 	info := inst.Snapshot()
 	return &info, nil
@@ -337,6 +343,7 @@ func (l *Launcher) Stop(ctx context.Context, instanceID string, force bool) erro
 	}
 
 	l.setState(internal, domain.AvdStopping, "")
+	l.log.Info("emulator", "正在停止 %s（%s，force=%v）", internal.info.AvdName, internal.info.Serial, force)
 	if !force && l.Adb != nil {
 		_ = l.Adb.EmuKill(ctx, internal.info.Serial)
 		select {
@@ -451,13 +458,35 @@ func (l *Launcher) Prune(keep int) {
 
 func (l *Launcher) setState(inst *instance, state domain.AvdState, errMsg string) {
 	l.mu.Lock()
+	previous := inst.info.State
 	inst.info.State = state
 	if errMsg != "" {
 		inst.info.LastError = errMsg
 	}
 	info := inst.info
 	l.mu.Unlock()
+
+	if previous != state {
+		switch state {
+		case domain.AvdRunning:
+			l.log.Info("emulator", "%s（%s）已开机完成，耗时 %s",
+				info.AvdName, info.Serial, time.Since(time.UnixMilli(info.StartedAt)).Round(time.Second))
+		case domain.AvdError:
+			l.log.Error("emulator", "%s（%s）状态异常：%s", info.AvdName, info.Serial, errMsg)
+		case domain.AvdStopped:
+			l.log.Info("emulator", "%s（%s）已停止（退出码 %v）", info.AvdName, info.Serial, derefInt(info.ExitCode))
+		default:
+			l.log.Debug("emulator", "%s 状态变化 %s -> %s", info.AvdName, previous, state)
+		}
+	}
 	l.emit(info)
+}
+
+func derefInt(v *int) any {
+	if v == nil {
+		return "-"
+	}
+	return *v
 }
 
 func (l *Launcher) emit(info domain.EmulatorInstance) {

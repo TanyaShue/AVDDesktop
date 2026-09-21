@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"AVDDesktop/internal/domain"
+	"AVDDesktop/internal/logging"
 	"AVDDesktop/internal/platform"
 	"AVDDesktop/internal/proc"
 )
@@ -16,11 +17,12 @@ import (
 type Client struct {
 	AdbPath string
 	Env     []string
+	log     logging.Interface
 }
 
-// New 创建 adb 客户端。
-func New(adbPath string, env []string) *Client {
-	return &Client{AdbPath: adbPath, Env: env}
+// New 创建 adb 客户端。log 为 nil 时使用空日志器。
+func New(adbPath string, env []string, log logging.Interface) *Client {
+	return &Client{AdbPath: adbPath, Env: env, log: logging.Or(log)}
 }
 
 // Available 判断 adb 是否存在。
@@ -31,13 +33,20 @@ func (c *Client) Devices(ctx context.Context) ([]domain.AdbDevice, error) {
 	if !c.Available() {
 		return nil, domain.Err(domain.CodeToolMissing, "未找到 adb（platform-tools 未安装）")
 	}
+	started := time.Now()
 	out, err := proc.Output(ctx, c.AdbPath, []string{"devices", "-l"}, proc.Options{
 		Env: c.Env, Timeout: 30 * time.Second,
 	})
 	if err != nil {
+		c.log.Warn("adb", "adb devices 失败：%v", err)
 		return nil, err
 	}
-	return ParseDevices(out), nil
+	devices := ParseDevices(out)
+	if c.log != nil {
+		c.log.Debug("adb", "adb devices -l 返回 %d 个设备（耗时 %s）",
+			len(devices), time.Since(started).Round(time.Millisecond))
+	}
+	return devices, nil
 }
 
 // ParseDevices 解析 `adb devices -l` 输出。
@@ -148,9 +157,13 @@ func (c *Client) WaitForBoot(ctx context.Context, serial string, timeout time.Du
 
 // EmuKill 请求模拟器实例优雅退出。
 func (c *Client) EmuKill(ctx context.Context, serial string) error {
+	c.log.Info("adb", "请求优雅停止 %s（adb emu kill）", serial)
 	_, err := proc.Output(ctx, c.AdbPath, []string{"-s", serial, "emu", "kill"}, proc.Options{
 		Env: c.Env, Timeout: 20 * time.Second,
 	})
+	if err != nil {
+		c.log.Warn("adb", "%s 的 emu kill 失败（将回退到强制结束进程）：%v", serial, err)
+	}
 	return err
 }
 
@@ -166,6 +179,7 @@ func (c *Client) Shell(ctx context.Context, serial, command string) (string, err
 
 // Install 安装 APK（-r 覆盖安装，-g 授予全部权限）。
 func (c *Client) Install(ctx context.Context, serial, apkPath string, grantAll bool, onLine func(string, string)) error {
+	c.log.Info("adb", "安装 APK 到 %s：%s（授权全部权限=%v）", serial, apkPath, grantAll)
 	args := []string{}
 	if serial != "" {
 		args = append(args, "-s", serial)
@@ -182,8 +196,10 @@ func (c *Client) Install(ctx context.Context, serial, apkPath string, grantAll b
 		return err
 	}
 	if strings.Contains(strings.ToLower(res.Stdout), "failure") {
+		c.log.Error("adb", "APK 安装失败：%s", res.Combined())
 		return domain.ErrDetail(domain.CodeProcessFailed, "APK 安装失败", res.Combined())
 	}
+	c.log.Info("adb", "APK 安装成功：%s", apkPath)
 	return nil
 }
 

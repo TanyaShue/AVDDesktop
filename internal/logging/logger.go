@@ -1,6 +1,10 @@
-// Package logging 提供结构化、按天滚动的应用日志。
+// Package logging 提供结构化、按天+按大小滚动的应用日志。
 //
-// 设计（见 ARCHITECTURE.md §12）：文件保留 KeepLogDays 天，内存保留最近 N 条供 UI 实时查看。
+// 设计要点（见 docs/ARCHITECTURE.md §12）：
+//   - Interface 是各领域包依赖的最小接口，避免 internal 包之间互相引用具体类型
+//   - 领域包通过构造函数注入日志器，未注入时使用 Nop()，保证可测试性
+//   - Sink 把每条日志实时推给 UI（诊断面板），文件仍按天+大小滚动保留
+//   - 保留内存环形缓冲，即使未配置 Sink 也能取到最近日志
 package logging
 
 import (
@@ -8,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -17,7 +22,7 @@ import (
 // Level 日志级别。
 type Level int
 
-// 级别定义。
+// 级别定义（数值越大越严重）。
 const (
 	LevelDebug Level = iota
 	LevelInfo
@@ -25,20 +30,7 @@ const (
 	LevelError
 )
 
-// ParseLevel 解析级别字符串。
-func ParseLevel(s string) Level {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "debug":
-		return LevelDebug
-	case "warn", "warning":
-		return LevelWarn
-	case "error":
-		return LevelError
-	default:
-		return LevelInfo
-	}
-}
-
+// String 返回固定宽度的大写级别名，便于对齐阅读。
 func (l Level) String() string {
 	switch l {
 	case LevelDebug:
@@ -52,35 +44,116 @@ func (l Level) String() string {
 	}
 }
 
-const memBuffer = 500
+// ParseLevel 解析级别字符串（非法值回退为 info）。
+func ParseLevel(s string) Level {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "debug", "trace":
+		return LevelDebug
+	case "warn", "warning":
+		return LevelWarn
+	case "error", "fatal":
+		return LevelError
+	default:
+		return LevelInfo
+	}
+}
 
-// Logger 是线程安全的文件日志器。
+// Entry 是一条日志的结构化表示（也会推送给前端）。
+type Entry struct {
+	At      int64  `json:"at"`
+	Level   string `json:"level"`
+	Module  string `json:"module"`
+	Message string `json:"message"`
+}
+
+// Interface 是领域包依赖的最小日志接口。
+//
+// 约定：实现必须可被多个 goroutine 并发调用。
+type Interface interface {
+	Debug(module, format string, args ...any)
+	Info(module, format string, args ...any)
+	Warn(module, format string, args ...any)
+	Error(module, format string, args ...any)
+}
+
+// nopLogger 是零依赖的空实现。
+type nopLogger struct{}
+
+func (nopLogger) Debug(string, string, ...any) {}
+func (nopLogger) Info(string, string, ...any)  {}
+func (nopLogger) Warn(string, string, ...any)  {}
+func (nopLogger) Error(string, string, ...any) {}
+
+// Nop 返回空日志器（未注入时的默认值）。
+func Nop() Interface { return nopLogger{} }
+
+// Or 返回非空日志器：nil 时回退到 Nop。
+func Or(l Interface) Interface {
+	if l == nil {
+		return Nop()
+	}
+	return l
+}
+
+const (
+	// memBuffer 是内存环形缓冲的容量。
+	memBuffer = 800
+	// defaultMaxBytes 是单个日志文件的默认大小上限（超过则滚动）。
+	defaultMaxBytes = 8 << 20
+)
+
+// Logger 是文件 + 内存 + 事件三路输出的日志器。
 type Logger struct {
 	mu       sync.Mutex
 	dir      string
 	level    Level
 	keepDays int
+	maxBytes int64
 
-	file *os.File
-	day  string
+	file    *os.File
+	day     string
+	seq     int
+	written int64
 
-	ring []string
+	ring []Entry
 	head int
 	size int
+
+	sink func(Entry)
+
+	stdout io.Writer
 
 	disabled bool
 }
 
+// Options 是日志器构造参数。
+type Options struct {
+	Dir      string
+	Level    string
+	KeepDays int
+	MaxBytes int64
+	// Stdout 非空时同时输出到该 writer（开发模式下常用 os.Stdout）。
+	Stdout io.Writer
+}
+
 // New 创建日志器并在目录下按天写文件。
-func New(dir string, level string, keepDays int) (*Logger, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+func New(opts Options) (*Logger, error) {
+	if opts.Dir == "" {
+		return nil, fmt.Errorf("日志目录为空")
+	}
+	if err := os.MkdirAll(opts.Dir, 0o755); err != nil {
 		return nil, err
 	}
 	l := &Logger{
-		dir:      dir,
-		level:    ParseLevel(level),
-		keepDays: keepDays,
-		ring:     make([]string, memBuffer),
+		dir:      opts.Dir,
+		level:    ParseLevel(opts.Level),
+		keepDays: opts.KeepDays,
+		maxBytes: opts.MaxBytes,
+		ring:     make([]Entry, memBuffer),
+		stdout:   opts.Stdout,
+	}
+	if l.maxBytes <= 0 {
+		l.maxBytes = defaultMaxBytes
 	}
 	if err := l.rotateLocked(time.Now()); err != nil {
 		return nil, err
@@ -89,12 +162,12 @@ func New(dir string, level string, keepDays int) (*Logger, error) {
 	return l, nil
 }
 
-// Discard 返回一个不写任何地方的日志器（初始化失败时兜底）。
+// Discard 返回一个不写任何地方的日志器（初始化失败时兜底，仍保留内存缓冲）。
 func Discard() *Logger {
-	return &Logger{disabled: true, ring: make([]string, memBuffer)}
+	return &Logger{disabled: true, ring: make([]Entry, memBuffer), maxBytes: defaultMaxBytes}
 }
 
-// SetLevel 动态调整级别。
+// SetLevel 动态调整级别（设置页修改时调用）。
 func (l *Logger) SetLevel(level string) {
 	if l == nil {
 		return
@@ -104,28 +177,58 @@ func (l *Logger) SetLevel(level string) {
 	l.mu.Unlock()
 }
 
+// Level 返回当前级别名。
+func (l *Logger) Level() string {
+	if l == nil {
+		return "info"
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return strings.TrimSpace(l.level.String())
+}
+
+// SetSink 注册实时日志订阅者（推送给 UI）；传 nil 取消订阅。
+func (l *Logger) SetSink(fn func(Entry)) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.sink = fn
+	l.mu.Unlock()
+}
+
 // Debug 输出调试日志。
 func (l *Logger) Debug(module, format string, args ...any) {
 	l.log(LevelDebug, module, format, args...)
 }
 
 // Info 输出信息日志。
-func (l *Logger) Info(module, format string, args ...any) {
-	l.log(LevelInfo, module, format, args...)
-}
+func (l *Logger) Info(module, format string, args ...any) { l.log(LevelInfo, module, format, args...) }
 
 // Warn 输出警告日志。
-func (l *Logger) Warn(module, format string, args ...any) {
-	l.log(LevelWarn, module, format, args...)
-}
+func (l *Logger) Warn(module, format string, args ...any) { l.log(LevelWarn, module, format, args...) }
 
 // Error 输出错误日志。
 func (l *Logger) Error(module, format string, args ...any) {
 	l.log(LevelError, module, format, args...)
 }
 
-// Tail 返回内存中最近 n 条日志（供诊断面板实时查看）。
-func (l *Logger) Tail(n int) []string {
+// Recover 捕获 fn 中的 panic 并记录堆栈，用于后台任务与协程。
+//
+// 返回 true 表示发生了 panic。
+func (l *Logger) Recover(module, context string, fn func()) (recovered bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			recovered = true
+			l.Error(module, "panic: %v（%s）\n%s", r, context, truncateStack(debug.Stack()))
+		}
+	}()
+	fn()
+	return false
+}
+
+// Tail 返回内存中最近 n 条日志。
+func (l *Logger) Tail(n int) []Entry {
 	if l == nil {
 		return nil
 	}
@@ -134,10 +237,50 @@ func (l *Logger) Tail(n int) []string {
 	if n <= 0 || n > l.size {
 		n = l.size
 	}
-	out := make([]string, 0, n)
+	out := make([]Entry, 0, n)
 	for i := 0; i < n; i++ {
 		idx := (l.head - n + i + memBuffer*2) % memBuffer
 		out = append(out, l.ring[idx])
+	}
+	return out
+}
+
+// Dir 返回日志目录。
+func (l *Logger) Dir() string {
+	if l == nil {
+		return ""
+	}
+	return l.dir
+}
+
+// Files 返回当前保留的日志文件（按修改时间倒序）。
+func (l *Logger) Files() []string {
+	if l == nil {
+		return nil
+	}
+	entries, err := os.ReadDir(l.dir)
+	if err != nil {
+		return nil
+	}
+	type item struct {
+		path string
+		mod  time.Time
+	}
+	var items []item
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		items = append(items, item{path: filepath.Join(l.dir, e.Name()), mod: info.ModTime()})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].mod.After(items[j].mod) })
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, it.path)
 	}
 	return out
 }
@@ -158,43 +301,95 @@ func (l *Logger) Close() error {
 }
 
 func (l *Logger) log(level Level, module, format string, args ...any) {
-	if l == nil || l.disabled || level < l.level {
+	if l == nil || level < l.levelValue() {
 		return
 	}
 	message := format
 	if len(args) > 0 {
 		message = fmt.Sprintf(format, args...)
 	}
-	line := fmt.Sprintf("%s [%s] %-12s %s\n", time.Now().Format("2006-01-02 15:04:05.000"), level, module, message)
+	now := time.Now()
+	entry := Entry{
+		At:      now.UnixMilli(),
+		Level:   strings.TrimSpace(level.String()),
+		Module:  module,
+		Message: message,
+	}
 
 	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.pushRingLocked(entry)
+	sink := l.sink
+	stdout := l.stdout
+	if !l.disabled {
+		l.writeLocked(now, level, module, message)
+	}
+	l.mu.Unlock()
 
-	l.ring[l.head] = strings.TrimRight(line, "\n")
+	if stdout != nil {
+		_, _ = io.WriteString(stdout, formatLine(now, level, module, message))
+	}
+	if sink != nil {
+		sink(entry)
+	}
+}
+
+// levelValue 读取级别（加锁版本，供 log 内部使用）。
+func (l *Logger) levelValue() Level {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.level
+}
+
+func (l *Logger) pushRingLocked(entry Entry) {
+	l.ring[l.head] = entry
 	l.head = (l.head + 1) % memBuffer
 	if l.size < memBuffer {
 		l.size++
 	}
+}
 
-	if l.file == nil {
-		return
-	}
-	if day := time.Now().Format("20060102"); day != l.day {
+func (l *Logger) writeLocked(now time.Time, level Level, module, message string) {
+	day := now.Format("20060102")
+	if l.file != nil && (day != l.day || l.written >= l.maxBytes) {
 		_ = l.file.Close()
 		l.file = nil
-		if err := l.rotateLocked(time.Now()); err != nil {
+		if day != l.day {
+			l.seq = 0
+		}
+	}
+	if l.file == nil {
+		if err := l.rotateLocked(now); err != nil {
 			return
 		}
 	}
-	_, _ = io.WriteString(l.file, line)
+	line := formatLine(now, level, module, message)
+	n, err := io.WriteString(l.file, line)
+	if err == nil {
+		l.written += int64(n)
+	}
 }
 
+// rotateLocked 打开（或滚动到）新的日志文件。
 func (l *Logger) rotateLocked(now time.Time) error {
 	l.day = now.Format("20060102")
-	path := filepath.Join(l.dir, "app-"+l.day+".log")
+	name := "app-" + l.day + ".log"
+	if l.seq > 0 {
+		name = fmt.Sprintf("app-%s.%d.log", l.day, l.seq)
+	}
+	path := filepath.Join(l.dir, name)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
+	}
+	info, statErr := f.Stat()
+	if statErr == nil {
+		l.written = info.Size()
+	}
+	// 打开时已超限：直接进入下一个序号文件
+	if l.written >= l.maxBytes {
+		_ = f.Close()
+		l.seq++
+		return l.rotateLocked(now)
 	}
 	l.file = f
 	return nil
@@ -205,30 +400,28 @@ func (l *Logger) cleanup() {
 	if l.keepDays <= 0 {
 		return
 	}
-	entries, err := os.ReadDir(l.dir)
-	if err != nil {
-		return
-	}
-	type entry struct {
-		path string
-		mod  time.Time
-	}
-	var files []entry
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), "app-") || !strings.HasSuffix(e.Name(), ".log") {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		files = append(files, entry{path: filepath.Join(l.dir, e.Name()), mod: info.ModTime()})
-	}
-	sort.Slice(files, func(i, j int) bool { return files[i].mod.After(files[j].mod) })
 	cutoff := time.Now().AddDate(0, 0, -l.keepDays)
-	for _, f := range files {
-		if f.mod.Before(cutoff) {
-			_ = os.Remove(f.path)
+	for _, path := range l.Files() {
+		info, err := os.Stat(path)
+		if err != nil || !info.ModTime().Before(cutoff) {
+			continue
 		}
+		_ = os.Remove(path)
 	}
+}
+
+func formatLine(at time.Time, level Level, module, message string) string {
+	return fmt.Sprintf("%s [%s] %-14s %s\n",
+		at.Format("2006-01-02 15:04:05.000"), level, module, message)
+}
+
+// today 返回当天日期字符串（测试用）。
+func today() string { return time.Now().Format("20060102") }
+
+func truncateStack(stack []byte) string {
+	const max = 4096
+	if len(stack) > max {
+		return string(stack[:max]) + "\n…（堆栈已截断）"
+	}
+	return string(stack)
 }

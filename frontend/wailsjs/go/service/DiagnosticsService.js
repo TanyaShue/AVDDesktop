@@ -18,6 +18,18 @@ export function ExportReport() {
   return window['go']['service']['DiagnosticsService']['ExportReport']();
 }
 
+export function LogDir() {
+  return window['go']['service']['DiagnosticsService']['LogDir']();
+}
+
+export function LogFiles() {
+  return window['go']['service']['DiagnosticsService']['LogFiles']();
+}
+
+export function LogLevel() {
+  return window['go']['service']['DiagnosticsService']['LogLevel']();
+}
+
 export function OpenLogFolder() {
   return window['go']['service']['DiagnosticsService']['OpenLogFolder']();
 }
@@ -28,4 +40,12 @@ export function ReadAppLog(arg1) {
 
 export function RunSelfCheck() {
   return window['go']['service']['DiagnosticsService']['RunSelfCheck']();
+}
+
+export function SetLogLevel(arg1) {
+  return window['go']['service']['DiagnosticsService']['SetLogLevel'](arg1);
+}
+
+export function TestLog(arg1) {
+  return window['go']['service']['DiagnosticsService']['TestLog'](arg1);
 }

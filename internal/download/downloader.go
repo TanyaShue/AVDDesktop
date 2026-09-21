@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"AVDDesktop/internal/domain"
+	"AVDDesktop/internal/logging"
 )
 
 // Progress 是下载进度快照。
@@ -45,6 +46,8 @@ type Options struct {
 	FilePerm    os.FileMode
 	SpeedLimit  int // KB/s，0 = 不限速
 	UserAgent   string
+	// Logger 可选：下载模式选择、断点续传与重试会写日志。
+	Logger logging.Interface
 }
 
 // Result 是下载结果。
@@ -66,6 +69,7 @@ const (
 
 // Fetch 下载 url 到 opts.Dest（自动选择模式、断点续传、进度回调）。
 func Fetch(ctx context.Context, rawURL string, opts Options) (Result, error) {
+	log := logging.Or(opts.Logger)
 	res := Result{Path: opts.Dest}
 	start := time.Now()
 	defer func() { res.Elapsed = time.Since(start) }()
@@ -88,6 +92,8 @@ func Fetch(ctx context.Context, rawURL string, opts Options) (Result, error) {
 	}
 	res.RangeSupported = probe.rangeSupported
 	res.FinalURL = probe.finalURL
+	log.Debug("download", "探测 %s：size=%d range支持=%v 最终地址=%s",
+		filepath.Base(opts.Dest), probe.size, probe.rangeSupported, probe.finalURL)
 
 	// 处理续传
 	var existing int64
@@ -100,12 +106,18 @@ func Fetch(ctx context.Context, rawURL string, opts Options) (Result, error) {
 		if probe.size > 0 && existing >= probe.size {
 			// 已完成，直接返回
 			res.Bytes = existing
+			log.Debug("download", "%s 已存在且大小相符，跳过下载", filepath.Base(opts.Dest))
 			return res, nil
 		}
+		log.Warn("download", "%s 存在 %d 字节残留但不支持续传，从头重新下载", filepath.Base(opts.Dest), existing)
 		_ = os.Remove(opts.Dest) // 无法续传则重下
 		existing = 0
 	}
 	res.Resumed = existing > 0
+	if res.Resumed {
+		log.Info("download", "%s 断点续传：从 %d / %d 字节继续",
+			filepath.Base(opts.Dest), existing, probe.size)
+	}
 
 	perm := opts.FilePerm
 	if perm == 0 {
@@ -132,11 +144,15 @@ func Fetch(ctx context.Context, rawURL string, opts Options) (Result, error) {
 	limiter := newLimiter(opts.SpeedLimit)
 
 	if probe.rangeSupported && opts.Concurrency > 1 && probe.size >= minParallel {
+		log.Debug("download", "%s 使用分片并发（并发=%d 大小=%d）",
+			filepath.Base(opts.Dest), opts.Concurrency, probe.size)
 		if err := parallelFetch(ctx, client, rawURL, f, probe.size, existing, opts, &counter, limiter); err != nil {
 			return res, err
 		}
 	} else {
-		if err := sequentialFetch(ctx, client, rawURL, f, existing, opts.UserAgent, &counter, limiter); err != nil {
+		log.Debug("download", "%s 使用单连接（range支持=%v 大小=%d）",
+			filepath.Base(opts.Dest), probe.rangeSupported, probe.size)
+		if err := sequentialFetch(ctx, client, rawURL, f, existing, opts.UserAgent, &counter, limiter, log); err != nil {
 			return res, err
 		}
 	}
@@ -218,7 +234,7 @@ func probeURL(ctx context.Context, client *http.Client, rawURL, ua string) (prob
 	return res, nil
 }
 
-func sequentialFetch(ctx context.Context, client *http.Client, rawURL string, f *os.File, existing int64, ua string, counter *atomicProgress, limiter *limiter) error {
+func sequentialFetch(ctx context.Context, client *http.Client, rawURL string, f *os.File, existing int64, ua string, counter *atomicProgress, limiter *limiter, log logging.Interface) error {
 	var attempt int
 	for {
 		attempt++
@@ -232,6 +248,7 @@ func sequentialFetch(ctx context.Context, client *http.Client, rawURL string, f 
 		if attempt >= maxRetries {
 			return err
 		}
+		log.Warn("download", "下载中断（第 %d 次重试）：%v", attempt, err)
 		select {
 		case <-ctx.Done():
 			return domain.Err(domain.CodeJobCanceled, "操作已取消")
@@ -331,7 +348,7 @@ func parallelFetch(ctx context.Context, client *http.Client, rawURL string, f *o
 			}
 			defer func() { <-sem }()
 
-			err := fetchChunk(ctx, client, rawURL, f, c.from, c.to, opts.UserAgent, counter, limiter)
+			err := fetchChunk(ctx, client, rawURL, f, c.from, c.to, opts.UserAgent, counter, limiter, logging.Or(opts.Logger))
 			if err != nil {
 				errCh <- err
 				cancel()
@@ -348,7 +365,7 @@ func parallelFetch(ctx context.Context, client *http.Client, rawURL string, f *o
 	return ctx.Err()
 }
 
-func fetchChunk(ctx context.Context, client *http.Client, rawURL string, f *os.File, from, to int64, ua string, counter *atomicProgress, limiter *limiter) error {
+func fetchChunk(ctx context.Context, client *http.Client, rawURL string, f *os.File, from, to int64, ua string, counter *atomicProgress, limiter *limiter, log logging.Interface) error {
 	var attempt int
 	for {
 		attempt++
@@ -362,6 +379,7 @@ func fetchChunk(ctx context.Context, client *http.Client, rawURL string, f *os.F
 		if attempt >= maxRetries {
 			return err
 		}
+		log.Warn("download", "分片 %d-%d 下载失败（第 %d 次重试）：%v", from, to, attempt, err)
 		select {
 		case <-ctx.Done():
 			return err

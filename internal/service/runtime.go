@@ -14,6 +14,7 @@ import (
 	"AVDDesktop/internal/config"
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/job"
+	"AVDDesktop/internal/logging"
 	"AVDDesktop/internal/mirror"
 	"AVDDesktop/internal/platform"
 	"AVDDesktop/internal/sdk/detect"
@@ -25,6 +26,7 @@ type Runtime struct {
 	AppName string
 	Version string
 
+	log      *logging.Logger
 	settings *config.Manager
 	jobs     *job.Manager
 	locks    *job.KeyedMutex
@@ -33,8 +35,9 @@ type Runtime struct {
 
 	emitFn func(event string, payload any)
 
-	ctxMu sync.RWMutex
-	ctx   context.Context
+	ctxMu    sync.RWMutex
+	ctx      context.Context
+	ctxReady bool
 
 	compMu   sync.Mutex
 	compRoot string
@@ -52,24 +55,46 @@ type components struct {
 	Env       []string
 }
 
-// NewRuntime 创建运行时。
-func NewRuntime(appName, version string, settings *config.Manager, cacheDir string) *Runtime {
+// NewRuntime 创建运行时。log 为 nil 时使用空日志器。
+func NewRuntime(appName, version string, settings *config.Manager, cacheDir string, log *logging.Logger) *Runtime {
+	if log == nil {
+		log = logging.Discard()
+	}
 	r := &Runtime{
 		AppName:  appName,
 		Version:  version,
+		log:      log,
 		settings: settings,
 		locks:    job.NewKeyedMutex(),
-		detector: detect.NewDetector(),
-		engine:   mirror.NewEngine(cacheDir),
+		detector: detect.NewDetector(log),
+		engine:   mirror.NewEngine(cacheDir, log),
 	}
-	r.jobs = job.NewManager(r.Emit)
+	r.jobs = job.NewManager(r.Emit, log)
+	// 任务日志同步写应用日志：用户离开界面后仍能在日志文件里回溯每个后台任务
+	r.jobs.SetLogHook(func(jobID, kind, level, source, message string) {
+		switch level {
+		case "error":
+			log.Error("job:"+source, "[%s/%s] %s", jobID, kind, message)
+		case "warn":
+			log.Warn("job:"+source, "[%s/%s] %s", jobID, kind, message)
+		default:
+			log.Debug("job:"+source, "[%s/%s] %s", jobID, kind, message)
+		}
+	})
 	return r
 }
 
+// Log 返回应用日志器。
+func (r *Runtime) Log() *logging.Logger { return r.log }
+
 // SetContext 由 Wails 的 startup 回调注入。
+//
+// 在 startup 之前（例如 `wails generate module` 的绑定生成阶段、单元测试）
+// 不允许调用任何 Wails runtime 方法，因此 Emit 会先检查 ctxReady。
 func (r *Runtime) SetContext(ctx context.Context) {
 	r.ctxMu.Lock()
 	r.ctx = ctx
+	r.ctxReady = true
 	r.ctxMu.Unlock()
 }
 
@@ -83,14 +108,25 @@ func (r *Runtime) Context() context.Context {
 	return r.ctx
 }
 
+// ContextReady 返回 Wails 生命周期上下文是否已就绪。
+func (r *Runtime) ContextReady() bool {
+	r.ctxMu.RLock()
+	defer r.ctxMu.RUnlock()
+	return r.ctxReady
+}
+
 // SetEmitter 设置事件出口（由 main.go 注入 wails runtime.EventsEmit）。
 func (r *Runtime) SetEmitter(fn func(event string, payload any)) { r.emitFn = fn }
 
 // Emit 发送事件到前端。
+//
+// 上下文未就绪时静默丢弃：这是安全前提，因为 Wails 在
+// `wails generate module` 阶段也会构造 App，此时调用 EventsEmit 会导致进程退出。
 func (r *Runtime) Emit(event string, payload any) {
-	if r.emitFn != nil {
-		r.emitFn(event, payload)
+	if r.emitFn == nil || !r.ContextReady() {
+		return
 	}
+	r.emitFn(event, payload)
 }
 
 // Jobs 返回任务管理器。
@@ -107,6 +143,7 @@ func (r *Runtime) Engine() *mirror.Engine { return r.engine }
 
 // Shutdown 停止所有任务与实例（应用退出时调用）。
 func (r *Runtime) Shutdown() {
+	r.log.Info("app", "开始关闭：取消任务并停止模拟器实例")
 	r.jobs.CancelAll()
 	if comp := r.comp; comp != nil && comp.Launcher != nil {
 		comp.Launcher.StopAll(context.Background(), true)
@@ -139,14 +176,16 @@ func (r *Runtime) Components() *components {
 		Paths: paths,
 		Store: st,
 	}
-	comp.Adb = adb.New(paths.Adb, env)
-	comp.Installer = install.New(paths, platform.SubDir(r.AppName, "cache"))
-	comp.Launcher = launch.New(paths, env, st, comp.Adb, r.Emit)
+	comp.Adb = adb.New(paths.Adb, env, r.log)
+	comp.Installer = install.New(paths, platform.SubDir(r.AppName, "cache"), r.log)
+	comp.Launcher = launch.New(paths, env, st, comp.Adb, r.Emit, r.log)
 	comp.Env = env
 
 	r.compRoot = sdkRes.Path
 	r.compAvd = avdRes.Path
 	r.comp = comp
+	r.log.Info("app", "工具链已按当前设置重新解析：SDK=%s AVD=%s 注入环境变量=%v",
+		sdkRes.Path, avdRes.Path, settings.InjectEnvForChild)
 	return comp
 }
 

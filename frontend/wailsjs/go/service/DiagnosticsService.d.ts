@@ -10,8 +10,18 @@ export function EnvSummary():Promise<domain.DiagnosticReport>;
 
 export function ExportReport():Promise<string>;
 
+export function LogDir():Promise<string>;
+
+export function LogFiles():Promise<Array<string>>;
+
+export function LogLevel():Promise<string>;
+
 export function OpenLogFolder():Promise<void>;
 
 export function ReadAppLog(arg1:number):Promise<Array<domain.LogLine>>;
 
 export function RunSelfCheck():Promise<string>;
+
+export function SetLogLevel(arg1:string):Promise<void>;
+
+export function TestLog(arg1:string):Promise<string>;
