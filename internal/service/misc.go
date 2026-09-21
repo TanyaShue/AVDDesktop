@@ -1,9 +1,12 @@
 package service
 
 import (
+	"strings"
+
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"AVDDesktop/internal/domain"
+	"AVDDesktop/internal/logging"
 )
 
 // SettingsService 暴露用户设置的读写。
@@ -50,9 +53,21 @@ func (s *LogService) Tail(n int) []domain.LogLine {
 	entries := s.rt.Log().Tail(n)
 	out := make([]domain.LogLine, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, domain.LogLine{At: e.At, Level: e.Level, Source: e.Module, Message: e.Message})
+		out = append(out, LogLineFromEntry(e))
 	}
 	return domain.NonNil(out)
+}
+
+// LogLineFromEntry 把应用日志条目转成统一控制台的日志行：
+// 模块作为来源，级别统一为小写（与任务日志一致），序号用于前端去重。
+func LogLineFromEntry(e logging.Entry) domain.LogLine {
+	return domain.LogLine{
+		Seq:     e.Seq,
+		At:      e.At,
+		Level:   strings.ToLower(strings.TrimSpace(e.Level)),
+		Source:  e.Module,
+		Message: e.Message,
+	}
 }
 
 // WindowService 提供无边框窗口的控制。

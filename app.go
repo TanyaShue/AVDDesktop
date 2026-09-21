@@ -74,9 +74,9 @@ func NewApp() (*App, error) {
 		wailsruntime.EventsEmit(rt.Context(), event, payload)
 	})
 
-	// 把每条日志实时推送前端（底部统一日志区域）
+	// 把每条应用日志实时推送前端（底部统一日志区域，与任务日志共享同一控制台）
 	logger.SetSink(func(entry logging.Entry) {
-		rt.Emit("log:line", entry)
+		rt.Emit("log:line", service.LogLineFromEntry(entry))
 	})
 
 	app := &App{

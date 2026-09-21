@@ -438,6 +438,7 @@ export namespace domain {
 		}
 	}
 	export class LogLine {
+	    seq: number;
 	    at: number;
 	    level: string;
 	    source?: string;
@@ -449,6 +450,7 @@ export namespace domain {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.seq = source["seq"];
 	        this.at = source["at"];
 	        this.level = source["level"];
 	        this.source = source["source"];

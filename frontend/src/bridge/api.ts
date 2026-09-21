@@ -9,6 +9,7 @@ export * as Avd from "../../wailsjs/go/service/AvdService";
 export * as Emulator from "../../wailsjs/go/service/EmulatorService";
 export * as Settings from "../../wailsjs/go/service/SettingsService";
 export * as Jobs from "../../wailsjs/go/service/JobService";
+export * as Logs from "../../wailsjs/go/service/LogService";
 export * as Win from "../../wailsjs/go/service/WindowService";
 
 import type { EnvReport } from "./types";
@@ -43,6 +44,7 @@ export const EVENTS = {
   jobLog: "job:log",
   jobDone: "job:done",
   jobFailed: "job:failed",
+  logLine: "log:line",
   emulatorState: "emulator:state",
   avdChanged: "avd:changed",
   envChanged: "env:changed",

@@ -99,6 +99,54 @@ func TestSinkReceivesEntries(t *testing.T) {
 	}
 }
 
+func TestEntrySeqMatchesBetweenSinkAndTail(t *testing.T) {
+	// 前端控制台靠 Entry.Seq 去重：同一行的实时推送（Sink）与历史回填（Tail）
+	// 必须带同一个序号，否则启动瞬间会重复插入同一行。
+	l, err := New(Options{Dir: t.TempDir(), Level: "info"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+
+	var mu sync.Mutex
+	var pushed []Entry
+	l.SetSink(func(e Entry) {
+		mu.Lock()
+		pushed = append(pushed, e)
+		mu.Unlock()
+	})
+
+	for i := 0; i < 3; i++ {
+		l.Info("boot", "启动 %d", i)
+	}
+
+	ring := l.Tail(10)
+	if len(ring) != 3 {
+		t.Fatalf("Tail 应返回 3 条，实际 %d", len(ring))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(pushed) != len(ring) {
+		t.Fatalf("Sink 与 Tail 条数不一致：%d / %d", len(pushed), len(ring))
+	}
+	seen := make(map[uint64]bool, len(ring))
+	for i, e := range ring {
+		if e.Seq == 0 {
+			t.Fatalf("第 %d 条缺少序号：%+v", i, e)
+		}
+		if seen[e.Seq] {
+			t.Fatalf("序号重复：%d", e.Seq)
+		}
+		seen[e.Seq] = true
+		if pushed[i].Seq != e.Seq {
+			t.Fatalf("实时推送与历史回填序号不一致：%+v / %+v", pushed[i], e)
+		}
+		if i > 0 && ring[i-1].Seq >= e.Seq {
+			t.Fatalf("序号应递增：%d → %d", ring[i-1].Seq, e.Seq)
+		}
+	}
+}
+
 func TestSizeRotation(t *testing.T) {
 	dir := t.TempDir()
 	l, err := New(Options{Dir: dir, Level: "info", MaxBytes: 512})

@@ -288,7 +288,11 @@ type JobInfo struct {
 }
 
 // LogLine 是一条日志。
+//
+// Seq 是应用日志的进程内唯一序号（任务日志为 0）：前端控制台用它作为行 id，
+// 使历史回填与实时推送的同一行不会被重复插入。
 type LogLine struct {
+	Seq     uint64 `json:"seq,omitempty"`
 	At      int64  `json:"at"`
 	Level   string `json:"level"` // debug|info|warn|error
 	Source  string `json:"source,omitempty"`

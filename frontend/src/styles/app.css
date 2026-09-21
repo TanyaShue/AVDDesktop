@@ -838,6 +838,13 @@ select {
   flex: 0 0 auto;
 }
 
+.drawer__count {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  flex: 0 0 auto;
+}
+
 .drawer__active {
   flex: 1;
   min-width: 0;
@@ -846,6 +853,15 @@ select {
   gap: var(--sp-3);
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+/* 折叠态的最近一条日志 */
+.drawer__latest {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-tertiary);
 }
 
 .drawer__body {
@@ -865,13 +881,6 @@ select {
 
 .drawer__item {
   padding: var(--sp-3) var(--sp-4);
-  cursor: pointer;
-  border-left: 2px solid transparent;
-}
-
-.drawer__item--active {
-  background: var(--bg-subtle);
-  border-left-color: var(--primary);
 }
 
 .drawer__item-title {

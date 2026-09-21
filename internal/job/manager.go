@@ -3,7 +3,7 @@
 // 设计（见 ARCHITECTURE.md ADR-03 / §7）：
 //   - 所有耗时操作（测速、下载、安装、创建 AVD、启动模拟器）都登记为 Job
 //   - 绑定方法立即返回 jobID，进度与日志通过事件流推送
-//   - 进度事件节流到 10Hz，日志批量发送，避免 Wails 序列化抖动
+//   - 进度事件节流到 10Hz，日志按 200ms 节流推送，避免 Wails 序列化抖动
 //   - 同类型资源互斥由调用方通过 KeyedMutex 保证（SDK 写锁 / AVD 写锁）
 package job
 
@@ -23,11 +23,6 @@ import (
 // Sink 是事件出口（由 service 层桥接到 Wails runtime.EventsEmit）。
 type Sink func(event string, payload any)
 
-// LogHook 把任务日志同时转写到应用日志（便于用户离开界面后仍能回溯）。
-//
-// 参数：jobID、jobKind、level、source、message。
-type LogHook func(jobID, kind, level, source, message string)
-
 // 事件名（与 docs/API-CONTRACT.md §6 一致）。
 const (
 	EventCreated  = "job:created"
@@ -41,7 +36,8 @@ const (
 	progressInterval = 100 * time.Millisecond
 	logFlushInterval = 200 * time.Millisecond
 	maxLogLines      = 500
-	maxBufferedLogs  = 50
+	// maxFinishedJobs 是保留的已结束任务数（更早的任务随应用日志文件留存）。
+	maxFinishedJobs = 20
 )
 
 // Spec 描述一个任务。
@@ -64,14 +60,13 @@ type Job struct {
 	id   string
 	spec Spec
 
-	mu       sync.Mutex
-	info     domain.JobInfo
-	logs     []domain.LogLine
-	pending  []domain.LogLine
-	dirty    bool
-	ended    bool
-	cancel   context.CancelFunc
-	onThread func(domain.LogLine) // 可选：转发给应用日志
+	mu      sync.Mutex
+	info    domain.JobInfo
+	logs    []domain.LogLine
+	pending []domain.LogLine
+	dirty   bool
+	ended   bool
+	cancel  context.CancelFunc
 }
 
 // ID 返回任务 ID。
@@ -140,7 +135,7 @@ func (j *Job) SetItems(done, total int) {
 	j.dirty = true
 }
 
-// Log 追加一条日志（会批量推送给前端，并保留最近 maxLogLines 条）。
+// Log 追加一条日志（由推送协程按 logFlushInterval 节流发给前端，并保留最近 maxLogLines 条）。
 func (j *Job) Log(level, source, message string) {
 	line := domain.LogLine{At: time.Now().UnixMilli(), Level: level, Source: source, Message: message}
 	j.mu.Lock()
@@ -149,12 +144,7 @@ func (j *Job) Log(level, source, message string) {
 		j.logs = j.logs[len(j.logs)-maxLogLines:]
 	}
 	j.pending = append(j.pending, line)
-	j.dirty = true
-	thread := j.onThread
 	j.mu.Unlock()
-	if thread != nil {
-		thread(line)
-	}
 }
 
 // Logf 是 Log 的格式化封装。
@@ -185,9 +175,6 @@ type Manager struct {
 	sink Sink
 	log  logging.Interface
 
-	hookMu  sync.Mutex
-	logHook LogHook
-
 	mu   sync.Mutex
 	jobs map[string]*Job
 	seq  int64
@@ -201,13 +188,6 @@ func NewManager(sink Sink, log logging.Interface) *Manager {
 	m := &Manager{sink: sink, log: logging.Or(log), jobs: map[string]*Job{}, stopCh: make(chan struct{})}
 	go m.ticker()
 	return m
-}
-
-// SetLogHook 设置任务日志转写钩子。
-func (m *Manager) SetLogHook(hook LogHook) {
-	m.hookMu.Lock()
-	m.logHook = hook
-	m.hookMu.Unlock()
 }
 
 // Stop 停止后台协程（应用退出时调用）。
@@ -240,10 +220,6 @@ func (m *Manager) Start(parent context.Context, spec Spec, runner Runner) *Job {
 			StartedAt:  time.Now().UnixMilli(),
 		},
 		dirty: true,
-	}
-	// 任务日志同时转写到应用日志，便于用户关闭界面后回溯。
-	j.onThread = func(line domain.LogLine) {
-		m.dispatchHook(id, string(spec.Kind), line.Level, line.Source, line.Message)
 	}
 	m.jobs[id] = j
 	m.mu.Unlock()
@@ -288,7 +264,7 @@ func (m *Manager) Start(parent context.Context, spec Spec, runner Runner) *Job {
 		info := j.info
 		j.mu.Unlock()
 
-		m.flushLogs(j, true)
+		m.flushLogs(j)
 		switch info.Status {
 		case domain.JobFailed:
 			m.log.Error("job", "任务 %s 失败（%s）：%v", id, spec.Kind, info.Error)
@@ -300,6 +276,8 @@ func (m *Manager) Start(parent context.Context, spec Spec, runner Runner) *Job {
 			m.log.Info("job", "任务 %s 完成（%s，耗时 %s）", id, spec.Kind, time.Since(start).Round(time.Millisecond))
 			m.emit(EventDone, info)
 		}
+		// 已结束任务只保留最近 maxFinishedJobs 条，避免长时间运行后无限增长
+		m.Prune(maxFinishedJobs)
 	}()
 	return j
 }
@@ -395,7 +373,7 @@ func (m *Manager) Prune(keep int) {
 	}
 }
 
-// ticker 周期性推送进度与批量日志。
+// ticker 周期性推送进度与日志。
 func (m *Manager) ticker() {
 	t := time.NewTicker(progressInterval)
 	defer t.Stop()
@@ -443,13 +421,14 @@ func (m *Manager) flushAllLogs() {
 	}
 	m.mu.Unlock()
 	for _, j := range jobs {
-		m.flushLogs(j, false)
+		m.flushLogs(j)
 	}
 }
 
-func (m *Manager) flushLogs(j *Job, force bool) {
+// flushLogs 把任务尚未推送的日志发给前端（按节流周期调用）。
+func (m *Manager) flushLogs(j *Job) {
 	j.mu.Lock()
-	if len(j.pending) == 0 || (!force && len(j.pending) < maxBufferedLogs) {
+	if len(j.pending) == 0 {
 		j.mu.Unlock()
 		return
 	}
@@ -462,16 +441,6 @@ func (m *Manager) flushLogs(j *Job, force bool) {
 func (m *Manager) emit(event string, payload any) {
 	if m.sink != nil {
 		m.sink(event, payload)
-	}
-}
-
-// dispatchHook 把任务日志转写到应用日志。
-func (m *Manager) dispatchHook(jobID, kind, level, source, message string) {
-	m.hookMu.Lock()
-	hook := m.logHook
-	m.hookMu.Unlock()
-	if hook != nil {
-		hook(jobID, kind, level, source, message)
 	}
 }
 

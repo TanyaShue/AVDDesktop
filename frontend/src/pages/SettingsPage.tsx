@@ -53,6 +53,10 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
   };
 
   const report = env.report;
+  // 「尚未初始化」已有横幅（含一个「立即准备」按钮），issue 列表不再重复渲染同类动作
+  const issues = report
+    ? report.issues.filter((issue) => !(report.needInit && issue.fixKind === "prepare"))
+    : [];
 
   return (
     <div className="page">
@@ -148,9 +152,9 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
                   </div>
                 ) : null}
 
-                {report.issues.length > 0 ? (
+                {issues.length > 0 ? (
                   <div style={{ marginTop: 12 }}>
-                    {report.issues.map((issue) => (
+                    {issues.map((issue) => (
                       <div
                         key={issue.id}
                         className={`banner ${issue.severity === "blocker" ? "banner--danger" : "banner--info"}`}

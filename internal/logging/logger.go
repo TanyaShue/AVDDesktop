@@ -59,7 +59,11 @@ func ParseLevel(s string) Level {
 }
 
 // Entry 是一条日志的结构化表示（也会推送给前端）。
+//
+// Seq 是进程内递增序号，唯一标识一条日志：实时推送（sink）与历史回填（Tail）
+// 携带同一序号，前端据此去重，不会把同一行插入两次。
 type Entry struct {
+	Seq     uint64 `json:"seq"`
 	At      int64  `json:"at"`
 	Level   string `json:"level"`
 	Module  string `json:"module"`
@@ -112,8 +116,9 @@ type Logger struct {
 
 	file    *os.File
 	day     string
-	seq     int
+	seq     int // 当日日志文件滚动序号（与 Entry.Seq 无关）
 	written int64
+	logSeq  uint64 // 每写入一条日志递增，作为 Entry.Seq
 
 	ring []Entry
 	head int
@@ -317,6 +322,8 @@ func (l *Logger) log(level Level, module, format string, args ...any) {
 	}
 
 	l.mu.Lock()
+	l.logSeq++
+	entry.Seq = l.logSeq
 	l.pushRingLocked(entry)
 	sink := l.sink
 	stdout := l.stdout

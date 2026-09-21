@@ -60,8 +60,8 @@ func (s *EmulatorService) trackStart(inst *domain.EmulatorInstance) {
 		Title:    "启动模拟器 " + inst.AvdName,
 		Subtitle: inst.Serial,
 	}, func(ctx context.Context, j *job.Job) error {
-		j.Logf("info", "emulator", "已启动 emulator 进程：pid=%d port=%d", inst.PID, inst.Port)
-		j.Logf("info", "emulator", "参数：%s", strings.Join(inst.Args, " "))
+		// 进程与状态细节已由 launcher 写入应用日志（module=emulator），
+		// 这里只推进任务阶段，避免同一件事在统一控制台出现两行。
 		ticker := time.NewTicker(startTrackInterval)
 		defer ticker.Stop()
 		seen := domain.AvdState("")
@@ -72,9 +72,7 @@ func (s *EmulatorService) trackStart(inst *domain.EmulatorInstance) {
 			}
 			if cur.State != seen {
 				seen = cur.State
-				text := startStateText(cur.State)
-				j.SetPhase(text)
-				j.Logf("info", "emulator", "%s：%s", inst.Serial, text)
+				j.SetPhase(startStateText(cur.State))
 				switch cur.State {
 				case domain.AvdRunning:
 					return nil
