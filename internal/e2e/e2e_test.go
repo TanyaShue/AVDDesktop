@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"AVDDesktop/internal/archive"
 	"AVDDesktop/internal/avd/store"
 	"AVDDesktop/internal/config"
 	"AVDDesktop/internal/domain"
@@ -810,6 +811,36 @@ func TestE2E_EmulatorBootAndAdb(t *testing.T) {
 		t.Errorf("旋转失败: %v", err)
 	}
 
+	// logcat：先取快照，再开实时流（验证长驻进程 + 行事件推送）
+	if lines, err := adbSvc.LogcatSnapshot(inst.Serial, "", 50); err != nil {
+		t.Errorf("logcat 快照失败: %v", err)
+	} else {
+		t.Logf("  logcat 快照 %d 行，示例：%s", len(lines), firstLine(lines))
+	}
+	streamID, err := adbSvc.StartLogcat(service.LogcatRequest{Serial: inst.Serial})
+	if err != nil {
+		t.Fatalf("启动 logcat 流失败: %v", err)
+	}
+	// 制造一点日志流量
+	_, _ = adbSvc.Shell(inst.Serial, "getprop ro.build.fingerprint")
+	time.Sleep(3 * time.Second)
+	streamJob, ok := rt.Jobs().Get(streamID)
+	if !ok {
+		t.Error("logcat 任务不存在")
+	} else if jobLogs := streamJob.Logs(); len(jobLogs) == 0 {
+		t.Error("logcat 流没有收到任何日志行")
+	} else {
+		t.Logf("  logcat 流已收到 %d 行（最后一行：%s）", len(jobLogs), truncate(jobLogs[len(jobLogs)-1].Message, 100))
+	}
+	if err := adbSvc.StopLogcat(streamID); err != nil {
+		t.Errorf("停止 logcat 流失败: %v", err)
+	}
+
+	// 运行中的设备不允许导出（数据文件正在写入）
+	if _, err := avdSvc.Export(service.ExportRequest{Name: name, TargetZip: filepath.Join(e.tmp, "running.zip")}); err == nil {
+		t.Error("运行中的设备不应允许导出")
+	}
+
 	// 停止
 	if err := emuSvc.StopByAvd(name, false); err != nil {
 		t.Fatalf("停止实例失败: %v", err)
@@ -860,6 +891,136 @@ func TestE2E_SdkListingAndVersions(t *testing.T) {
 			img.Path, img.APILevel, img.TagID, img.ABI, img.IsPlaystore, img.RequiresEmulator)
 		if img.APILevel == "" || img.ABI == "" {
 			t.Errorf("镜像信息不完整：%+v", img)
+		}
+	}
+}
+
+// ---------------------------------------------------------------- 8. 导出 / 导入
+
+func TestE2E_AvdExportImport(t *testing.T) {
+	e := setup(t)
+	e.requireSDK(t)
+	e.requireImage(t)
+
+	rt := e.newRuntime(t)
+	avdSvc := service.NewAvdService(rt)
+
+	profiles, err := avdSvc.ListProfiles(false)
+	if err != nil {
+		t.Fatalf("读取档案失败: %v", err)
+	}
+
+	const name = "E2E_ExportSrc"
+	jobID, err := avdSvc.Create(domain.AvdSpec{
+		Name:            name,
+		DisplayName:     "导出源设备",
+		ProfileID:       pickProfile(profiles),
+		SystemImagePath: e.imagePath,
+		HW:              map[string]string{"hw.ramSize": "2048"},
+		Tags:            []string{"export-test"},
+		Note:            "导出导入回归用",
+	})
+	if err != nil {
+		t.Fatalf("创建失败: %v", err)
+	}
+	if info := waitJob(t, rt, jobID, 3*time.Minute); info.Status != domain.JobSucceeded {
+		t.Fatalf("创建任务失败：%v", info.Error)
+	}
+
+	exportPath := filepath.Join(e.tmp, "exported-device.zip")
+	exportJob, err := avdSvc.Export(service.ExportRequest{Name: name, TargetZip: exportPath})
+	if err != nil {
+		t.Fatalf("导出失败: %v", err)
+	}
+	if info := waitJob(t, rt, exportJob, 3*time.Minute); info.Status != domain.JobSucceeded {
+		t.Fatalf("导出任务失败：%v", info.Error)
+	}
+	if !platform.FileExists(exportPath) {
+		t.Fatal("导出文件不存在")
+	}
+	exportSize := platform.DirSize(exportPath)
+	if exportSize <= 0 {
+		t.Fatal("导出文件为空")
+	}
+
+	entries, err := archive.ListZip(exportPath)
+	if err != nil {
+		t.Fatalf("无法读取导出包: %v", err)
+	}
+	joined := strings.Join(entries, "\n")
+	for _, want := range []string{name + ".ini", name + ".avd/config.ini"} {
+		if !strings.Contains(joined, filepath.ToSlash(want)) {
+			t.Errorf("导出包缺少 %s\n包内条目：%v", want, entries)
+		}
+	}
+	t.Logf("导出成功：%s（%s，%d 个条目）", filepath.Base(exportPath), platform.HumanSize(exportSize), len(entries))
+
+	// 删除原设备，再导入为另一个名字
+	delJob, err := avdSvc.Delete(service.DeleteRequest{Name: name, DeleteFiles: true})
+	if err != nil {
+		t.Fatalf("删除失败: %v", err)
+	}
+	waitJob(t, rt, delJob, time.Minute)
+
+	importJob, err := avdSvc.Import(service.ImportRequest{ZipPath: exportPath, Name: "E2E_Imported"})
+	if err != nil {
+		t.Fatalf("导入失败: %v", err)
+	}
+	if info := waitJob(t, rt, importJob, 3*time.Minute); info.Status != domain.JobSucceeded {
+		t.Fatalf("导入任务失败：%v", info.Error)
+	}
+
+	detail, err := avdSvc.Get("E2E_Imported")
+	if err != nil {
+		t.Fatalf("读取导入结果失败: %v", err)
+	}
+	if detail.Config["AvdId"] != "E2E_Imported" {
+		t.Errorf("导入后 AvdId 未改写：%s", detail.Config["AvdId"])
+	}
+	if detail.Summary.RAMMB != 2048 {
+		t.Errorf("导入后配置丢失：ram=%d", detail.Summary.RAMMB)
+	}
+	if detail.Summary.APILevel == "" || detail.Summary.ABI == "" {
+		t.Errorf("导入后摘要信息不完整：%+v", detail.Summary)
+	}
+	if !strings.HasPrefix(detail.RawConfig, "AvdId=") {
+		t.Logf("导入后的 config.ini 首行：%s", strings.SplitN(detail.RawConfig, "\n", 2)[0])
+	}
+	layout := store.New(e.avdHome).Resolve("E2E_Imported")
+	if !platform.FileExists(layout.IniPath) {
+		t.Error(".ini 未重建")
+	}
+	ini, err := store.ReadIni(layout.IniPath)
+	if err != nil {
+		t.Fatalf("无法读取导入后的 .ini: %v", err)
+	}
+	if ini["path"] != layout.Dir {
+		t.Errorf(".ini 的 path 未指向新位置：%s ≠ %s", ini["path"], layout.Dir)
+	}
+	meta, _ := store.New(e.avdHome).ReadMeta("E2E_Imported")
+	if meta == nil || meta.Extra["importedFrom"] == "" {
+		t.Errorf("导入元数据缺失：%+v", meta)
+	}
+	t.Logf("导入成功：display=%q api=%s ram=%dMB", detail.Summary.DisplayName, detail.Summary.APILevel, detail.Summary.RAMMB)
+
+	// 同包再导入一次：同名时应自动改名而不是覆盖
+	again, err := avdSvc.Import(service.ImportRequest{ZipPath: exportPath, Name: "E2E_Imported"})
+	if err != nil {
+		t.Fatalf("重复导入失败: %v", err)
+	}
+	if info := waitJob(t, rt, again, 3*time.Minute); info.Status != domain.JobSucceeded {
+		t.Fatalf("重复导入任务失败：%v", info.Error)
+	}
+	list, _ := avdSvc.List()
+	if len(list) != 2 {
+		t.Errorf("重复导入后应有 2 个设备，实际 %d：%v", len(list), names(list))
+	}
+	t.Logf("重复导入后的设备：%v", names(list))
+
+	// 清理
+	for _, d := range list {
+		if job, err := avdSvc.Delete(service.DeleteRequest{Name: d.Name, DeleteFiles: true}); err == nil {
+			waitJob(t, rt, job, time.Minute)
 		}
 	}
 }
@@ -938,4 +1099,11 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+func firstLine(lines []string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	return truncate(lines[0], 120)
 }

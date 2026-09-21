@@ -8,6 +8,8 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
+
+	"AVDDesktop/internal/platform"
 )
 
 //go:embed all:frontend/dist
@@ -17,6 +19,20 @@ func main() {
 	app, err := NewApp()
 	if err != nil {
 		log.Fatalf("初始化失败: %v", err)
+	}
+
+	// 单实例：避免两个进程同时写同一个 SDK/AVD 目录
+	release, alreadyRunning, lockErr := platform.AcquireSingleInstance(AppName)
+	if lockErr != nil {
+		app.log.Warn("app", "单实例锁创建失败（不影响使用）: %v", lockErr)
+	} else if alreadyRunning {
+		app.log.Warn("app", "已有实例在运行，本次启动退出")
+		platform.FocusExistingInstance("AVDDesktop")
+		platform.NotifyAlreadyRunning("AVDDesktop",
+			"AVDDesktop 已经在运行。\n\n请使用已打开的窗口；若窗口被隐藏，请在任务栏中恢复。")
+		return
+	} else {
+		defer release()
 	}
 
 	err = wails.Run(&options.App{

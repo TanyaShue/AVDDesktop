@@ -9,6 +9,8 @@ export function InstallApk(arg1:service.InstallApkRequest):Promise<string>;
 
 export function KillServer():Promise<void>;
 
+export function LogcatSnapshot(arg1:string,arg2:string,arg3:number):Promise<Array<string>>;
+
 export function Pull(arg1:service.PullRequest):Promise<string>;
 
 export function Push(arg1:service.PushRequest):Promise<string>;
@@ -22,3 +24,5 @@ export function Shell(arg1:string,arg2:string):Promise<string>;
 export function StartLogcat(arg1:service.LogcatRequest):Promise<string>;
 
 export function StartServer():Promise<void>;
+
+export function StopLogcat(arg1:string):Promise<void>;

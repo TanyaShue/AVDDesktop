@@ -48,6 +48,7 @@ export const EVENTS = {
   envChanged: "env:changed",
   diagnosticsChecks: "diagnostics:checks",
   logLine: "log:line",
+  logcatLine: "logcat:line",
 } as const;
 
 /** 把 AppError 渲染成可读文本。 */

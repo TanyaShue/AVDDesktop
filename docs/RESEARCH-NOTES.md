@@ -420,3 +420,50 @@ ready=true 阻塞项=0
 ```
 
 结论：路径解析链、版本读取、加速判定这三处最容易出错的地方均与官方工具的实际行为一致。
+
+### 8.7 Windows 虚拟化能力探测（补充 §6）
+
+通过 CIM（非管理员）读到的真实数据：
+
+```json
+{"hypervisorPresent":true,"virtFirmware":false,"slat":false,"vmm":false,
+ "cpu":"13th Gen Intel(R) Core(TM) i5-13500H","caption":"Microsoft Windows 11 专业版","build":"26200"}
+```
+
+两个重要结论：
+
+1. **`hypervisorPresent=true` 时，`virtFirmware/slat/vmm` 会报 false** —— hypervisor 已接管 CPU，
+   根分区看不到这些能力位。不能据此判定“不支持虚拟化”，否则会给出完全错误的 BIOS 引导。
+   已在 `buildIssues` 中区分三种归因（已有 hypervisor 但 WHPX 未启用 / 无 hypervisor / BIOS 未开 VT-x）。
+2. **PowerShell 5.1 在中文 Windows 默认用 GBK 输出**，`ConvertTo-Json` 的结果不是合法 UTF-8，
+   会把 “Windows 11 专业版” 变成乱码。必须在脚本里显式设置
+   `[Console]::OutputEncoding=[Text.Encoding]::UTF8`，并在解析后过滤非法字节。
+
+另外实测本机 **未开启长路径支持**（`LongPathsEnabled=0`），因此自检会给出 `reg add` 修复命令。
+
+### 8.8 自检性能优化（实测）
+
+| 阶段 | 耗时 | 原因 |
+| --- | --- | --- |
+| 初版 | 13.3 s | AVD 健康检查遍历数 GB 的设备数据目录统计大小 |
+| + 目录大小缓存与 `WithSize=false` 快路径 | 7.2 s | 自检不再遍历大目录 |
+| + Windows 探测移入并行段 | **5.2 s** | CIM 查询（约 3s）与其它检测重叠 |
+| 二次调用（TTL / 单飞） | < 5 ms | 命中缓存；并发调用只执行一次扫描 |
+
+---
+
+## 9. 回归测试发现并修复的缺陷
+
+首次完整跑通时，E2E 套件（`internal/e2e`，构建标签 `e2e`）与运行时日志共抓出 5 个真实缺陷，
+全部已修复并补了单元测试：
+
+| # | 缺陷 | 现象 | 修复 |
+| --- | --- | --- | --- |
+| 1 | 系统镜像目录拼接丢前缀 | `android-34` → 拼成 `system-images/34/...`，创建设备时误报“镜像未安装” | 区分展示用 `api=34` 与目录段 `android-34`（`SystemImageDir`） |
+| 2 | 官方归档包装目录未剥离 | `platform-tools` 解压成 `<sdk>/platform-tools/platform-tools/adb.exe`，安装后找不到 adb | 按所有条目共同顶层目录剥离（与 sdkmanager 一致），并拒绝把 `../` 当作可剥离前缀 |
+| 3 | `ANDROID_AVD_HOME` 指到父目录 | avdmanager 把新建 AVD 放到错误位置，工具随即“看不到”设备 | 指向 avd 目录本身 |
+| 4 | 后端选择忽略显式开关 | `createWithAvdManager=false` 仍走 avdmanager（无 JDK 环境会失败） | 显式关闭时强制使用直写后端 |
+| 5 | 并发自检重复扫描（由运行时日志发现，非 E2E） | 启动推送与前端请求同时触发两次完整扫描（日志中出现两条“开始环境自检”） | 单飞（single-flight）+ TTL 缓存 |
+
+> 结论：路径拼接、归档布局、环境变量语义这三类问题几乎不可能靠代码审阅发现，
+> 必须用真实工具与真实归档跑一遍。这也是把 E2E 作为独立阶段交付的原因。

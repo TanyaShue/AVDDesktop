@@ -43,7 +43,7 @@ type Options struct {
 	AvdIssues []string
 }
 
-// Detector 执行环境自检（带短 TTL 缓存）。
+// Detector 执行环境自检（带短 TTL 缓存 + 单飞保护）。
 type Detector struct {
 	log logging.Interface
 
@@ -51,6 +51,12 @@ type Detector struct {
 	cached   *domain.EnvReport
 	cachedAt time.Time
 	ttl      time.Duration
+	// inflight 非空时表示已有扫描在进行，后来的调用等待其结果，
+	// 避免启动推送与前端请求同时触发两次完整扫描。
+	inflight chan struct{}
+
+	// scanHook 仅在测试中使用，用于统计实际扫描次数。
+	scanHook func()
 }
 
 // NewDetector 创建探测器。log 为 nil 时使用空日志器。
@@ -60,21 +66,37 @@ func NewDetector(log logging.Interface) *Detector {
 
 // Detect 执行全量自检。
 func (d *Detector) Detect(ctx context.Context, opts Options) (*domain.EnvReport, error) {
-	d.mu.Lock()
-	if d.cached != nil && time.Since(d.cachedAt) < d.ttl {
-		rep := d.cached
+	for {
+		d.mu.Lock()
+		if d.cached != nil && time.Since(d.cachedAt) < d.ttl {
+			rep := d.cached
+			d.mu.Unlock()
+			return rep, nil
+		}
+		if d.inflight != nil {
+			wait := d.inflight
+			d.mu.Unlock()
+			select {
+			case <-wait:
+				continue // 等待完成后重试（此时应命中缓存）
+			case <-ctx.Done():
+				return nil, domain.Err(domain.CodeJobCanceled, "已取消环境自检")
+			}
+		}
+		d.inflight = make(chan struct{})
+		done := d.inflight
 		d.mu.Unlock()
-		return rep, nil
+
+		report := d.scan(ctx, opts)
+
+		d.mu.Lock()
+		d.cached = report
+		d.cachedAt = time.Now()
+		d.inflight = nil
+		d.mu.Unlock()
+		close(done)
+		return report, nil
 	}
-	d.mu.Unlock()
-
-	report := d.scan(ctx, opts)
-
-	d.mu.Lock()
-	d.cached = report
-	d.cachedAt = time.Now()
-	d.mu.Unlock()
-	return report, nil
 }
 
 // Invalidate 使缓存失效（安装/设置变更后调用）。
@@ -83,8 +105,10 @@ func (d *Detector) Invalidate() {
 	d.cached = nil
 	d.mu.Unlock()
 }
-
 func (d *Detector) scan(ctx context.Context, opts Options) *domain.EnvReport {
+	if d.scanHook != nil {
+		d.scanHook()
+	}
 	started := time.Now()
 	sdkRes := platform.ResolveSdkRoot(opts.SdkRootOverride)
 	avdRes := platform.ResolveAvdHome(opts.AvdHomeOverride)

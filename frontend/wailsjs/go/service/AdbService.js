@@ -14,6 +14,10 @@ export function KillServer() {
   return window['go']['service']['AdbService']['KillServer']();
 }
 
+export function LogcatSnapshot(arg1, arg2, arg3) {
+  return window['go']['service']['AdbService']['LogcatSnapshot'](arg1, arg2, arg3);
+}
+
 export function Pull(arg1) {
   return window['go']['service']['AdbService']['Pull'](arg1);
 }
@@ -40,4 +44,8 @@ export function StartLogcat(arg1) {
 
 export function StartServer() {
   return window['go']['service']['AdbService']['StartServer']();
+}
+
+export function StopLogcat(arg1) {
+  return window['go']['service']['AdbService']['StopLogcat'](arg1);
 }

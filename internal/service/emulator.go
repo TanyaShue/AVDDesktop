@@ -13,6 +13,7 @@ import (
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/job"
 	"AVDDesktop/internal/platform"
+	"AVDDesktop/internal/proc"
 )
 
 // EmulatorService 管理模拟器实例。
@@ -431,25 +432,109 @@ func (s *AdbService) StartServer() error {
 type LogcatRequest struct {
 	Serial string `json:"serial"`
 	Filter string `json:"filter"`
+	// Buffer 可选：main/system/crash/events/all
+	Buffer string `json:"buffer"`
 }
 
-// StartLogcat 启动日志流（持续推送事件）。
+// StartLogcat 启动实时日志流：任务持续运行，逐行推送 logcat:line 事件。
 //
-// TODO(M6): 目前只验证设备可用性并返回提示；完整实现需要长驻进程 + 行流式事件。
+// 返回的 jobID 可直接传给 StopLogcat / JobService.Cancel 停止流。
 func (s *AdbService) StartLogcat(req LogcatRequest) (string, error) {
 	comp := s.rt.Components()
-	if _, err := outputCommand(context.Background(), comp.Paths.Adb,
-		[]string{"-s", req.Serial, "get-state"}, comp.Env); err != nil {
-		return "", err
+	if !comp.Adb.Available() {
+		return "", domain.Err(domain.CodeToolMissing, "未找到 adb（platform-tools 未安装）")
 	}
+	if strings.TrimSpace(req.Serial) == "" {
+		return "", domain.Err(domain.CodeInvalidArgument, "未指定设备（serial）")
+	}
+
+	// 先确认设备在线，避免任务启动后立即失败
+	if _, err := outputCommand(s.rt.Context(), comp.Paths.Adb,
+		[]string{"-s", req.Serial, "get-state"}, comp.Env); err != nil {
+		return "", domain.ErrDetail(domain.CodeProcessFailed,
+			"设备 "+req.Serial+" 当前不可用", "请确认模拟器已启动完成").
+			WithHint("可以在设备页面查看实例状态")
+	}
+
+	args := []string{"-s", req.Serial, "logcat", "-v", "time"}
+	if b := strings.TrimSpace(req.Buffer); b != "" {
+		args = append(args, "-b", b)
+	}
+	if f := strings.TrimSpace(req.Filter); f != "" {
+		args = append(args, strings.Fields(f)...)
+	}
+
 	j := s.rt.jobs.Start(s.rt.Context(), job.Spec{
-		Kind:  domain.JobLogcat,
-		Title: "logcat " + req.Serial,
+		Kind:     domain.JobLogcat,
+		Title:    "logcat " + req.Serial,
+		Subtitle: nonEmpty(req.Filter, "全部日志"),
 	}, func(ctx context.Context, j *job.Job) error {
-		j.Log("info", "logcat", "日志流功能将在 M6 完成（当前占位）")
+		j.Logf("info", "logcat", "开始订阅 %s 的日志（buffer=%s）", req.Serial, nonEmpty(req.Buffer, "main"))
+
+		// adb logcat 是长驻进程：ctx 取消时 proc.Run 会终止它
+		res, err := proc.Run(ctx, comp.Paths.Adb, args, proc.Options{
+			Env:    comp.Env,
+			OnLine: func(stream, line string) { s.emitLogcatLine(req.Serial, j, line) },
+		})
+		_ = res
+		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "cancel") {
+			return err
+		}
+		j.Logf("info", "logcat", "日志流已结束")
 		return nil
 	})
 	return j.ID(), nil
+}
+
+// emitLogcatLine 把一行 logcat 同时送入任务日志与前端事件。
+func (s *AdbService) emitLogcatLine(serial string, j *job.Job, line string) {
+	level := detectLogLevel(line)
+	j.Log(level, "logcat", line)
+	s.rt.Emit("logcat:line", map[string]any{
+		"jobId":  j.ID(),
+		"serial": serial,
+		"line":   line,
+		"level":  level,
+		"at":     platform.NowMs(),
+	})
+}
+
+// StopLogcat 停止日志流（取消对应任务）。
+func (s *AdbService) StopLogcat(jobID string) error {
+	if strings.TrimSpace(jobID) == "" {
+		return domain.Err(domain.CodeInvalidArgument, "未指定日志任务")
+	}
+	return s.rt.Jobs().Cancel(jobID)
+}
+
+// LogcatSnapshot 抓取一次日志快照（相当于 adb logcat -d），不开长驻流。
+func (s *AdbService) LogcatSnapshot(serial, filter string, lines int) ([]string, error) {
+	comp := s.rt.Components()
+	if lines <= 0 {
+		lines = 200
+	}
+	args := []string{"-s", serial, "logcat", "-d", "-v", "time", "-t", strconv.Itoa(lines)}
+	if f := strings.TrimSpace(filter); f != "" {
+		args = append(args, strings.Fields(f)...)
+	}
+	out, err := outputCommand(s.rt.Context(), comp.Paths.Adb, args, comp.Env)
+	if err != nil {
+		return nil, err
+	}
+	return platform.SplitLines(out), nil
+}
+
+// detectLogLevel 根据 logcat 行内容粗略判断级别（用于 UI 着色）。
+func detectLogLevel(line string) string {
+	upper := strings.ToUpper(line)
+	switch {
+	case strings.Contains(upper, " E ") || strings.Contains(upper, " F ") || strings.Contains(upper, "FATAL"):
+		return "error"
+	case strings.Contains(upper, " W ") || strings.Contains(upper, "WARN"):
+		return "warn"
+	default:
+		return "info"
+	}
 }
 
 func (s *AdbService) adbPath() string { return s.rt.Components().Paths.Adb }

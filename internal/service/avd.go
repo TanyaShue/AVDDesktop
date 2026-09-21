@@ -445,30 +445,98 @@ func (s *AvdService) ComputeCommand(spec domain.AvdSpec) map[string]string {
 	}
 }
 
-// ExportRequest 是导出请求（打包 .avd 目录 + .ini）。
+// ExportRequest 是导出请求（打包 .avd 目录与 .ini）。
 type ExportRequest struct {
-	Name      string `json:"name"`
-	TargetZip string `json:"targetZip"`
+	Name             string `json:"name"`
+	TargetZip        string `json:"targetZip"`
+	IncludeSnapshots bool   `json:"includeSnapshots"`
 }
 
-// Export 导出设备为一个 zip 包。
-//
-// TODO(M6): 当前返回未实现错误；实现思路见 docs/ARCHITECTURE.md §11-M6。
+// Export 把设备导出为一个 zip 包（内部结构：<name>.ini + <name>.avd/...）。
 func (s *AvdService) Export(req ExportRequest) (string, error) {
-	return "", domain.NotImplemented("导出设备（.avd 打包为 zip）")
+	comp := s.rt.Components()
+	layout := comp.Store.Resolve(req.Name)
+	if !layout.Exists {
+		return "", domain.Err(domain.CodeAvdNotFound, "设备不存在: "+req.Name)
+	}
+	if strings.TrimSpace(req.TargetZip) == "" {
+		return "", domain.Err(domain.CodeInvalidArgument, "未指定导出文件路径")
+	}
+	if _, ok := comp.Launcher.ByAvd(req.Name); ok {
+		return "", domain.Err(domain.CodeFileInUse,
+			"设备正在运行，无法导出（数据文件正在被写入）").
+			WithHint("请先停止设备后重试")
+	}
+
+	unlock, ok := s.rt.locks.TryLock("avd:" + comp.Store.AvdHome)
+	if !ok {
+		return "", domain.Err(domain.CodeJobBusy, "已有设备写任务正在进行")
+	}
+
+	j := s.rt.jobs.Start(s.rt.Context(), job.Spec{
+		Kind:  domain.JobExport,
+		Title: "导出设备 " + req.Name,
+	}, func(ctx context.Context, j *job.Job) error {
+		defer unlock()
+		j.SetPhase("正在打包")
+		written, err := comp.Store.Export(ctx, req.Name, req.TargetZip, req.IncludeSnapshots, func(done, total int64, name string, line string) {
+			if line != "" {
+				j.Log("info", "export", line)
+			}
+			if total > 0 {
+				j.SetBytes(done, total, 0)
+			}
+		})
+		if err != nil {
+			return err
+		}
+		j.Logf("info", "export", "已导出到 %s（%s）", req.TargetZip, platform.HumanSize(written))
+		return nil
+	})
+	return j.ID(), nil
 }
 
 // ImportRequest 是导入请求。
 type ImportRequest struct {
 	ZipPath string `json:"zipPath"`
-	Name    string `json:"name"`
+	// Name 为空时使用包内的设备名；重名时自动加后缀。
+	Name string `json:"name"`
 }
 
-// Import 从 zip 包导入设备。
-//
-// TODO(M6): 当前返回未实现错误。
+// Import 从 zip 包导入设备（恢复到当前 AVD 目录并修正配置中的路径）。
 func (s *AvdService) Import(req ImportRequest) (string, error) {
-	return "", domain.NotImplemented("导入设备（从 zip 恢复 .avd）")
+	comp := s.rt.Components()
+	if !platform.FileExists(req.ZipPath) {
+		return "", domain.Err(domain.CodePathNotFound, "文件不存在: "+req.ZipPath)
+	}
+	unlock, ok := s.rt.locks.TryLock("avd:" + comp.Store.AvdHome)
+	if !ok {
+		return "", domain.Err(domain.CodeJobBusy, "已有设备写任务正在进行")
+	}
+
+	j := s.rt.jobs.Start(s.rt.Context(), job.Spec{
+		Kind:  domain.JobAvdCreate,
+		Title: "导入设备 " + filepath.Base(req.ZipPath),
+	}, func(ctx context.Context, j *job.Job) error {
+		defer unlock()
+		j.SetPhase("正在解包")
+		name, err := comp.Store.Import(ctx, req.ZipPath, req.Name, func(done, total int64, current string) error {
+			if err := ctx.Err(); err != nil {
+				return domain.Err(domain.CodeJobCanceled, "操作已取消")
+			}
+			if total > 0 {
+				j.SetBytes(done, total, 0)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		j.Logf("info", "import", "已导入设备 %s", name)
+		s.rt.Emit("avd:changed", map[string]any{"action": "created", "name": name})
+		return nil
+	})
+	return j.ID(), nil
 }
 
 // SnapshotDir 返回快照目录（供 UI 显示占用）。

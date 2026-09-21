@@ -1370,6 +1370,7 @@ export namespace service {
 	export class ExportRequest {
 	    name: string;
 	    targetZip: string;
+	    includeSnapshots: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ExportRequest(source);
@@ -1379,6 +1380,7 @@ export namespace service {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.targetZip = source["targetZip"];
+	        this.includeSnapshots = source["includeSnapshots"];
 	    }
 	}
 	export class ImportRequest {
@@ -1470,6 +1472,7 @@ export namespace service {
 	export class LogcatRequest {
 	    serial: string;
 	    filter: string;
+	    buffer: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new LogcatRequest(source);
@@ -1479,6 +1482,7 @@ export namespace service {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.serial = source["serial"];
 	        this.filter = source["filter"];
+	        this.buffer = source["buffer"];
 	    }
 	}
 	export class PickRequest {

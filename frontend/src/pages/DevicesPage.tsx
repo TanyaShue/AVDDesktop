@@ -5,6 +5,7 @@ import { EVENTS, errorText } from "../bridge/api";
 import type { AvdSummary, EmulatorInstance, LaunchOptions } from "../bridge/types";
 import { useWailsEvent } from "../hooks/useApp";
 import { DeviceWizard } from "./DeviceWizard";
+import { LogcatModal } from "../components/LogcatModal";
 import { humanSize } from "../components/ui";
 
 interface Props {
@@ -19,6 +20,7 @@ export function DevicesPage({ onToast }: Props) {
   const [sortBy, setSortBy] = useState<"name" | "api" | "recent">("name");
   const [showWizard, setShowWizard] = useState(false);
   const [busyName, setBusyName] = useState<string | null>(null);
+  const [logcatTarget, setLogcatTarget] = useState<{ serial: string; name: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -128,6 +130,44 @@ export function DevicesPage({ onToast }: Props) {
     }
   };
 
+  /** 导出设备为 zip（可选是否包含快照）。 */
+  const exportDevice = async (device: AvdSummary) => {
+    try {
+      const target = await api.Env.SaveFile({
+        title: `导出 ${device.displayName}`,
+        defaultFilename: `${device.name}.zip`,
+        filterDisplay: "压缩包",
+        filterPattern: "*.zip",
+      });
+      if (!target) return;
+      const includeSnapshots = window.confirm(
+        "是否一并导出快照？\n\n确定 = 包含快照（体积大）\n取消 = 跳过快照与临时文件（推荐）",
+      );
+      const id = await api.Avd.Export({ name: device.name, targetZip: target, includeSnapshots });
+      onToast("info", "正在导出设备", `任务 ${id}，可在任务面板查看进度`);
+    } catch (err) {
+      onToast("danger", "导出失败", errorText(err));
+    }
+  };
+
+  /** 从 zip 导入设备。 */
+  const importDevice = async () => {
+    try {
+      const zipPath = await api.Env.PickFile({
+        title: "选择设备备份包",
+        filterDisplay: "压缩包",
+        filterPattern: "*.zip",
+      });
+      if (!zipPath) return;
+      const name = window.prompt("导入后的设备名称（留空则使用包内名称）：", "") ?? "";
+      const id = await api.Avd.Import({ zipPath, name: name.trim() });
+      onToast("info", "正在导入设备", `任务 ${id}`);
+      await load();
+    } catch (err) {
+      onToast("danger", "导入失败", errorText(err));
+    }
+  };
+
   const wipeDevice = async (device: AvdSummary) => {
     if (!window.confirm(`清除「${device.displayName}」的所有用户数据（相当于恢复出厂设置）？`)) return;
     try {
@@ -158,6 +198,9 @@ export function DevicesPage({ onToast }: Props) {
           </button>
           <button className="btn btn--secondary" disabled title="批量启动/停止将在 M6 提供">
             批量操作
+          </button>
+          <button className="btn btn--secondary" onClick={() => void importDevice()} title="从 zip 备份恢复设备">
+            导入设备
           </button>
           <button
             className="btn btn--secondary"
@@ -313,6 +356,13 @@ export function DevicesPage({ onToast }: Props) {
                           />
                           <MenuItem label="清除数据" onClick={() => void wipeDevice(device)} />
                           <MenuItem label="克隆设备" onClick={() => void cloneDevice(device)} />
+                          <MenuItem label="导出设备…" onClick={() => void exportDevice(device)} />
+                          {isRunning && inst ? (
+                            <MenuItem
+                              label="查看实时日志 (logcat)"
+                              onClick={() => setLogcatTarget({ serial: inst.serial, name: device.displayName })}
+                            />
+                          ) : null}
                           <MenuItem
                             label="打开目录"
                             onClick={() => void api.Avd.OpenFolder(device.name)}
@@ -344,6 +394,15 @@ export function DevicesPage({ onToast }: Props) {
         <DeviceWizard
           onClose={() => setShowWizard(false)}
           onCreated={() => void load()}
+          onToast={onToast}
+        />
+      ) : null}
+
+      {logcatTarget ? (
+        <LogcatModal
+          serial={logcatTarget.serial}
+          avdName={logcatTarget.name}
+          onClose={() => setLogcatTarget(null)}
           onToast={onToast}
         />
       ) : null}
