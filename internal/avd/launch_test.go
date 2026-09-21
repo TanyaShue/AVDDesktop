@@ -2,13 +2,17 @@ package avd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"AVDDesktop/internal/adb"
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/logging"
 	"AVDDesktop/internal/platform"
@@ -171,5 +175,113 @@ func TestProcessExitCancelsWait(t *testing.T) {
 	case <-waitCtx2.Done():
 	case <-time.After(time.Second):
 		t.Fatal("上层 ctx 取消未传递到等待上下文")
+	}
+}
+
+// testInstance 构造一个不涉及真实进程的实例；exit 关闭表示进程已退出。
+func testInstance(avdName string, port int) *instance {
+	return &instance{exit: make(chan struct{}), info: domain.EmulatorInstance{
+		ID: fmt.Sprintf("emu-%d-1", port), AvdName: avdName, Serial: adb.SerialForPort(port),
+		Port: port, State: domain.AvdStarting, StartedAt: platform.NowMs(),
+	}}
+}
+
+// registerInstance 把测试实例登记到启动器，模拟已受理的启动。
+func registerInstance(l *Launcher, inst *instance) {
+	l.mu.Lock()
+	l.instances[inst.info.ID] = inst
+	l.mu.Unlock()
+}
+
+// TestMonitorConvergesOnPrematureExit 验证进程提前退出时 monitor 立即收敛为 stopped，不空等超时。
+func TestMonitorConvergesOnPrematureExit(t *testing.T) {
+	port, _ := freePortRange(t, 1)
+	l := newTestLauncher()
+	inst := testInstance("Dev1", port)
+	registerInstance(l, inst)
+	close(inst.exit) // 进程已在 monitor 启动前退出（退出码 0）
+
+	started := time.Now()
+	l.monitor(context.Background(), inst)
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("进程已退出，monitor 仍耗时 %s，应立即收敛", elapsed)
+	}
+	snap, ok := l.Get(inst.info.ID)
+	if !ok {
+		t.Fatal("实例未登记到启动器")
+	}
+	if snap.State != domain.AvdStopped {
+		t.Fatalf("进程提前退出后状态 = %s，期望 %s", snap.State, domain.AvdStopped)
+	}
+}
+
+// TestPortReallocatedAfterExit 验证实例结束后端口被归还，可再次分配。
+func TestPortReallocatedAfterExit(t *testing.T) {
+	port, _ := freePortRange(t, 1)
+	l := newTestLauncher()
+	l.first, l.last = port, port
+	if got, err := l.AllocatePort(); err != nil || got != port {
+		t.Fatalf("准备端口 %d 失败：port=%d err=%v", port, got, err)
+	}
+	inst := testInstance("Dev1", port)
+	registerInstance(l, inst)
+	close(inst.exit)
+	l.monitor(context.Background(), inst)
+
+	if got, err := l.AllocatePort(); err != nil || got != port {
+		t.Fatalf("实例结束后端口 %d 应可再次分配：port=%d err=%v", port, got, err)
+	}
+}
+
+// TestStartRejectsDuplicateAvd 验证同一 AVD 已有运行实例时拒绝再次启动。
+func TestStartRejectsDuplicateAvd(t *testing.T) {
+	emulator := filepath.Join(t.TempDir(), "emulator")
+	if err := os.WriteFile(emulator, nil, 0o644); err != nil {
+		t.Fatalf("创建测试用 emulator 占位文件失败：%v", err)
+	}
+	l := newTestLauncher()
+	l.tools.Emulator = emulator
+	registerInstance(l, testInstance("Dev1", 5560))
+
+	_, err := l.Start(context.Background(), "Dev1", domain.LaunchOptions{})
+	var appErr *domain.AppError
+	if !errors.As(err, &appErr) || appErr.Code != domain.CodeFileInUse {
+		t.Fatalf("同一 AVD 重复启动错误 = %v，期望错误码 %s", err, domain.CodeFileInUse)
+	}
+}
+
+// TestMonitorRequestedStopNonZeroExit 验证用户请求停止后的非 0 退出记为 stopped，只有非请求退出才记 error。
+func TestMonitorRequestedStopNonZeroExit(t *testing.T) {
+	cases := []struct {
+		name          string
+		stopRequested bool
+		want          domain.AvdState
+	}{
+		{"已请求停止", true, domain.AvdStopped},
+		{"未请求停止", false, domain.AvdError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			port, _ := freePortRange(t, 1)
+			l := newTestLauncher()
+			inst := testInstance("Dev1", port)
+			inst.code = 1
+			inst.stopRequested = tc.stopRequested
+			registerInstance(l, inst)
+			close(inst.exit)
+
+			l.monitor(context.Background(), inst)
+
+			snap, ok := l.Get(inst.info.ID)
+			if !ok {
+				t.Fatal("实例未登记到启动器")
+			}
+			if snap.State != tc.want {
+				t.Fatalf("退出码 1 后状态 = %s，期望 %s", snap.State, tc.want)
+			}
+			if snap.LastError == "" {
+				t.Error("应保留退出原因（LastError）")
+			}
+		})
 	}
 }

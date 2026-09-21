@@ -30,7 +30,7 @@ const (
 	defaultFirstPort, defaultLastPort = 5554, 5680
 	deviceWaitTimeout                 = 3 * time.Minute
 	bootWaitTimeout                   = 5 * time.Minute
-	stopGraceTimeout                  = 20 * time.Second
+	stopGraceTimeout                  = 30 * time.Second
 	killWaitTimeout                   = 15 * time.Second
 	ringLimit                         = 200
 )
@@ -56,6 +56,9 @@ type instance struct {
 	cmd  *exec.Cmd
 	exit chan struct{} // cmd.Wait 返回后关闭；code 只允许在其后读取
 	code int
+
+	// stopRequested 表示用户已请求停止（受 Launcher.mu 保护）：之后的非 0 退出记为 stopped 而非 error。
+	stopRequested bool
 
 	ringMu sync.Mutex
 	ring   []string // 最近若干行原始输出，用于分析退出原因
@@ -124,7 +127,7 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 		if inst.info.AvdName == avdName && !processExited(inst.exit) {
 			l.mu.Unlock()
 			return nil, domain.ErrDetail(domain.CodeFileInUse, "该设备已经有一个实例在运行", inst.info.Serial).
-				WithHint("同一个 AVD 不能同时启动两次；如需多开请先克隆设备")
+				WithHint("同一个 AVD 不能同时启动两次；请先停止正在运行的实例")
 		}
 	}
 	l.mu.Unlock()
@@ -146,14 +149,24 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 			WithHint("请确认模拟器未被杀毒软件拦截、路径没有特殊字符，且当前账户有执行权限")
 	}
 
+	l.mu.Lock()
 	l.seq++
+	seq := l.seq
 	inst := &instance{cmd: cmd, exit: make(chan struct{}), info: domain.EmulatorInstance{
-		ID: fmt.Sprintf("emu-%d-%d", port, l.seq), AvdName: avdName, Serial: adb.SerialForPort(port),
+		ID: fmt.Sprintf("emu-%d-%d", port, seq), AvdName: avdName, Serial: adb.SerialForPort(port),
 		Port: port, PID: cmd.Process.Pid, State: domain.AvdStarting, StartedAt: platform.NowMs(), Args: args,
 	}}
-	l.mu.Lock()
 	l.instances[inst.info.ID] = inst
+	// 快照必须在锁内复制：monitor 随后会并发写 inst.info.State。
+	snapshot := inst.info
 	l.mu.Unlock()
+
+	var captureDone sync.WaitGroup
+	captureDone.Add(1)
+	go func() {
+		defer captureDone.Done()
+		l.capture(inst, pr)
+	}()
 	go func() {
 		err := cmd.Wait()
 		var exitErr *exec.ExitError
@@ -163,14 +176,13 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 			inst.code = -1
 		}
 		_ = pw.Close()
+		captureDone.Wait() // 先让 capture 读完管道，保证关闭 exit 时内存环已完整
 		close(inst.exit)
 	}()
-	go l.capture(inst, pr)
 	go l.monitor(ctx, inst)
 	l.log.Info("emulator", "已启动 %s：pid=%d serial=%s port=%d\n  参数：%s %s", avdName,
 		cmd.Process.Pid, inst.info.Serial, port, l.tools.Emulator, strings.Join(args, " "))
-	info := inst.info
-	return &info, nil
+	return &snapshot, nil
 }
 
 // monitor 推进状态机（booting → running/error），并在进程退出后收敛状态。
@@ -210,6 +222,14 @@ func (l *Launcher) monitor(ctx context.Context, inst *instance) {
 	logText := strings.ToLower(strings.Join(inst.ring, "\n"))
 	inst.ringMu.Unlock()
 	reason := explainExit(logText, code)
+	l.mu.Lock()
+	requested := inst.stopRequested
+	l.mu.Unlock()
+	if requested {
+		l.setState(inst, domain.AvdStopped, reason)
+		l.log.Info("emulator", "%s（%s）已按用户请求停止（退出码 %d）：%s", inst.info.AvdName, inst.info.Serial, code, reason)
+		return
+	}
 	l.setState(inst, domain.AvdError, reason)
 	l.log.Error("emulator", "%s（%s）异常退出：%s", inst.info.AvdName, inst.info.Serial, reason)
 }
@@ -237,6 +257,9 @@ func (l *Launcher) capture(inst *instance, r io.Reader) {
 func (l *Launcher) Stop(ctx context.Context, instanceID string, force bool) error {
 	l.mu.Lock()
 	inst := l.instances[instanceID]
+	if inst != nil {
+		inst.stopRequested = true // 用户主动停止：之后的非 0 退出不记为 error
+	}
 	l.mu.Unlock()
 	switch {
 	case inst == nil:
