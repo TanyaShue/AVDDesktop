@@ -13,7 +13,9 @@ const CONSOLE_BACKFILL_JOBS = 5;
 /** 控制台去重键 / React key：应用日志用后端唯一序号，任务日志（无序号）用时间 + 来源 + 内容。
  *  同一条日志无论是实时推送还是历史回填，都得到同一个 id，因此不可能被插入两次。 */
 export function lineId(line: LogLine): string {
-  if (line.seq > 0) return `a:${line.seq}`;
+  // seq 只在应用日志上有值（任务日志不带序号），因此按可选处理
+  const seq = line.seq ?? 0;
+  if (seq > 0) return `a:${seq}`;
   return `j:${line.at}|${line.source ?? ""}|${line.message}`;
 }
 

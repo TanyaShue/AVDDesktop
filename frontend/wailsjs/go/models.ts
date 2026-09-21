@@ -438,7 +438,7 @@ export namespace domain {
 		}
 	}
 	export class LogLine {
-	    seq: number;
+	    seq?: number;
 	    at: number;
 	    level: string;
 	    source?: string;
