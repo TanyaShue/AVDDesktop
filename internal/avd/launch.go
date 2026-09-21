@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -390,7 +391,8 @@ func explainExit(logText string, code int) string {
 	lower := strings.ToLower(logText)
 	switch {
 	case strings.Contains(lower, "accel") || strings.Contains(lower, "hypervisor") || strings.Contains(lower, "whpx"):
-		return fmt.Sprintf("模拟器因硬件加速不可用而退出（退出码 %d），请检查「虚拟机监控程序平台」是否已在 Windows 功能中开启", code)
+		// 加速不可用的排查方式各平台完全不同，必须按宿主平台给建议。
+		return fmt.Sprintf("模拟器因硬件加速不可用而退出（退出码 %d）：%s", code, platform.AccelAdvice(runtime.GOOS))
 	case strings.Contains(lower, "permission") || strings.Contains(lower, "access is denied"):
 		return fmt.Sprintf("权限不足或文件被占用（退出码 %d），请检查杀毒软件拦截或改用管理员身份运行", code)
 	case strings.Contains(lower, "port") && strings.Contains(lower, "in use"):

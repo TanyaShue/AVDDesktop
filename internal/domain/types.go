@@ -61,7 +61,7 @@ type ToolStatus struct {
 // AccelInfo 来自 `emulator -accel-check`。
 type AccelInfo struct {
 	Available bool     `json:"available"`
-	Kind      string   `json:"kind"` // whpx | aehd | haxm | gvm | none | unknown
+	Kind      string   `json:"kind"` // hvf | kvm | whpx | aehd | haxm | gvm | none
 	Raw       string   `json:"raw"`
 	Hints     []string `json:"hints,omitempty"`
 }

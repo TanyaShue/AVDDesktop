@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -283,5 +284,25 @@ func TestMonitorRequestedStopNonZeroExit(t *testing.T) {
 				t.Error("应保留退出原因（LastError）")
 			}
 		})
+	}
+}
+
+// TestExplainExitAccelHintMatchesHostPlatform 回归测试：
+// 加速不可用的排查建议必须与宿主平台一致（历史上无论哪个平台都提示「Windows 功能」）。
+func TestExplainExitAccelHintMatchesHostPlatform(t *testing.T) {
+	got := explainExit("x86_64 emulation currently requires hardware acceleration", 1)
+	switch runtime.GOOS {
+	case "windows":
+		if !strings.Contains(got, "Windows 功能") {
+			t.Errorf("Windows 上应给出「Windows 功能」建议：%q", got)
+		}
+	case "linux":
+		if !strings.Contains(got, "kvm") || strings.Contains(got, "Windows 功能") {
+			t.Errorf("Linux 上应给出 kvm 建议且不提 Windows：%q", got)
+		}
+	case "darwin":
+		if !strings.Contains(got, "Hypervisor.Framework") || strings.Contains(got, "Windows 功能") {
+			t.Errorf("macOS 上应给出 Hypervisor.Framework 建议且不提 Windows：%q", got)
+		}
 	}
 }

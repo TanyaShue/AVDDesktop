@@ -227,29 +227,17 @@ func (s *EnvService) CopyToClipboard(text string) error {
 func (s *EnvService) checkAcceleration(ctx context.Context, tools platform.Tools, env []string) domain.AccelInfo {
 	res, err := proc.Run(ctx, tools.Emulator, []string{"-accel-check"}, proc.Options{Env: env, Timeout: emulatorProbe})
 	raw := strings.TrimSpace(res.Combined())
-	info := domain.AccelInfo{Raw: raw}
-	lower := strings.ToLower(raw)
-	switch {
-	case err == nil && strings.Contains(lower, "is installed and usable"):
-		info.Available = true
-	case strings.Contains(lower, "is not installed"), strings.Contains(lower, "not installed"):
-		info.Hints = append(info.Hints, "未安装可用的硬件加速（Windows 可启用「Windows 虚拟机监控程序平台」或安装 AEHD）")
-	case strings.Contains(lower, "not supported"), strings.Contains(lower, "not enabled"):
-		info.Hints = append(info.Hints, "CPU 虚拟化未开启：请在 BIOS/UEFI 中启用 VT-x / AMD-V")
+	parsed := parseAccelCheck(raw)
+	// 命令本身失败（超时、被杀、无法启动）时一律视为不可用。
+	if err != nil && res.ExitCode != 0 {
+		parsed.Available = false
 	}
-	for _, kind := range []string{"WHPX", "HAXM", "AEHD", "GVM", "KVM"} {
-		if strings.Contains(strings.ToUpper(raw), kind) {
-			info.Kind = strings.ToLower(kind)
-			break
-		}
+	return domain.AccelInfo{
+		Available: parsed.Available,
+		Kind:      parsed.Kind,
+		Raw:       raw,
+		Hints:     accelHints(runtime.GOOS, parsed.Message, parsed.Available),
 	}
-	if info.Kind == "" {
-		info.Kind = "none"
-	}
-	if !info.Available {
-		info.Hints = append(info.Hints, "没有硬件加速时模拟器可以启动，但会明显变慢")
-	}
-	return info
 }
 
 func (s *EnvService) avdNames(comp *components) []string {
