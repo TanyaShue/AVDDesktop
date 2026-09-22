@@ -251,6 +251,83 @@ func TestStartRejectsDuplicateAvd(t *testing.T) {
 	}
 }
 
+// TestByAvdIgnoresExitedInstance 验证历史记录即使保留了旧状态，也不会被当作运行实例。
+func TestByAvdIgnoresExitedInstance(t *testing.T) {
+	port, _ := freePortRange(t, 1)
+	l := newTestLauncher()
+	inst := testInstance("Dev1", port)
+	inst.info.State = domain.AvdRunning
+	registerInstance(l, inst)
+	close(inst.exit)
+
+	if got, ok := l.ByAvd("Dev1"); ok {
+		t.Fatalf("已退出实例不应被返回: %+v", got)
+	}
+}
+
+// TestByAvdReturnsLiveInstance 验证同名历史记录存在时，仍能找到进程尚存活的实例。
+func TestByAvdReturnsLiveInstance(t *testing.T) {
+	stalePort, livePort := 5560, 5562
+	l := newTestLauncher()
+	stale := testInstance("Dev1", stalePort)
+	stale.info.State = domain.AvdRunning
+	registerInstance(l, stale)
+	close(stale.exit)
+
+	live := testInstance("Dev1", livePort)
+	live.info.State = domain.AvdRunning
+	registerInstance(l, live)
+
+	got, ok := l.ByAvd("Dev1")
+	if !ok || got.ID != live.info.ID {
+		t.Fatalf("ByAvd 返回了错误实例：got=%+v ok=%v，期望 ID=%s", got, ok, live.info.ID)
+	}
+}
+
+// TestStopByAvdTargetsLiveInstance 验证按 AVD 停止时不会误命中同名历史记录。
+func TestStopByAvdTargetsLiveInstance(t *testing.T) {
+	l := newTestLauncher()
+	stale := testInstance("Dev1", 5560)
+	stale.info.State = domain.AvdStopped
+	registerInstance(l, stale)
+	close(stale.exit)
+
+	live := testInstance("Dev1", 5562)
+	live.info.State = domain.AvdRunning
+	registerInstance(l, live)
+
+	done := make(chan error, 1)
+	go func() { done <- l.StopByAvd(context.Background(), "Dev1", true) }()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		snap, _ := l.Get(live.info.ID)
+		if snap.State == domain.AvdStopping {
+			close(live.exit)
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("StopByAvd 在停止存活实例前提前返回: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			close(live.exit)
+			t.Fatal("StopByAvd 未选择存活的同名实例")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("StopByAvd 返回错误: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("StopByAvd 未在实例退出后返回")
+	}
+}
+
 // TestMonitorRequestedStopNonZeroExit 验证用户请求停止后的非 0 退出记为 stopped，只有非请求退出才记 error。
 func TestMonitorRequestedStopNonZeroExit(t *testing.T) {
 	cases := []struct {

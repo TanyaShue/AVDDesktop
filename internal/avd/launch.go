@@ -292,12 +292,11 @@ func (l *Launcher) Stop(ctx context.Context, instanceID string, force bool) erro
 
 // StopByAvd 按 AVD 名称停止实例；StopAll 停止所有实例（应用退出时调用）。
 func (l *Launcher) StopByAvd(ctx context.Context, avdName string, force bool) error {
-	for _, inst := range l.List() {
-		if inst.AvdName == avdName {
-			return l.Stop(ctx, inst.ID, force)
-		}
+	inst, ok := l.ByAvd(avdName)
+	if !ok {
+		return nil
 	}
-	return nil
+	return l.Stop(ctx, inst.ID, force)
 }
 
 func (l *Launcher) StopAll(ctx context.Context, force bool) {
@@ -330,9 +329,13 @@ func (l *Launcher) Get(instanceID string) (domain.EmulatorInstance, bool) {
 
 // ByAvd 返回某个 AVD 当前运行的实例。
 func (l *Launcher) ByAvd(avdName string) (domain.EmulatorInstance, bool) {
-	for _, inst := range l.List() {
-		if inst.AvdName == avdName && inst.State != domain.AvdStopped && inst.State != domain.AvdError {
-			return inst, true
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, inst := range l.instances {
+		// instances 会保留已结束的历史记录；必须按进程是否退出筛选，
+		// 不能只看状态，否则同一 AVD 的旧记录可能遮蔽新实例。
+		if inst.info.AvdName == avdName && !processExited(inst.exit) {
+			return inst.info, true
 		}
 	}
 	return domain.EmulatorInstance{}, false
