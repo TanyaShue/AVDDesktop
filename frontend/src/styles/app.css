@@ -252,6 +252,16 @@ select {
   padding: 0 var(--sp-6) var(--sp-6);
 }
 
+.page--settings .pageheader {
+  padding-inline: max(var(--sp-6), calc((100% - var(--page-content-max)) / 2));
+}
+
+.settings-content {
+  width: 100%;
+  max-width: var(--page-content-max);
+  margin: 0 auto;
+}
+
 /* ---------------------------------------------------------------- 按钮 */
 
 .btn {
@@ -312,6 +322,12 @@ select {
   background: var(--danger-soft);
 }
 
+.btn--sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 .btn--lg {
   height: 40px;
   padding: 0 var(--sp-5);
@@ -361,6 +377,7 @@ select {
 /* ---------------------------------------------------------------- 卡片 */
 
 .card {
+  padding: var(--sp-5);
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-lg);
@@ -726,6 +743,10 @@ select {
   margin-bottom: var(--sp-4);
 }
 
+.field:last-child {
+  margin-bottom: 0;
+}
+
 .field__label {
   width: 140px;
   flex: 0 0 auto;
@@ -736,6 +757,12 @@ select {
 .field__control {
   flex: 1;
   min-width: 0;
+}
+
+.field input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
 }
 
 .input {
@@ -831,6 +858,15 @@ select {
   cursor: pointer;
 }
 
+.drawer__head-actions {
+  margin-left: auto;
+  padding-left: var(--sp-4);
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
 .drawer__title {
   font-size: 13px;
   font-weight: 600;
@@ -870,24 +906,67 @@ select {
   min-height: 0;
 }
 
-.drawer__list {
+.drawer__tasks {
   width: 380px;
   flex: 0 0 auto;
   border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.drawer__list-head {
+  min-height: 40px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+}
+
+.drawer__list-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.drawer__list {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
-  padding: var(--sp-2) 0;
+  padding: 0;
+}
+
+.drawer__empty {
+  padding: var(--sp-3) var(--sp-4);
 }
 
 .drawer__item {
   padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.drawer__item:last-child {
+  border-bottom: none;
 }
 
 .drawer__item-title {
+  min-width: 0;
   font-size: 13px;
   font-weight: 500;
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+}
+
+.drawer__stop {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  flex: 0 0 auto;
 }
 
 .drawer__console {
@@ -1046,6 +1125,24 @@ select {
   gap: var(--sp-3);
 }
 
+.row--wrap {
+  flex-wrap: wrap;
+}
+
+.table-scroll {
+  width: 100%;
+  margin-top: 10px;
+  overflow-x: auto;
+}
+
+.table--environment {
+  min-width: 620px;
+}
+
+.table--images {
+  min-width: 520px;
+}
+
 .muted {
   color: var(--text-tertiary);
   font-size: 13px;
@@ -1100,4 +1197,144 @@ select {
   color: var(--text-secondary);
   white-space: pre-wrap;
   word-break: break-word;
+}
+/* ------------------------------------------------------------- 窄窗口 / 移动端 */
+/* 页面与任务区在窄宽度下改为纵向布局，避免按钮拥挤和误触。 */
+
+@media (max-width: 760px) {
+  :root {
+    --nav-w: 64px;
+    --drawer-expanded-h: min(62vh, 420px);
+  }
+
+  .titlebar {
+    padding: 0 8px 0 12px;
+  }
+
+  .titlebar__title {
+    display: none;
+  }
+
+  .navrail {
+    padding: var(--sp-2) 0;
+  }
+
+  .navrail__item {
+    width: 48px;
+    height: 52px;
+  }
+
+  .pageheader {
+    height: auto;
+    min-height: var(--pageheader-h);
+    padding: 10px var(--sp-4);
+    gap: var(--sp-2) var(--sp-3);
+    flex-wrap: wrap;
+  }
+
+  .pageheader__text {
+    flex: 1 1 180px;
+  }
+
+  .page--settings .pageheader {
+    padding-inline: var(--sp-4);
+  }
+
+  .pagecontent {
+    padding: 0 var(--sp-4) var(--sp-4);
+  }
+
+  .settings-content {
+    max-width: none;
+  }
+
+  .card {
+    padding: var(--sp-4);
+  }
+
+  .field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
+  }
+
+  .field__label {
+    width: auto;
+    grid-column: 1 / -1;
+  }
+
+  .field__control {
+    grid-column: 1;
+    width: 100%;
+  }
+
+  .field > .btn--icon {
+    grid-column: 2;
+    align-self: center;
+  }
+
+  .banner {
+    flex-wrap: wrap;
+  }
+
+  .banner__body {
+    flex-basis: 180px;
+  }
+
+  .table--environment,
+  .table--images {
+    min-width: 560px;
+  }
+
+  .drawer__head {
+    padding: 0 var(--sp-4);
+    gap: var(--sp-3);
+  }
+
+  .drawer__head-actions {
+    padding-left: var(--sp-3);
+  }
+
+  .drawer__active {
+    display: none;
+  }
+
+  .drawer__body {
+    flex-direction: column;
+  }
+
+  .drawer__tasks {
+    width: 100%;
+    max-height: 44%;
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .drawer__console {
+    min-height: 130px;
+  }
+}
+
+@media (max-width: 480px) {
+  .drawer__count {
+    display: none;
+  }
+
+  .drawer__toggle {
+    padding: 0 10px;
+  }
+
+  .card {
+    padding: 14px;
+  }
+
+  .toasts {
+    left: 8px;
+    right: 8px;
+  }
+
+  .toast {
+    width: auto;
+  }
 }

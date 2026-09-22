@@ -67,16 +67,12 @@ export function TaskDrawer({
         {/* 折叠态始终能看到最近一条日志（含没有任务时的应用日志） */}
         {!expanded ? <span className="drawer__latest truncate">{latestText(latest)}</span> : null}
 
-        <div
-          style={{ marginLeft: "auto", display: "flex", gap: 8 }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {expanded && active.length > 0 ? (
-            <button className="btn btn--ghost" onClick={() => void api.Jobs.CancelAll()}>
-              全部取消
-            </button>
-          ) : null}
-          <button className="btn btn--ghost" onClick={() => onToggle(!expanded)}>
+        <div className="drawer__head-actions" onClick={(e) => e.stopPropagation()}>
+          <button
+            className="btn btn--ghost drawer__toggle"
+            aria-label={expanded ? "收起任务日志" : "展开任务日志"}
+            onClick={() => onToggle(!expanded)}
+          >
             {expanded ? "收起" : "展开"}
           </button>
         </div>
@@ -84,44 +80,55 @@ export function TaskDrawer({
 
       {expanded ? (
         <div className="drawer__body">
-          <div className="drawer__list">
-            {jobs.length === 0 ? (
-              <div className="muted" style={{ padding: 12 }}>
-                暂无任务
-              </div>
-            ) : (
-              jobs.map((job) => (
-                <div key={job.id} className="drawer__item">
-                  <div className="drawer__item-title">
-                    <span className="truncate" style={{ flex: 1 }}>
-                      {job.title}
-                    </span>
-                    <span className={`chip chip--sm${statusChipClass(job)}`}>{jobStatusText(job)}</span>
-                    {job.status === "running" || job.status === "queued" ? (
-                      <button
-                        className="btn btn--ghost btn--icon"
-                        title="取消该任务"
-                        onClick={() => void api.Jobs.Cancel(job.id)}
-                      >
-                        ✕
-                      </button>
-                    ) : null}
-                  </div>
-                  {detail(job) ? (
-                    <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
-                      {detail(job)}
+          <div className="drawer__tasks">
+            <div className="drawer__list-head">
+              <span className="drawer__list-title">任务记录</span>
+              {active.length > 0 ? (
+                <button
+                  className="btn btn--danger-ghost btn--sm"
+                  onClick={() => void api.Jobs.CancelAll()}
+                >
+                  停止全部
+                </button>
+              ) : null}
+            </div>
+            <div className="drawer__list">
+              {jobs.length === 0 ? (
+                <div className="muted drawer__empty">暂无任务</div>
+              ) : (
+                jobs.map((job) => (
+                  <div key={job.id} className="drawer__item">
+                    <div className="drawer__item-title">
+                      <span className="truncate" style={{ flex: 1 }}>
+                        {job.title}
+                      </span>
+                      <span className={`chip chip--sm${statusChipClass(job)}`}>{jobStatusText(job)}</span>
+                      {job.status === "running" || job.status === "queued" ? (
+                        <button
+                          className="btn btn--danger-ghost drawer__stop"
+                          title={`停止任务：${job.title}`}
+                          onClick={() => void api.Jobs.Cancel(job.id)}
+                        >
+                          停止
+                        </button>
+                      ) : null}
                     </div>
-                  ) : null}
-                  <div style={{ marginTop: 6 }}>
-                    <Progress
-                      percent={job.percent}
-                      indeterminate={job.status === "running" && job.percent <= 0}
-                      showPercent
-                    />
+                    {detail(job) ? (
+                      <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+                        {detail(job)}
+                      </div>
+                    ) : null}
+                    <div style={{ marginTop: 6 }}>
+                      <Progress
+                        percent={job.percent}
+                        indeterminate={job.status === "running" && job.percent <= 0}
+                        showPercent
+                      />
+                    </div>
                   </div>
-                </div>
-              ))
-            )}
+                ))
+              )}
+            </div>
           </div>
           <div className="drawer__console" ref={consoleRef}>
             {lines.length === 0 ? (

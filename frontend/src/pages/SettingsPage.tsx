@@ -59,7 +59,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
     : [];
 
   return (
-    <div className="page">
+    <div className="page page--settings">
       <div className="pageheader">
         <div className="pageheader__text">
           <div className="pageheader__title">设置</div>
@@ -75,13 +75,14 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
       </div>
 
       <div className="pagecontent">
+        <div className="settings-content">
         {/* ---------------------------------------------------------- 环境检查 */}
         <div className="section">
           <div className="section__title">环境检查</div>
           <div className="card">
             {report ? (
               <>
-                <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                <div className="row row--wrap" style={{ justifyContent: "space-between", alignItems: "center" }}>
                   <span className={`chip ${report.ready ? "chip--success" : "chip--warning"}`}>
                     {report.ready ? "环境就绪" : report.needInit ? "尚未初始化" : "存在缺失组件"}
                   </span>
@@ -90,7 +91,8 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
                   </span>
                 </div>
 
-                <table className="table" style={{ marginTop: 10 }}>
+                <div className="table-scroll">
+                  <table className="table table--environment">
                   <thead>
                     <tr>
                       <th>组件</th>
@@ -116,10 +118,11 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
                         </td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
+                    </tbody>
+                  </table>
+                </div>
 
-                <div className="row" style={{ gap: 16, marginTop: 12, flexWrap: "wrap" }}>
+                <div className="row row--wrap" style={{ gap: 16, marginTop: 12 }}>
                   <span className="muted">
                     已安装系统镜像：<span className="nums">{report.images}</span> 个
                   </span>
@@ -198,7 +201,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
         <div className="section">
           <div className="section__title">系统镜像</div>
           <div className="card">
-            <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <div className="row row--wrap" style={{ justifyContent: "space-between", alignItems: "center" }}>
               <span className="muted">
                 镜像由官方 sdkmanager 安装到软件自己的 SDK 目录。创建 AVD 时若缺少镜像会自动安装。
               </span>
@@ -207,7 +210,8 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
               </button>
             </div>
             {images.length > 0 ? (
-              <table className="table" style={{ marginTop: 10 }}>
+              <div className="table-scroll">
+                <table className="table table--images">
                 <thead>
                   <tr>
                     <th>Android</th>
@@ -232,8 +236,9 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
                         </td>
                       </tr>
                     ))}
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+              </div>
             ) : (
               <div className="muted" style={{ marginTop: 8 }}>
                 {report ? `已安装 ${report.images} 个镜像` : ""}
@@ -303,8 +308,8 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
                   <option value="warn">warn</option>
                   <option value="error">error</option>
                 </select>
+                <div className="field__hint">用于底部日志区域与日志文件</div>
               </div>
-              <div className="field__hint">用于底部日志区域与日志文件</div>
             </div>
             <div className="field">
               <div className="field__label">删除设备前确认</div>
@@ -327,6 +332,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
               </div>
             </div>
           </div>
+        </div>
         </div>
       </div>
     </div>
