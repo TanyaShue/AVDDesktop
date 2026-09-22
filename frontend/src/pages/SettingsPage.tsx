@@ -545,16 +545,6 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
                 />
               </div>
             </div>
-            <div className="field">
-              <div className="field__label">自动展开任务区域</div>
-              <div className="field__control">
-                <input
-                  type="checkbox"
-                  checked={settings?.showTaskDrawer ?? true}
-                  onChange={(e) => void patch({ showTaskDrawer: e.target.checked })}
-                />
-              </div>
-            </div>
           </div>
         </div>
         </div>

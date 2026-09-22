@@ -1,5 +1,5 @@
 // 应用壳：标题栏 + 导航 + 页面路由 + 任务抽屉 + Toast。
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import * as api from "../bridge/api";
 import { EVENTS } from "../bridge/api";
 import type { AppSettings, JobInfo, PageKey } from "../bridge/types";
@@ -29,70 +29,25 @@ export default function App() {
   // 环境检查由应用壳持有：只跑一次，页面切换不重新探测；后端自检结果通过 env:changed 复用
   const env = useEnvCheck(push);
 
-  // 设置只加载一次；启动自检的任务可能早于设置到达，因此用同一个 Promise 等结果
-  const settingsRef = useRef<AppSettings | null>(null);
-  const settingsPromise = useRef<Promise<AppSettings | null> | null>(null);
-  const loadSettings = useCallback(() => {
-    if (!settingsPromise.current) {
-      settingsPromise.current = api.Settings.Get()
-        .then((next) => {
-          settingsRef.current = next as AppSettings;
-          return settingsRef.current;
-        })
-        .catch(() => null); // 后端未就绪时忽略（首次 wails dev 生成绑定期间）
-    }
-    return settingsPromise.current;
+  useEffect(() => {
+    void api.Settings.Get()
+      .then((next) => setSettings(next as AppSettings))
+      .catch(() => {
+        /* 后端未就绪时忽略（首次 wails dev 生成绑定期间） */
+      });
   }, []);
 
   useTheme(settings?.theme ?? "light");
 
-  useEffect(() => {
-    void loadSettings().then((next) => {
-      if (next) setSettings(next);
-    });
-  }, [loadSettings]);
-
-  // 「自动展开任务区域」设置：任务开始/失败时是否自动展开
-  // （先等首次加载完成，设置页的修改由 handleSettingsChanged 同步进 ref，始终按最新值判断）
-  const shouldAutoExpand = useCallback(async () => {
-    await loadSettings();
-    return settingsRef.current?.showTaskDrawer ?? true;
-  }, [loadSettings]);
-
-  useWailsEvent<JobInfo>(EVENTS.jobCreated, (info) => {
-    // 启动模拟器属于用户主动操作，进度在设备卡片上有明确状态；
-    // 不要因为这个短任务自动展开底部日志面板。
-    if (info?.kind === "emulator-start") return;
-    void shouldAutoExpand().then((open) => {
-      if (open) setDrawerOpen(true);
-    });
-  });
+  // 底部任务/日志面板只由用户点击展开，任务事件不修改展开状态。
   useWailsEvent<JobInfo>(EVENTS.jobFailed, (info) => {
-    // 启动失败用 Toast 提示即可；用户没有主动要求查看日志时不要打断当前页面布局。
-    if (info?.kind !== "emulator-start") {
-      void shouldAutoExpand().then((open) => {
-        if (open) setDrawerOpen(true);
-      });
-    }
     push("danger", "任务失败", info?.error?.message);
   });
-
-  // 启动自检的任务可能在前端订阅事件之前就已开始：首次看到进行中的任务时补一次自动展开
-  const autoExpandApplied = useRef(false);
-  useEffect(() => {
-    if (autoExpandApplied.current || !settings) return;
-    if (!jobs.some((j) => (j.status === "running" || j.status === "queued") && j.kind !== "emulator-start")) return;
-    autoExpandApplied.current = true;
-    if (settings.showTaskDrawer) setDrawerOpen(true);
-  }, [settings, jobs]);
   useWailsEvent<{ status: string; title?: string }>(EVENTS.jobDone, (info) => {
     if (info?.status === "succeeded") push("success", `${info.title ?? "任务"} 已完成`);
   });
 
-  const handleSettingsChanged = useCallback((next: AppSettings) => {
-    settingsRef.current = next;
-    setSettings(next);
-  }, []);
+  const handleSettingsChanged = useCallback((next: AppSettings) => setSettings(next), []);
 
   return (
     <div className="app">
