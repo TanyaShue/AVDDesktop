@@ -1,4 +1,4 @@
-package sdk
+package archive
 
 import (
 	"archive/zip"
@@ -13,8 +13,8 @@ import (
 
 // ExtractZip 把 zip 解压到 destDir（防目录穿越）。
 //
-// 官方 Android 归档都套了一层与包同名的顶层目录（如 cmdline-tools/bin/…），
-// 而安装后的目录结构不含这一层，因此这里会自动剥离唯一的顶层目录。
+// 官方 Android / Temurin 归档都套了一层与包同名的顶层目录（如 cmdline-tools/bin/…、
+// jdk-21/...），而安装后的目录结构不含这一层，因此这里会自动剥离唯一的顶层目录。
 func ExtractZip(ctx context.Context, zipPath, destDir string) error {
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
@@ -22,7 +22,15 @@ func ExtractZip(ctx context.Context, zipPath, destDir string) error {
 	}
 	defer func() { _ = r.Close() }()
 
-	prefix := singleRootPrefix(r.File)
+	names := make([]string, 0, len(r.File))
+	for _, f := range r.File {
+		name := f.Name
+		if f.FileInfo().IsDir() && !strings.HasSuffix(name, "/") {
+			name += "/"
+		}
+		names = append(names, name)
+	}
+	prefix := singleRootPrefix(names)
 	for _, f := range r.File {
 		if err := ctx.Err(); err != nil {
 			return domain.Err(domain.CodeJobCanceled, "解压已取消")
@@ -44,7 +52,7 @@ func ExtractZip(ctx context.Context, zipPath, destDir string) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return domain.Wrap(domain.CodeArchiveFailed, "创建目录失败: "+filepath.Dir(target), err)
 		}
-		if err := extractFile(f, target); err != nil {
+		if err := extractZipFile(f, target); err != nil {
 			return err
 		}
 	}
@@ -54,11 +62,11 @@ func ExtractZip(ctx context.Context, zipPath, destDir string) error {
 // singleRootPrefix 返回所有条目共同的顶层目录前缀（形如 "cmdline-tools/"）。
 //
 // 存在任何顶层文件、或顶层目录不唯一时返回空串（表示不剥离）。
-func singleRootPrefix(files []*zip.File) string {
+func singleRootPrefix(names []string) string {
 	prefix := ""
-	for _, f := range files {
-		name := filepath.ToSlash(strings.TrimPrefix(f.Name, "./"))
-		if strings.TrimSpace(name) == "" {
+	for _, raw := range names {
+		name := normalizeArchiveName(raw)
+		if name == "" {
 			continue
 		}
 		i := strings.IndexByte(name, '/')
@@ -80,21 +88,29 @@ func singleRootPrefix(files []*zip.File) string {
 	return prefix
 }
 
-func stripPrefix(name, prefix string) string {
-	if prefix == "" {
-		return name
+func normalizeArchiveName(name string) string {
+	name = filepath.ToSlash(strings.TrimPrefix(name, "./"))
+	for strings.HasPrefix(name, "./") {
+		name = strings.TrimPrefix(name, "./")
 	}
-	normalized := filepath.ToSlash(strings.TrimPrefix(name, "./"))
+	return name
+}
+
+func stripPrefix(name, prefix string) string {
+	normalized := normalizeArchiveName(name)
+	if prefix == "" {
+		return normalized
+	}
 	if normalized == strings.TrimSuffix(prefix, "/") {
 		return ""
 	}
 	if !strings.HasPrefix(normalized, prefix) {
-		return name
+		return normalized
 	}
 	return strings.TrimPrefix(normalized, prefix)
 }
 
-func extractFile(f *zip.File, target string) error {
+func extractZipFile(f *zip.File, target string) error {
 	rc, err := f.Open()
 	if err != nil {
 		return domain.Wrap(domain.CodeArchiveFailed, "无法读取压缩包条目: "+f.Name, err)
@@ -112,14 +128,14 @@ func extractFile(f *zip.File, target string) error {
 	}
 	if _, err := io.Copy(out, rc); err != nil {
 		_ = out.Close()
-		return domain.Wrap(domain.CodeArchiveFailed, "解压写入失败: "+target, err)
+		return domain.Wrap(domain.CodeArchiveFailed, "解压写入失败", err)
 	}
 	return out.Close()
 }
 
-// safeJoin 校验 zip 条目路径不会逃出 destDir。
+// safeJoin 校验归档条目路径不会逃出 destDir。
 //
-// zip 条目必须是相对路径：绝对路径、以 "/" 开头的路径、UNC 路径一律拒绝
+// 条目必须是相对路径：绝对路径、以 "/" 开头的路径、UNC 路径一律拒绝
 // （Windows 上 "/abs" 不算 filepath.IsAbs，因此显式判一次，保证各平台行为一致）。
 func safeJoin(destDir, name string) (string, error) {
 	clean := filepath.Clean(filepath.FromSlash(name))

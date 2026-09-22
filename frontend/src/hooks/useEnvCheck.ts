@@ -3,7 +3,7 @@
 // 检查本身会实跑 java / sdkmanager / adb / emulator，因此状态提升到应用壳（常驻），
 // 切页面不会重复探测。以下三种情况会更新：
 //  1. 用户点「重新检查」；
-//  2. 后端自动准备完成（env:changed 事件）；
+//  2. 后端自动准备完成（env:changed 事件；JDK / SDK 均走这一条链路）；
 //  3. 安装 SDK 组件后主动重新检查。
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../bridge/api";
@@ -18,8 +18,8 @@ export interface EnvCheck {
   loading: boolean;
   /** 重新检查环境（实跑工具链）。 */
   reload: () => Promise<void>;
-  /** 自动准备 SDK 环境（下载命令行工具 / 安装 platform-tools 与 emulator）。 */
-  prepare: () => Promise<void>;
+  /** 自动准备软件自带环境；传入 sourceId 时先切换到该 SDK 镜像。 */
+  prepare: (sourceId?: string) => Promise<void>;
 }
 
 export function useEnvCheck(
@@ -43,9 +43,13 @@ export function useEnvCheck(
     }
   }, [onToast]);
 
-  const prepare = useCallback(async () => {
+  const prepare = useCallback(async (sourceId?: string) => {
     try {
-      await api.Env.Prepare();
+      if (sourceId) {
+        await api.Env.PrepareFromSource(sourceId);
+      } else {
+        await api.Env.Prepare();
+      }
     } catch (err) {
       onToast("danger", "准备环境失败", errorText(err));
     }

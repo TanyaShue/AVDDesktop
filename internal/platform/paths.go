@@ -76,30 +76,29 @@ func scriptName(name string) string {
 	return name
 }
 
-// FindJava 返回可用的 java 可执行文件（JAVA_HOME → PATH）。
-//
-// sdkmanager / avdmanager 依赖 JDK；软件不代管 JDK，也不扫描 Android Studio 自带运行时。
-func FindJava() string {
-	if v := envOr("JAVA_HOME"); v != "" {
-		if c := filepath.Join(v, "bin", exeName("java")); FileExists(c) {
-			return c
-		}
+// JavaPath 返回软件自带 JDK 的 java 可执行文件路径（不保证存在）。
+func JavaPath() string { return javaPathIn(JdkHome()) }
+
+// FindJava 只返回软件自带 JDK 中的 java；不会读取 JAVA_HOME / PATH，
+// 因此不会误用系统 JDK。JDK 缺失时应通过 EnvService.Prepare 下载补齐。
+func FindJava() string { return JavaPath() }
+
+func javaPathIn(home string) string {
+	if strings.TrimSpace(home) == "" {
+		return ""
 	}
-	for _, dir := range strings.Split(os.Getenv("PATH"), string(os.PathListSeparator)) {
-		if dir = strings.TrimSpace(dir); dir == "" {
-			continue
-		}
-		if c := filepath.Join(dir, exeName("java")); FileExists(c) {
-			return c
-		}
+	path := filepath.Join(home, "bin", exeName("java"))
+	if FileExists(path) {
+		return path
 	}
 	return ""
 }
 
-// ChildEnv 构造子进程环境变量：把软件自有 SDK 与 AVD 目录注入，并让工具链互相可见。
+// ChildEnv 构造子进程环境变量：把软件自带 JDK、SDK 与 AVD 目录注入，并让工具链互相可见。
 //
-// 只影响我们启动的子进程，不修改系统 PATH。
-func ChildEnv(t Tools, avdHome string) []string {
+// JAVA_HOME 与 JDK 的 bin 目录始终指向软件目录；即使 JDK 尚未下载完成，
+// 也不会回退到系统 JAVA_HOME / PATH 中的 JDK。只影响我们启动的子进程，不修改当前进程环境。
+func ChildEnv(t Tools, jdkHome, avdHome string) []string {
 	env := os.Environ()
 	set := func(key, value string) {
 		if value == "" {
@@ -123,7 +122,12 @@ func ChildEnv(t Tools, avdHome string) []string {
 	// 避免用户在我们的停止流程中看到误导性的 “Android Emulator closed unexpectedly”。
 	set("ANDROID_EMU_ENABLE_CRASH_REPORTING", "0")
 
-	paths := []string{t.PlatformTools, t.EmulatorDir, filepath.Join(t.CmdlineTools, "bin")}
+	set("JAVA_HOME", jdkHome)
+	paths := make([]string, 0, 4)
+	if strings.TrimSpace(jdkHome) != "" {
+		paths = append(paths, filepath.Join(jdkHome, "bin"))
+	}
+	paths = append(paths, t.PlatformTools, t.EmulatorDir, filepath.Join(t.CmdlineTools, "bin"))
 	if old := os.Getenv("PATH"); old != "" {
 		paths = append(paths, old)
 	}

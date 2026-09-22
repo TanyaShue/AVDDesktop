@@ -14,6 +14,26 @@ export function Prepare() {
   return window['go']['service']['EnvService']['Prepare']();
 }
 
+export function PrepareFromSource(arg1) {
+  return window['go']['service']['EnvService']['PrepareFromSource'](arg1);
+}
+
+export function PrepareFromSources(arg1, arg2) {
+  return window['go']['service']['EnvService']['PrepareFromSources'](arg1, arg2);
+}
+
+export function Repair() {
+  return window['go']['service']['EnvService']['Repair']();
+}
+
+export function RepairFromSource(arg1) {
+  return window['go']['service']['EnvService']['RepairFromSource'](arg1);
+}
+
+export function RepairFromSources(arg1, arg2) {
+  return window['go']['service']['EnvService']['RepairFromSources'](arg1, arg2);
+}
+
 export function Resolved() {
   return window['go']['service']['EnvService']['Resolved']();
 }

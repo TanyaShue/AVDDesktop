@@ -107,6 +107,7 @@ export default function App() {
             <SettingsPage
               onToast={push}
               env={env}
+              jobs={jobs}
               onSettingsChanged={handleSettingsChanged}
             />
           )}

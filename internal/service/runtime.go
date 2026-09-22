@@ -36,9 +36,11 @@ type Runtime struct {
 	ctxReady bool
 }
 
-// components 是软件自有 SDK / AVD 目录下的工具链句柄集合。
+// components 是软件自带 JDK / SDK / AVD 目录下的工具链句柄集合。
 type components struct {
 	Tools    platform.Tools
+	JdkRoot  string
+	JdkHome  string
 	Store    *avd.Store
 	Launcher *avd.Launcher
 	Adb      *adb.Client
@@ -51,8 +53,10 @@ func NewRuntime(appName, version string, settings *config.Manager, log *logging.
 		log = logging.Discard()
 	}
 	tools := platform.NewTools(platform.SdkRoot())
+	jdkRoot := platform.JdkRoot()
+	jdkHome := platform.JdkHome()
 	avdHome := platform.AvdHome()
-	env := platform.ChildEnv(tools, avdHome)
+	env := platform.ChildEnv(tools, jdkHome, avdHome)
 
 	st := avd.New(avdHome, tools.SdkRoot)
 
@@ -64,10 +68,12 @@ func NewRuntime(appName, version string, settings *config.Manager, log *logging.
 		locks:    job.NewKeyedMutex(),
 	}
 	r.comp = &components{
-		Tools: tools,
-		Store: st,
-		Adb:   adb.New(tools.Adb, env, log),
-		Env:   env,
+		Tools:   tools,
+		JdkRoot: jdkRoot,
+		JdkHome: jdkHome,
+		Store:   st,
+		Adb:     adb.New(tools.Adb, env, log),
+		Env:     env,
 	}
 	r.comp.Launcher = avd.NewLauncher(tools, env, st, r.comp.Adb, r.Emit, log)
 	r.jobs = job.NewManager(r.Emit, log)
@@ -136,6 +142,7 @@ func (r *Runtime) Shutdown() {
 // ResolvedPaths 是软件自有目录的解析结果（供设置页展示）。
 type ResolvedPaths struct {
 	AppRoot  string `json:"appRoot"`
+	JdkRoot  string `json:"jdkRoot"`
 	SdkRoot  string `json:"sdkRoot"`
 	AvdHome  string `json:"avdHome"`
 	JavaPath string `json:"javaPath,omitempty"`
@@ -147,6 +154,7 @@ type ResolvedPaths struct {
 func (r *Runtime) Resolved() ResolvedPaths {
 	return ResolvedPaths{
 		AppRoot:  platform.Root(),
+		JdkRoot:  platform.JdkRoot(),
 		SdkRoot:  platform.SdkRoot(),
 		AvdHome:  platform.AvdHome(),
 		JavaPath: platform.FindJava(),

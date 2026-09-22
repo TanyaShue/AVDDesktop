@@ -138,7 +138,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
               <div className="banner__title">环境尚未就绪</div>
               <div className="banner__text">
                 {env.report.needInit
-                  ? "软件自带 SDK 尚未初始化，需要先下载官方命令行工具并安装 platform-tools 与 emulator。"
+                  ? "软件自带 JDK / SDK 尚未就绪，需要先补齐 JDK、官方命令行工具并安装 platform-tools 与 emulator。"
                   : "部分组件不可用，请到设置页查看环境检查结果。"}
               </div>
             </div>

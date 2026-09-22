@@ -59,6 +59,7 @@ func main() {
 		Bind: []interface{}{
 			app,
 			app.Env,
+			app.Mirror,
 			app.Avd,
 			app.Emulator,
 			app.Settings,

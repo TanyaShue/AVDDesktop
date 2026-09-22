@@ -6,7 +6,7 @@
 //
 //	go test -tags e2e -timeout 60m ./internal/e2e/ -run TestE2E_EnvPrepare -v
 //
-// 首次运行会真实下载官方命令行工具（约 150 MB）与 platform-tools / emulator，
+// 首次运行会真实下载软件自带 JDK（约 200 MB）、官方命令行工具（约 150 MB）与 platform-tools / emulator，
 // 缓存在 AVDDESKTOP_E2E_HOME 指定的软件根目录里（未指定时使用临时目录）。
 package e2e
 
@@ -45,8 +45,8 @@ func TestMain(m *testing.M) {
 }
 
 // TestE2E_EnvPrepare 验证 Phase 1 的验收链路：
-// 软件自带 SDK 不存在 → 自动初始化（下载命令行工具 / 接受许可 / 安装基础组件）
-// → 四个工具全部来自软件自己的目录。
+// 软件自带 JDK / SDK 不存在 → 自动初始化（下载 JDK、命令行工具 / 接受许可 / 安装基础组件）
+// → JDK 与工具全部来自软件自己的目录，不使用系统 JDK。
 func TestE2E_EnvPrepare(t *testing.T) {
 	rt := newRuntime(t)
 	env := service.NewEnvService(rt)
@@ -61,7 +61,7 @@ func TestE2E_EnvPrepare(t *testing.T) {
 		t.Fatalf("SDK 目录必须位于软件根目录下: %s", before.SdkRoot)
 	}
 	if before.JavaPath == "" {
-		t.Fatalf("未找到 JDK：sdkmanager 无法运行（安装 JDK 17+ 并设置 JAVA_HOME 后重跑）")
+		t.Log("初始化前未安装软件自带 JDK，Prepare 将自动下载 Temurin 21")
 	}
 
 	if before.NeedInit || !tools.HasAdb() || !tools.HasEmulator() {
@@ -97,6 +97,9 @@ func TestE2E_EnvPrepare(t *testing.T) {
 	}
 	if !after.Ready {
 		t.Fatalf("环境未就绪，问题：%+v", after.Issues)
+	}
+	if after.JavaPath == "" || !strings.HasPrefix(after.JavaPath, platform.Root()) {
+		t.Fatalf("JDK 必须来自软件目录：%q", after.JavaPath)
 	}
 	for _, c := range after.Components {
 		if c.State != domain.StatePresent {

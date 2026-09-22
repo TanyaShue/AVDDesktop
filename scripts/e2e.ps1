@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 # ============================================================================
 # AVDDesktop 端到端测试运行脚本
 #
@@ -6,11 +6,11 @@
 #   .\scripts\e2e.ps1
 #
 # 说明：
-#   - 走真实服务层 + 真网络 + 真磁盘：首次运行会下载官方命令行工具（约 150 MB），
-#     并安装 platform-tools / emulator 到软件自己的 SDK 目录
+#   - 走真实服务层 + 真网络 + 真磁盘：首次运行会下载软件自带 JDK（约 200 MB）与官方命令行工具（约 150 MB），
+#     并安装 platform-tools / emulator 到软件自己的目录
 #   - 软件根目录由 AVDDESKTOP_E2E_HOME 指定（默认 %LOCALAPPDATA%\AVDDesktop\e2e），
 #     与真实使用中的软件目录隔离；重复运行会复用已下载内容
-#   - 需要 JDK（sdkmanager / avdmanager 依赖）与网络
+#   - 不需要系统 JDK（软件会自动下载 Temurin 21）；需要网络
 # ============================================================================
 [CmdletBinding()]
 param()

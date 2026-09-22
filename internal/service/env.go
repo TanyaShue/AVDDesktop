@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -9,7 +11,9 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"AVDDesktop/internal/domain"
+	"AVDDesktop/internal/jdk"
 	"AVDDesktop/internal/job"
+	"AVDDesktop/internal/mirror"
 	"AVDDesktop/internal/platform"
 	"AVDDesktop/internal/proc"
 	"AVDDesktop/internal/sdk"
@@ -37,11 +41,18 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 	env := comp.Env
 	ctx := s.rt.Context()
 
+	activeSource := activeMirrorSource(s.rt)
+	activeJDK := activeJDKSource(s.rt)
 	report := &domain.EnvReport{
-		AppRoot:  platform.Root(),
-		SdkRoot:  tools.SdkRoot,
-		AvdHome:  platform.AvdHome(),
-		JavaPath: platform.FindJava(),
+		AppRoot:             platform.Root(),
+		JdkRoot:             platform.JdkRoot(),
+		SdkRoot:             tools.SdkRoot,
+		AvdHome:             platform.AvdHome(),
+		JavaPath:            platform.FindJava(),
+		MirrorSourceID:      activeSource.ID,
+		MirrorSourceName:    activeSource.Name,
+		JDKMirrorSourceID:   activeJDK.ID,
+		JDKMirrorSourceName: activeJDK.Name,
 		Host: domain.HostInfo{
 			OS:       runtime.GOOS,
 			Arch:     runtime.GOARCH,
@@ -50,55 +61,65 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 		CheckedAt: platform.NowMs(),
 	}
 
-	javaVersion := ""
-	if report.JavaPath != "" {
-		javaVersion = parseJavaVersion(sdk.ToolVersion(ctx, report.JavaPath, []string{"-version"}, env, javaTimeout))
-	} else {
-		javaVersion = sdk.ToolVersion(ctx, "java", []string{"-version"}, env, javaTimeout)
-	}
-
-	javaOK := report.JavaPath != "" && javaVersion != ""
-	report.Components = append(report.Components, toolStatus(domain.ToolJDK, "JDK", javaOK, javaVersion, report.JavaPath, &domain.ToolFix{
-		Label:   "查看说明",
-		Command: "安装 JDK 17 或更高版本，并设置 JAVA_HOME（sdkmanager 与 avdmanager 依赖 JDK）",
+	// 只检测软件自带 JDK：即使系统 JAVA_HOME / PATH 中有 java，也不采用。
+	javaVersion, javaOK := s.probeJava(ctx, report.JavaPath, env)
+	report.Components = append(report.Components, toolStatus(domain.ToolJDK, "JDK（软件自带）", javaOK, javaVersion, report.JdkRoot, &domain.ToolFix{
+		Kind:  domain.FixPrepare,
+		Label: "自动下载 JDK",
 	}))
 
 	// sdkmanager / avdmanager 由 JDK 驱动：缺 JDK 时它们即使存在也无法运行。
+	// 同时检查包元数据，避免把以前版本留下的空目录/半成品当成可用环境。
+	cmdlineOK := tools.HasSdkmanager() && sdk.VerifyPackage(tools, "cmdline-tools;latest") == nil
 	sdkmanagerVersion := ""
-	if javaOK {
-		sdkmanagerVersion = sdk.ToolVersion(ctx, tools.Sdkmanager, []string{"--version"}, env, sdkmanagerProbe)
+	if javaOK && cmdlineOK {
+		sdkmanagerVersion = parseSdkmanagerVersion(sdk.ToolOutput(ctx, tools.Sdkmanager, []string{"--version"}, env, sdkmanagerProbe))
 	}
-	report.Components = append(report.Components, toolStatus(domain.ToolSdkmanager, "sdkmanager", tools.HasSdkmanager() && sdkmanagerVersion != "", sdkmanagerVersion, tools.Sdkmanager, &domain.ToolFix{
+	sdkmanagerOK := cmdlineOK && sdkmanagerVersion != ""
+	avdmanagerOK := cmdlineOK && javaOK
+	report.Components = append(report.Components, toolStatus(domain.ToolSdkmanager, "sdkmanager", sdkmanagerOK, sdkmanagerVersion, tools.Sdkmanager, &domain.ToolFix{
 		Kind:  domain.FixPrepare,
-		Label: "自动准备 SDK",
+		Label: "准备 / 修复 SDK",
 	}))
-	report.Components = append(report.Components, toolStatus(domain.ToolAvdmanager, "avdmanager", tools.HasAvdmanager() && javaOK, "", tools.Avdmanager, &domain.ToolFix{
+	report.Components = append(report.Components, toolStatus(domain.ToolAvdmanager, "avdmanager", avdmanagerOK, "", tools.Avdmanager, &domain.ToolFix{
 		Kind:  domain.FixPrepare,
-		Label: "自动准备 SDK",
+		Label: "准备 / 修复 SDK",
 	}))
 
 	adbVersion := ""
-	if tools.HasAdb() {
+	adbOK := tools.HasAdb() && sdk.VerifyPackage(tools, "platform-tools") == nil
+	if adbOK {
 		adbVersion = parseToolVersionLine(sdk.ToolVersion(ctx, tools.Adb, []string{"version"}, env, adbProbe))
 	}
-	report.Components = append(report.Components, toolStatus(domain.ToolAdb, "adb (platform-tools)", tools.HasAdb(), adbVersion, tools.Adb, &domain.ToolFix{
+	report.Components = append(report.Components, toolStatus(domain.ToolAdb, "adb (platform-tools)", adbOK, adbVersion, tools.Adb, &domain.ToolFix{
 		Kind:    domain.FixInstall,
-		Label:   "安装 platform-tools",
+		Label:   "修复 platform-tools",
 		Payload: "platform-tools",
 	}))
 
 	emulatorVersion := ""
-	if tools.HasEmulator() {
+	emulatorOK := tools.HasEmulator() && sdk.VerifyPackage(tools, "emulator") == nil
+	if emulatorOK {
 		emulatorVersion = parseEmulatorVersion(sdk.ToolOutput(ctx, tools.Emulator, []string{"-version"}, env, emulatorProbe))
 	}
-	report.Components = append(report.Components, toolStatus(domain.ToolEmulator, "emulator", tools.HasEmulator(), emulatorVersion, tools.Emulator, &domain.ToolFix{
+	report.Components = append(report.Components, toolStatus(domain.ToolEmulator, "emulator", emulatorOK, emulatorVersion, tools.Emulator, &domain.ToolFix{
 		Kind:    domain.FixInstall,
-		Label:   "安装 emulator",
+		Label:   "修复 emulator",
 		Payload: "emulator",
 	}))
+	if tools.HasSdkmanager() && !cmdlineOK {
+		setComponentDetail(report, domain.ToolSdkmanager, "检测到旧版本残留或不完整安装，请执行环境修复")
+		setComponentDetail(report, domain.ToolAvdmanager, "检测到旧版本残留或不完整安装，请执行环境修复")
+	}
+	if tools.HasAdb() && !adbOK {
+		setComponentDetail(report, domain.ToolAdb, "目录存在但元数据不完整，可能为旧版本残留，请执行环境修复")
+	}
+	if tools.HasEmulator() && !emulatorOK {
+		setComponentDetail(report, domain.ToolEmulator, "目录存在但元数据不完整，可能为旧版本残留，请执行环境修复")
+	}
 
-	// 已安装系统镜像（读官方 sdkmanager 的本地列表，不联网）
-	report.NeedInit = !(tools.HasSdkmanager() && javaOK)
+	// 已安装系统镜像（扫描本地 package.xml/source.properties，不联网，也不受 CLI 退出码影响）
+	report.NeedInit = !(cmdlineOK && javaOK)
 	if !report.NeedInit {
 		if images, err := sdk.ListImages(ctx, tools, env, true, nil); err == nil {
 			report.Images = len(images)
@@ -124,42 +145,158 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 	report.Disk = platform.DiskSpace(tools.SdkRoot)
 	report.Avds = len(s.avdNames(comp))
 
-	report.Ready = javaOK && tools.HasSdkmanager() && tools.HasAvdmanager() && tools.HasAdb() && tools.HasEmulator()
-	report.Issues = s.buildIssues(report, tools)
+	report.Ready = javaOK && sdkmanagerOK && avdmanagerOK && adbOK && emulatorOK
+	report.Issues = s.buildIssues(report, tools, javaOK)
 	report.ElapsedMs = time.Since(started).Milliseconds()
 	return report, nil
 }
 
-// Prepare 自动准备 SDK 环境：下载命令行工具 → 接受许可 → 安装基础组件。
+// Prepare 使用已保存的镜像自动准备软件自带环境。
 //
 // 返回 jobID；进度与日志走统一任务区域。
 func (s *EnvService) Prepare() (string, error) {
+	return s.run("", false)
+}
+
+// PrepareFromSource 先保存所选 Android SDK 镜像，再准备或补装环境。
+func (s *EnvService) PrepareFromSource(sourceID string) (string, error) {
+	return s.PrepareFromSources(sourceID, "")
+}
+
+// PrepareFromSources 保存所选 SDK / JDK 镜像，再准备或补装环境。
+func (s *EnvService) PrepareFromSources(sourceID, jdkSourceID string) (string, error) {
+	if err := s.saveSourceSelection(sourceID, jdkSourceID); err != nil {
+		return "", err
+	}
+	return s.run("", false)
+}
+
+// Repair 使用已保存的镜像强制校验并重装核心 SDK 工具链。
+func (s *EnvService) Repair() (string, error) {
+	return s.run("", true)
+}
+
+// RepairFromSource 先保存所选 Android SDK 镜像，再强制修复核心工具链。
+func (s *EnvService) RepairFromSource(sourceID string) (string, error) {
+	return s.RepairFromSources(sourceID, "")
+}
+
+// RepairFromSources 保存所选 SDK / JDK 镜像，再强制修复核心工具链。
+func (s *EnvService) RepairFromSources(sourceID, jdkSourceID string) (string, error) {
+	if err := s.saveSourceSelection(sourceID, jdkSourceID); err != nil {
+		return "", err
+	}
+	return s.run("", true)
+}
+
+// saveSourceSelection 验证并持久化弹窗中选择的下载源；空 ID 表示保留当前设置。
+func (s *EnvService) saveSourceSelection(sourceID, jdkSourceID string) error {
+	patch := map[string]any{}
+	if strings.TrimSpace(sourceID) != "" {
+		source, ok := mirror.Find(sourceID)
+		if !ok {
+			return domain.Err(domain.CodeInvalidArgument, "镜像源不存在: "+strings.TrimSpace(sourceID))
+		}
+		patch["mirrorSourceId"] = source.ID
+	}
+	if strings.TrimSpace(jdkSourceID) != "" {
+		source, ok := jdk.FindSource(jdkSourceID)
+		if !ok {
+			return domain.Err(domain.CodeInvalidArgument, "JDK 镜像源不存在: "+strings.TrimSpace(jdkSourceID))
+		}
+		patch["jdkMirrorSourceId"] = source.ID
+	}
+	if len(patch) == 0 {
+		return nil
+	}
+	_, err := s.rt.settings.Update(patch)
+	return err
+}
+
+// run 自动准备软件自带环境；repair=true 时会强制重装核心工具链并清理旧版缓存。
+func (s *EnvService) run(sourceID string, repair bool) (string, error) {
 	comp := s.rt.Components()
 	tools := comp.Tools
-	env := comp.Env
+	source, env := mirrorEnv(s.rt, sourceID)
+
+	if repair {
+		if name, ok := activeEmulatorName(comp); ok {
+			return "", domain.Err(domain.CodeJobBusy,
+				"模拟器 "+name+" 正在运行，不能修复 SDK 工具链").
+				WithHint("请先停止所有模拟器，再执行环境修复")
+		}
+	}
 
 	unlock, ok := s.rt.locks.TryLock("sdk:" + tools.SdkRoot)
 	if !ok {
-		return "", domain.Err(domain.CodeJobBusy, "已有 SDK 准备/安装任务正在进行").
+		return "", domain.Err(domain.CodeJobBusy, "已有环境准备/安装任务正在进行").
 			WithHint("请等待当前任务完成，或在底部任务区域取消它")
 	}
 
+	title := "准备软件自带环境"
+	if repair {
+		title = "修复软件自带环境"
+	}
 	j := s.rt.jobs.Start(s.rt.Context(), job.Spec{
 		Kind:  domain.JobBootstrap,
-		Title: "准备软件 SDK 环境",
+		Title: title,
 	}, func(ctx context.Context, j *job.Job) error {
 		defer unlock()
 		if err := platform.EnsureLayout(); err != nil {
 			return domain.Wrap(domain.CodePermissionDenied, "无法创建软件数据目录", err)
 		}
 
-		// 1. 命令行工具（sdkmanager / avdmanager 的唯一来源）
-		if !tools.HasSdkmanager() {
+		// 1. 软件自带 JDK：sdkmanager / avdmanager 的前置条件。JDK 使用独立的
+		// 镜像选择与内置 SHA-256 校验；env 中的 JAVA_HOME 与 PATH 始终指向软件目录，
+		// JDK 缺失时不会回退到系统 JDK。
+		jdkSource := activeJDKSource(s.rt)
+		if _, javaOK := s.probeJava(ctx, platform.FindJava(), env); !javaOK {
+			j.SetPhase("下载并解压软件自带 JDK")
+			j.Logf("info", "jdk", "从 JDK 镜像 %s（%s）下载 Eclipse Temurin %s 并安装到 %s",
+				jdkSource.Name, jdkSource.BaseURL, jdk.Version(), comp.JdkRoot)
+			started := time.Now()
+			if err := jdk.InstallFromSource(ctx, jdkSource.ID, comp.JdkRoot, comp.JdkHome, platform.CacheDir(), j.SetBytes); err != nil {
+				return err
+			}
+			if _, ok := s.probeJava(ctx, platform.FindJava(), env); !ok {
+				return domain.ErrDetail(domain.CodeProcessFailed,
+					"JDK 安装后仍不可用", platform.FindJava())
+			}
+			j.Logf("info", "jdk", "JDK 就绪（耗时 %s）", time.Since(started).Round(time.Second))
+		} else {
+			j.Logf("info", "jdk", "已存在 JDK：%s", platform.FindJava())
+		}
+
+		j.Logf("info", "mirror", "Android SDK 组件使用镜像源：%s（%s）", source.Name, source.BaseURL)
+		if repair {
+			j.SetPhase("停止旧工具链进程")
+			if tools.HasAdb() {
+				_, _ = proc.Run(ctx, tools.Adb, []string{"kill-server"}, proc.Options{Env: env, Timeout: 15 * time.Second})
+			}
+			j.SetPhase("清理旧版本缓存")
+			j.Logf("warn", "sdk", "开始强制修复：将重装命令行工具、platform-tools 与 emulator；保留 licenses、系统镜像和 AVD")
+			for _, path := range []string{
+				filepath.Join(tools.SdkRoot, ".temp"),
+				filepath.Join(tools.SdkRoot, ".knownPackages"),
+				filepath.Join(tools.SdkRoot, ".sdk"),
+			} {
+				if err := os.RemoveAll(path); err != nil {
+					return domain.Wrap(domain.CodePermissionDenied, "无法清理旧版本缓存: "+path, err)
+				}
+			}
+		}
+
+		// 2. 命令行工具（sdkmanager / avdmanager 的唯一来源）
+		cmdlineOK := tools.HasSdkmanager() && sdk.VerifyPackage(tools, "cmdline-tools;latest") == nil
+		if repair || !cmdlineOK {
 			j.SetPhase("下载 Android 命令行工具")
-			j.Logf("info", "sdk", "从官方地址下载命令行工具到 %s", tools.CmdlineTools)
+			if tools.HasSdkmanager() {
+				j.Logf("warn", "sdk", "命令行工具元数据不完整，按旧版本残留修复：%s", tools.CmdlineTools)
+			}
+			j.Logf("info", "sdk", "从 %s 下载命令行工具到 %s", source.Name, tools.CmdlineTools)
 			started := time.Now()
 			// 速度由任务内部采样估算，这里只上报字节数
-			err := sdk.Bootstrap(ctx, tools, platform.CacheDir(), j.SetBytes)
+			err := sdk.Bootstrap(ctx, tools, platform.CacheDir(), source.BaseURL, j.SetBytes)
 			if err != nil {
 				return err
 			}
@@ -168,31 +305,40 @@ func (s *EnvService) Prepare() (string, error) {
 			j.Logf("info", "sdk", "已存在命令行工具：%s", tools.Sdkmanager)
 		}
 
-		// 2. 许可（用 y 回答官方提示，不自行维护许可文件）
+		// 3. 许可（用 y 回答官方提示，不自行维护许可文件）
 		j.SetPhase("接受 SDK 许可")
 		if err := sdk.AcceptLicenses(ctx, tools, env, jobLine(j, "sdkmanager")); err != nil {
 			return err
 		}
 
-		// 3. 基础组件：platform-tools（adb）与 emulator
+		// 4. 基础组件：platform-tools（adb）与 emulator
 		missing := make([]string, 0, 2)
-		if !tools.HasAdb() {
+		if repair || sdk.VerifyPackage(tools, "platform-tools") != nil {
 			missing = append(missing, "platform-tools")
 		}
-		if !tools.HasEmulator() {
+		if repair || sdk.VerifyPackage(tools, "emulator") != nil {
 			missing = append(missing, "emulator")
 		}
 		if len(missing) > 0 {
 			j.SetPhase("安装 " + strings.Join(missing, "、"))
 			j.Logf("info", "sdk", "执行：%s", sdk.InstallCommand(tools, missing))
-			stopProgress := watchInstallProgress(ctx, j, tools.SdkRoot, missing)
-			err := sdk.InstallPackages(ctx, tools, env, missing, jobLine(j, "sdkmanager"))
+			stopProgress := watchInstallProgress(ctx, j, tools.SdkRoot, missing, source.BaseURL)
+			var err error
+			if repair {
+				err = sdk.RepairPackages(ctx, tools, env, missing, jobLine(j, "sdkmanager"))
+			} else {
+				err = sdk.InstallPackages(ctx, tools, env, missing, jobLine(j, "sdkmanager"))
+			}
 			stopProgress()
 			if err != nil {
 				return err
 			}
 		}
-		j.Logf("info", "sdk", "SDK 环境准备完成")
+		if repair {
+			j.Logf("info", "sdk", "软件自带环境修复完成")
+		} else {
+			j.Logf("info", "sdk", "软件自带环境准备完成")
+		}
 		s.rt.Emit("env:changed", nil)
 		return nil
 	})
@@ -247,16 +393,33 @@ func (s *EnvService) avdNames(comp *components) []string {
 	return out
 }
 
+func activeEmulatorName(comp *components) (string, bool) {
+	for _, instance := range comp.Launcher.List() {
+		switch instance.State {
+		case domain.AvdStarting, domain.AvdBooting, domain.AvdRunning, domain.AvdStopping:
+			return instance.AvdName, true
+		}
+	}
+	return "", false
+}
+
 // buildIssues 汇总可操作的环境问题。
-func (s *EnvService) buildIssues(report *domain.EnvReport, tools platform.Tools) []domain.EnvIssue {
+func (s *EnvService) buildIssues(report *domain.EnvReport, tools platform.Tools, javaOK bool) []domain.EnvIssue {
 	var issues []domain.EnvIssue
 
-	if report.JavaPath == "" {
+	if !javaOK {
+		title := "未找到软件自带 JDK"
+		if report.JavaPath != "" {
+			title = "软件自带 JDK 不可用"
+		}
 		issues = append(issues, domain.EnvIssue{
 			ID:       "jdk-missing",
 			Severity: domain.SeverityBlocker,
-			Title:    "未找到 JDK",
-			Detail:   "sdkmanager 与 avdmanager 需要 JDK 17 或更高版本。请安装 JDK 并设置 JAVA_HOME，或把 java 加入 PATH。",
+			Title:    title,
+			Detail: "sdkmanager 与 avdmanager 需要软件自带 JDK 17 或更高版本。将从所选 JDK 镜像下载 Eclipse Temurin 21 到 " +
+				report.JdkRoot + " 并进行 SHA-256 校验，不读取系统 JAVA_HOME / PATH。",
+			FixKind:  domain.FixPrepare,
+			FixLabel: "自动下载 JDK",
 		})
 	}
 	if report.NeedInit {
@@ -277,8 +440,11 @@ func (s *EnvService) buildIssues(report *domain.EnvReport, tools platform.Tools)
 				continue
 			}
 			detail := "缺少 " + comp.Name
+			if strings.TrimSpace(comp.Detail) != "" {
+				detail = comp.Detail
+			}
 			if comp.Fix.Kind == domain.FixInstall {
-				detail += "，可通过 sdkmanager 安装：" + comp.Fix.Payload
+				detail += "，可通过当前镜像补装：" + comp.Fix.Payload
 			}
 			issues = append(issues, domain.EnvIssue{
 				ID:         "missing-" + string(comp.ID),
@@ -321,6 +487,15 @@ func toolStatus(id domain.ToolID, name string, ok bool, version, path string, fi
 	return domain.ToolStatus{ID: id, Name: name, State: state, Version: version, Path: path, Fix: fix}
 }
 
+func setComponentDetail(report *domain.EnvReport, id domain.ToolID, detail string) {
+	for i := range report.Components {
+		if report.Components[i].ID == id {
+			report.Components[i].Detail = detail
+			return
+		}
+	}
+}
+
 // jobLine 把命令输出写进任务日志。
 func jobLine(j *job.Job, source string) func(stream, line string) {
 	return func(stream, line string) {
@@ -330,6 +505,20 @@ func jobLine(j *job.Job, source string) func(stream, line string) {
 		}
 		j.Log(level, source, line)
 	}
+}
+
+// probeJava 只探测指定路径的 java，并确认主版本 >= 17。
+//
+// 路径为空或探测失败时返回 false，绝不去 PATH 中回退查找系统 java。
+func (s *EnvService) probeJava(ctx context.Context, javaPath string, env []string) (string, bool) {
+	if strings.TrimSpace(javaPath) == "" {
+		return "", false
+	}
+	version := parseJavaVersion(sdk.ToolVersion(ctx, javaPath, []string{"-version"}, env, javaTimeout))
+	if version == "" {
+		return "", false
+	}
+	return version, javaMajor(version) >= 17
 }
 
 // parseJavaVersion 从 `java -version` 输出中取版本号（形如 17.0.6 或 1.8.0_392）。
@@ -348,6 +537,23 @@ func parseJavaVersion(out string) string {
 		text = text[:i]
 	}
 	return text
+}
+
+// javaMajor 取 Java 主版本号（8、11、17、21…）。
+func javaMajor(version string) int {
+	version = strings.TrimSpace(version)
+	n, digits := 0, 0
+	for _, r := range version {
+		if r < '0' || r > '9' {
+			break
+		}
+		n = n*10 + int(r-'0')
+		digits++
+	}
+	if digits == 0 {
+		return 0
+	}
+	return n
 }
 
 // parseEmulatorVersion 从 `emulator -version` 输出中取版本号。
@@ -372,4 +578,23 @@ func parseToolVersionLine(out string) string {
 		}
 	}
 	return ""
+}
+
+func parseSdkmanagerVersion(out string) string {
+	for _, line := range platform.SplitLines(out) {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if trimmed == "" || strings.HasPrefix(lower, "warning:") ||
+			strings.HasPrefix(lower, "the 'android'") || strings.HasPrefix(lower, "to learn") {
+			continue
+		}
+		fields := strings.Fields(trimmed)
+		if len(fields) == 0 {
+			continue
+		}
+		if strings.Contains(trimmed, "Android CLI") || strings.ContainsAny(fields[0], "0123456789") {
+			return fields[0]
+		}
+	}
+	return parseToolVersionLine(out)
 }

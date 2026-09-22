@@ -72,10 +72,11 @@ func TestToolsAvailability(t *testing.T) {
 
 func TestChildEnvInjectsOwnSdk(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "sdk")
+	jdkHome := filepath.Join(t.TempDir(), "jdk")
 	avdHome := filepath.Join(t.TempDir(), "avd")
 	tools := NewTools(root)
 
-	env := ChildEnv(tools, avdHome)
+	env := ChildEnv(tools, jdkHome, avdHome)
 	got := map[string]string{}
 	for _, kv := range env {
 		i := strings.IndexByte(kv, '=')
@@ -88,16 +89,22 @@ func TestChildEnvInjectsOwnSdk(t *testing.T) {
 	if got["ANDROID_SDK_ROOT"] != root || got["ANDROID_HOME"] != root {
 		t.Errorf("未把软件自有 SDK 注入子进程: %v", got["ANDROID_SDK_ROOT"])
 	}
+	if got["JAVA_HOME"] != jdkHome {
+		t.Errorf("JAVA_HOME 应指向软件自带 JDK: %q", got["JAVA_HOME"])
+	}
 	if got["ANDROID_AVD_HOME"] != avdHome {
 		t.Errorf("ANDROID_AVD_HOME 应为 AVD 目录本身，实际 %q", got["ANDROID_AVD_HOME"])
 	}
 	if got["ANDROID_EMU_ENABLE_CRASH_REPORTING"] != "0" {
 		t.Errorf("应禁用模拟器外部崩溃报告，实际 %q", got["ANDROID_EMU_ENABLE_CRASH_REPORTING"])
 	}
-	// PATH 必须把自带工具链放在前面，且保留原 PATH
+	// PATH 必须把自带 JDK 与工具链放在前面，且保留原 PATH
 	path := got["PATH"]
-	if !strings.HasPrefix(path, filepath.Join(root, "platform-tools")) {
-		t.Errorf("PATH 未优先使用自带 platform-tools: %q", path)
+	if !strings.HasPrefix(path, filepath.Join(jdkHome, "bin")) {
+		t.Errorf("PATH 未优先使用自带 JDK: %q", path)
+	}
+	if !strings.Contains(path, filepath.Join(root, "platform-tools")) {
+		t.Errorf("PATH 缺少自带 platform-tools: %q", path)
 	}
 	if !strings.Contains(path, filepath.Join(root, "emulator")) ||
 		!strings.Contains(path, filepath.Join(root, "cmdline-tools", "latest", "bin")) {
@@ -134,21 +141,43 @@ func TestRootOverridable(t *testing.T) {
 	}
 }
 
-func TestFindJavaPrefersJavaHome(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "bin")
-	if err := os.MkdirAll(bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
+func TestFindJavaUsesOnlyManagedJdk(t *testing.T) {
+	systemHome := t.TempDir()
+	managedHome := t.TempDir()
 	name := "java"
 	if runtime.GOOS == "windows" {
 		name = "java.exe"
 	}
-	writeTemp(t, filepath.Join(bin, name), "stub")
+	if err := os.MkdirAll(filepath.Join(systemHome, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTemp(t, filepath.Join(systemHome, "bin", name), "system")
+	t.Setenv("JAVA_HOME", systemHome)
+	t.Setenv("PATH", filepath.Join(systemHome, "bin"))
 
-	t.Setenv("JAVA_HOME", dir)
-	if got := FindJava(); got != filepath.Join(bin, name) {
-		t.Fatalf("应优先使用 JAVA_HOME 下的 java：期望 %q，实际 %q", filepath.Join(bin, name), got)
+	if got := javaPathIn(managedHome); got != "" {
+		t.Fatalf("软件目录没有 java 时不应回退系统 JDK，实际 %q", got)
+	}
+	if err := os.MkdirAll(filepath.Join(managedHome, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	managedJava := filepath.Join(managedHome, "bin", name)
+	writeTemp(t, managedJava, "managed")
+	if got := javaPathIn(managedHome); got != managedJava {
+		t.Fatalf("应使用软件目录下的 java：期望 %q，实际 %q", managedJava, got)
+	}
+}
+func TestJdkHomeAt(t *testing.T) {
+	root := filepath.Join("C:", "app", "jdk")
+	if got := jdkHomeAt(root, "windows"); got != root {
+		t.Fatalf("Windows JdkHome = %q，期望 %q", got, root)
+	}
+	if got := jdkHomeAt(root, "linux"); got != root {
+		t.Fatalf("Linux JdkHome = %q，期望 %q", got, root)
+	}
+	wantMac := filepath.Join(root, "Contents", "Home")
+	if got := jdkHomeAt(root, "darwin"); got != wantMac {
+		t.Fatalf("macOS JdkHome = %q，期望 %q", got, wantMac)
 	}
 }
 

@@ -57,7 +57,8 @@ func (s *AvdService) ListProfiles(refresh bool) ([]domain.DeviceProfile, error) 
 // 数据全部来自官方 sdkmanager：installedOnly 为 true 时只读本地列表（不联网）。
 func (s *AvdService) ListImages(installedOnly bool) ([]domain.SystemImage, error) {
 	comp := s.rt.Components()
-	images, err := sdk.ListImages(s.rt.Context(), comp.Tools, comp.Env, installedOnly, func(stream, line string) {
+	_, env := mirrorEnv(s.rt, "")
+	images, err := sdk.ListImages(s.rt.Context(), comp.Tools, env, installedOnly, func(stream, line string) {
 		s.rt.Log().Debug("sdkmanager", "%s", line)
 	})
 	if err != nil {
@@ -73,6 +74,7 @@ func (s *AvdService) ListImages(installedOnly bool) ([]domain.SystemImage, error
 // 与其它写 SDK/AVD 目录的任务共用同一把互斥锁（同一时刻只允许一个写任务）。
 func (s *AvdService) Create(spec domain.AvdSpec) (string, error) {
 	comp := s.rt.Components()
+	source, sdkEnv := mirrorEnv(s.rt, "")
 	spec.Name = strings.TrimSpace(spec.Name)
 	if v := comp.Store.ValidateName(spec.Name); !v.Valid {
 		return "", domain.Err(domain.CodeAvdNameInvalid, v.Reason)
@@ -95,9 +97,10 @@ func (s *AvdService) Create(spec domain.AvdSpec) (string, error) {
 		defer unlock()
 
 		j.SetPhase("检查系统镜像")
+		j.Logf("info", "mirror", "系统镜像使用镜像源：%s（%s）", source.Name, source.BaseURL)
 		// 缺镜像时 EnsureImage 会走 sdkmanager 安装，因此同样要接进度。
-		stopProgress := watchInstallProgress(ctx, j, comp.Tools.SdkRoot, []string{spec.SystemImagePath})
-		already, err := avd.EnsureImage(ctx, comp.Tools, comp.Env, spec.SystemImagePath, jobLine(j, "sdkmanager"))
+		stopProgress := watchInstallProgress(ctx, j, comp.Tools.SdkRoot, []string{spec.SystemImagePath}, source.BaseURL)
+		already, err := avd.EnsureImage(ctx, comp.Tools, sdkEnv, spec.SystemImagePath, jobLine(j, "sdkmanager"))
 		stopProgress()
 		if err != nil {
 			return err
@@ -161,6 +164,7 @@ func (s *AvdService) InstallImage(pkgPath string) (string, error) {
 		return "", err
 	}
 	comp := s.rt.Components()
+	source, sdkEnv := mirrorEnv(s.rt, "")
 	unlock, ok := s.rt.locks.TryLock("sdk:" + comp.Tools.SdkRoot)
 	if !ok {
 		return "", domain.Err(domain.CodeJobBusy, "已有 SDK 安装任务正在进行")
@@ -171,9 +175,10 @@ func (s *AvdService) InstallImage(pkgPath string) (string, error) {
 		Subtitle: sdk.InstallCommand(comp.Tools, []string{pkgPath}),
 	}, func(ctx context.Context, j *job.Job) error {
 		defer unlock()
-		stopProgress := watchInstallProgress(ctx, j, comp.Tools.SdkRoot, []string{pkgPath})
+		j.Logf("info", "mirror", "系统镜像使用镜像源：%s（%s）", source.Name, source.BaseURL)
+		stopProgress := watchInstallProgress(ctx, j, comp.Tools.SdkRoot, []string{pkgPath}, source.BaseURL)
 		defer stopProgress()
-		if err := sdk.InstallPackages(ctx, comp.Tools, comp.Env, []string{pkgPath}, jobLine(j, "sdkmanager")); err != nil {
+		if err := sdk.InstallPackages(ctx, comp.Tools, sdkEnv, []string{pkgPath}, jobLine(j, "sdkmanager")); err != nil {
 			return err
 		}
 		j.Logf("info", "sdkmanager", "系统镜像安装完成：%s", pkgPath)

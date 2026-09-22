@@ -23,6 +23,8 @@ func Defaults() domain.AppSettings {
 		ShowTaskDrawer:      true,
 		LogLevel:            "info",
 		KeepLogDays:         7,
+		MirrorSourceID:      "google-cn",
+		JDKMirrorSourceID:   "nju",
 	}
 }
 
@@ -137,6 +139,9 @@ func normalize(s domain.AppSettings) domain.AppSettings {
 	}
 	if s.KeepLogDays <= 0 {
 		s.KeepLogDays = def.KeepLogDays
+	}
+	if strings.TrimSpace(s.JDKMirrorSourceID) == "" {
+		s.JDKMirrorSourceID = def.JDKMirrorSourceID
 	}
 	return s
 }

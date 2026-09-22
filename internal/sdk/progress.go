@@ -105,18 +105,23 @@ type progressWatcher struct {
 	interval time.Duration
 }
 
-// WatchInstallProgress 在 ctx 存续期间轮询 sdkmanager 的下载进度并回调，直到 ctx 结束。
+// WatchInstallProgress 使用官方仓库地址轮询安装进度。
+func WatchInstallProgress(ctx context.Context, sdkRoot string, packages []string, onProgress func(DownloadProgress)) {
+	WatchInstallProgressFrom(ctx, sdkRoot, packages, officialRepoBaseURL, onProgress)
+}
+
+// WatchInstallProgressFrom 在 ctx 存续期间轮询 sdkmanager 的下载进度并回调，直到 ctx 结束。
 //
 // 总量通过官方仓库的 HEAD 请求获得；拿不到总量时 Total 为 0，调用方应显示不确定进度，
 // 绝不推算假百分比。
-func WatchInstallProgress(ctx context.Context, sdkRoot string, packages []string, onProgress func(DownloadProgress)) {
+func WatchInstallProgressFrom(ctx context.Context, sdkRoot string, packages []string, baseURL string, onProgress func(DownloadProgress)) {
 	if onProgress == nil {
 		return
 	}
 	w := progressWatcher{
 		sdkRoot:  sdkRoot,
 		packages: packages,
-		baseURL:  repoBaseURL,
+		baseURL:  strings.TrimSpace(baseURL),
 		client:   &http.Client{Timeout: progressHTTPTimeout},
 		interval: progressPollInterval,
 	}
@@ -177,7 +182,7 @@ func (w progressWatcher) remoteSize(ctx context.Context, packages []string, arch
 	}
 	base := strings.TrimSpace(w.baseURL)
 	if base == "" {
-		base = repoBaseURL
+		base = officialRepoBaseURL
 	}
 	for _, url := range archiveURLs(base, packages, archive) {
 		if size, err := headContentLength(ctx, client, url); err == nil && size > 0 {

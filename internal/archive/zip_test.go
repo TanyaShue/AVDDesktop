@@ -1,4 +1,4 @@
-package sdk
+package archive
 
 import (
 	"archive/zip"

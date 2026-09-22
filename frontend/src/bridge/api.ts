@@ -5,6 +5,7 @@
 //   - wailsjs 由 `wails generate module` / `wails dev` 自动生成，勿手改
 
 export * as Env from "../../wailsjs/go/service/EnvService";
+export * as Mirror from "../../wailsjs/go/service/MirrorService";
 export * as Avd from "../../wailsjs/go/service/AvdService";
 export * as Emulator from "../../wailsjs/go/service/EmulatorService";
 export * as Settings from "../../wailsjs/go/service/SettingsService";

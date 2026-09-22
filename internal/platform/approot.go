@@ -1,7 +1,8 @@
 // Package platform 封装宿主环境差异：软件自有目录布局、工具链路径、通用文件操作与单实例锁。
 //
-// 目录布局（跨平台一致，不再依赖系统 Android SDK）：
+// 目录布局（跨平台一致，不再依赖系统 Android SDK / JDK）：
 //
+//	<Root>/jdk      软件自己的 JDK（JAVA_HOME）
 //	<Root>/sdk      软件自己的 ANDROID_SDK_ROOT
 //	<Root>/avd      软件自己的 ANDROID_AVD_HOME
 //	<Root>/config   设置
@@ -84,6 +85,20 @@ func userDataDir(name string) string {
 	return filepath.Join(".", name)
 }
 
+// JdkRoot 返回软件自带 JDK 的根目录（macOS 归档保留 Contents 目录结构）。
+func JdkRoot() string { return filepath.Join(Root(), "jdk") }
+
+// JdkHome 返回实际 JAVA_HOME。Windows / Linux 与 JdkRoot 相同，
+// macOS 的 Temurin 归档把真正的 JDK Home 放在 Contents/Home 下。
+func JdkHome() string { return jdkHomeAt(JdkRoot(), runtimeGOOS()) }
+
+func jdkHomeAt(root, goos string) string {
+	if goos == "darwin" {
+		return filepath.Join(root, "Contents", "Home")
+	}
+	return root
+}
+
 // SdkRoot 返回软件自有 SDK 根目录。
 func SdkRoot() string { return filepath.Join(Root(), "sdk") }
 
@@ -101,7 +116,7 @@ func CacheDir() string { return filepath.Join(Root(), "cache") }
 
 // EnsureLayout 创建软件自有目录布局（幂等）。
 func EnsureLayout() error {
-	for _, dir := range []string{SdkRoot(), AvdHome(), filepath.Dir(SettingsPath()), LogDir(), CacheDir()} {
+	for _, dir := range []string{JdkRoot(), SdkRoot(), AvdHome(), filepath.Dir(SettingsPath()), LogDir(), CacheDir()} {
 		if err := EnsureDir(dir); err != nil {
 			return err
 		}

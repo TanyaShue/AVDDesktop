@@ -79,6 +79,8 @@ export namespace domain {
 	    showTaskDrawer: boolean;
 	    logLevel: string;
 	    keepLogDays: number;
+	    mirrorSourceId: string;
+	    jdkMirrorSourceId: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppSettings(source);
@@ -92,6 +94,8 @@ export namespace domain {
 	        this.showTaskDrawer = source["showTaskDrawer"];
 	        this.logLevel = source["logLevel"];
 	        this.keepLogDays = source["keepLogDays"];
+	        this.mirrorSourceId = source["mirrorSourceId"];
+	        this.jdkMirrorSourceId = source["jdkMirrorSourceId"];
 	    }
 	}
 	export class AvdSpec {
@@ -318,9 +322,14 @@ export namespace domain {
 	}
 	export class EnvReport {
 	    appRoot: string;
+	    jdkRoot: string;
 	    sdkRoot: string;
 	    avdHome: string;
 	    javaPath?: string;
+	    mirrorSourceId?: string;
+	    mirrorSourceName?: string;
+	    jdkMirrorSourceId?: string;
+	    jdkMirrorSourceName?: string;
 	    ready: boolean;
 	    needInit: boolean;
 	    components: ToolStatus[];
@@ -340,9 +349,14 @@ export namespace domain {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.appRoot = source["appRoot"];
+	        this.jdkRoot = source["jdkRoot"];
 	        this.sdkRoot = source["sdkRoot"];
 	        this.avdHome = source["avdHome"];
 	        this.javaPath = source["javaPath"];
+	        this.mirrorSourceId = source["mirrorSourceId"];
+	        this.mirrorSourceName = source["mirrorSourceName"];
+	        this.jdkMirrorSourceId = source["jdkMirrorSourceId"];
+	        this.jdkMirrorSourceName = source["jdkMirrorSourceName"];
 	        this.ready = source["ready"];
 	        this.needInit = source["needInit"];
 	        this.components = this.convertValues(source["components"], ToolStatus);
@@ -451,6 +465,115 @@ export namespace domain {
 	        this.message = source["message"];
 	    }
 	}
+	export class MirrorResource {
+	    id: string;
+	    name: string;
+	    path?: string;
+	    url?: string;
+	    required: boolean;
+	    available: boolean;
+	    statusCode?: number;
+	    sizeBytes?: number;
+	    latencyMs?: number;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MirrorResource(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.url = source["url"];
+	        this.required = source["required"];
+	        this.available = source["available"];
+	        this.statusCode = source["statusCode"];
+	        this.sizeBytes = source["sizeBytes"];
+	        this.latencyMs = source["latencyMs"];
+	        this.error = source["error"];
+	    }
+	}
+	export class MirrorCheck {
+	    sourceId: string;
+	    sourceName: string;
+	    baseURL: string;
+	    region?: string;
+	    reachable: boolean;
+	    compatible: boolean;
+	    recommended: boolean;
+	    latencyMs: number;
+	    throughputBps: number;
+	    resources: MirrorResource[];
+	    checkedAt: number;
+	    elapsedMs: number;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MirrorCheck(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sourceId = source["sourceId"];
+	        this.sourceName = source["sourceName"];
+	        this.baseURL = source["baseURL"];
+	        this.region = source["region"];
+	        this.reachable = source["reachable"];
+	        this.compatible = source["compatible"];
+	        this.recommended = source["recommended"];
+	        this.latencyMs = source["latencyMs"];
+	        this.throughputBps = source["throughputBps"];
+	        this.resources = this.convertValues(source["resources"], MirrorResource);
+	        this.checkedAt = source["checkedAt"];
+	        this.elapsedMs = source["elapsedMs"];
+	        this.error = source["error"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class MirrorSource {
+	    id: string;
+	    name: string;
+	    baseURL: string;
+	    region?: string;
+	    note?: string;
+	    official?: boolean;
+	    active?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new MirrorSource(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.baseURL = source["baseURL"];
+	        this.region = source["region"];
+	        this.note = source["note"];
+	        this.official = source["official"];
+	        this.active = source["active"];
+	    }
+	}
 	export class NameValidation {
 	    name: string;
 	    valid: boolean;
@@ -476,6 +599,8 @@ export namespace domain {
 	    abi: string;
 	    version?: string;
 	    description?: string;
+	    androidVersion: string;
+	    rootSupported: boolean;
 	    installed: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -490,6 +615,8 @@ export namespace domain {
 	        this.abi = source["abi"];
 	        this.version = source["version"];
 	        this.description = source["description"];
+	        this.androidVersion = source["androidVersion"];
+	        this.rootSupported = source["rootSupported"];
 	        this.installed = source["installed"];
 	    }
 	}
@@ -501,6 +628,7 @@ export namespace service {
 	
 	export class ResolvedPaths {
 	    appRoot: string;
+	    jdkRoot: string;
 	    sdkRoot: string;
 	    avdHome: string;
 	    javaPath?: string;
@@ -514,6 +642,7 @@ export namespace service {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.appRoot = source["appRoot"];
+	        this.jdkRoot = source["jdkRoot"];
 	        this.sdkRoot = source["sdkRoot"];
 	        this.avdHome = source["avdHome"];
 	        this.javaPath = source["javaPath"];

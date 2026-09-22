@@ -1,8 +1,9 @@
-package sdk
+package archive
 
 import (
 	"context"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,11 @@ import (
 
 func sha1Hex(s string) string {
 	sum := sha1.Sum([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -51,6 +57,22 @@ func TestDownloadVerifiesSHA1(t *testing.T) {
 	}
 }
 
+func TestDownloadVerifiesSHA256(t *testing.T) {
+	const payload = "temurin-jdk-payload"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(payload))
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "jdk.zip")
+	if err := Download(context.Background(), srv.URL, dest, sha256Hex(payload), nil); err != nil {
+		t.Fatalf("SHA-256 下载失败: %v", err)
+	}
+	if err := Download(context.Background(), srv.URL, dest+".bad", strings.Repeat("0", 64), nil); err == nil {
+		t.Fatal("SHA-256 不匹配时必须返回错误")
+	}
+}
+
 func TestDownloadHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
@@ -83,5 +105,12 @@ func TestDownloadContextCanceled(t *testing.T) {
 	}
 	if _, statErr := os.Stat(dest); statErr == nil {
 		t.Error("取消后不应留下目标文件")
+	}
+}
+
+func TestDownloadRejectsUnknownChecksumLength(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "z.zip")
+	if err := Download(context.Background(), "https://example.invalid/z.zip", dest, "abc", nil); err == nil {
+		t.Fatal("未知长度的校验值必须返回错误")
 	}
 }

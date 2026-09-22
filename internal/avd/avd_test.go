@@ -351,8 +351,11 @@ func TestEnsureImageSkipsInstalled(t *testing.T) {
 		t.Fatalf("缺 package.xml 时应尝试安装，实际 already=%v err=%v", already, err)
 	}
 
-	// 目录与 package.xml 都在 → 直接跳过，不调用 sdkmanager
+	// 目录、package.xml 与 source.properties 都在 → 直接跳过，不调用 sdkmanager
 	if err := os.WriteFile(filepath.Join(dir, "package.xml"), []byte("<ns2:repository/>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "source.properties"), []byte("Pkg.Path=system-images;android-34;google_apis;x86_64\nPkg.Revision=14\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	already, err := EnsureImage(context.Background(), tools, nil, pkg, nil)

@@ -9,4 +9,14 @@ export function CopyToClipboard(arg1:string):Promise<void>;
 
 export function Prepare():Promise<string>;
 
+export function PrepareFromSource(arg1:string):Promise<string>;
+
+export function PrepareFromSources(arg1:string,arg2:string):Promise<string>;
+
+export function Repair():Promise<string>;
+
+export function RepairFromSource(arg1:string):Promise<string>;
+
+export function RepairFromSources(arg1:string,arg2:string):Promise<string>;
+
 export function Resolved():Promise<service.ResolvedPaths>;

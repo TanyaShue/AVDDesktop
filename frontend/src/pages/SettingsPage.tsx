@@ -1,22 +1,39 @@
 // 设置页：环境检查（唯一入口）+ 基础偏好。
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../bridge/api";
 import { errorText } from "../bridge/api";
-import type { AppSettings, ResolvedPaths, SystemImage } from "../bridge/types";
+import type { AppSettings, JobInfo, ResolvedPaths, SystemImage } from "../bridge/types";
 import type { EnvCheck } from "../hooks/useEnvCheck";
+import { EnvironmentSetupModal } from "../components/EnvironmentSetupModal";
+import {
+  androidVersionLabel,
+  imageRootSupported,
+  imageTagLabel,
+  SystemImageModal,
+} from "../components/SystemImageModal";
 import { formatMs } from "../components/ui";
 
 interface Props {
   onToast: (level: "info" | "success" | "warning" | "danger", title: string, text?: string) => void;
   onSettingsChanged: (next: AppSettings) => void;
   env: EnvCheck;
+  jobs: JobInfo[];
 }
 
-export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
+export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [paths, setPaths] = useState<ResolvedPaths | null>(null);
-  const [images, setImages] = useState<SystemImage[]>([]);
-  const [loadingImages, setLoadingImages] = useState(false);
+  const [installedImages, setInstalledImages] = useState<SystemImage[]>([]);
+  const [allImages, setAllImages] = useState<SystemImage[]>([]);
+  const [loadingInstalled, setLoadingInstalled] = useState(false);
+  const [loadingAll, setLoadingAll] = useState(false);
+  const [installedError, setInstalledError] = useState("");
+  const [allImagesError, setAllImagesError] = useState("");
+  const [imagePickerOpen, setImagePickerOpen] = useState(false);
+  const [environmentSetupOpen, setEnvironmentSetupOpen] = useState(false);
+  const [installJobs, setInstallJobs] = useState<Record<string, string>>({});
+  const [startingPath, setStartingPath] = useState("");
+  const handledJobsRef = useRef(new Set<string>());
 
   const load = useCallback(async () => {
     try {
@@ -27,9 +44,74 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
     }
   }, [onToast]);
 
+  const loadInstalledImages = useCallback(
+    async (notifyError = false) => {
+      setLoadingInstalled(true);
+      setInstalledError("");
+      try {
+        const list = api.asArray((await api.Avd.ListImages(true)) as SystemImage[]);
+        setInstalledImages(list);
+        setInstalledError("");
+      } catch (err) {
+        const text = errorText(err);
+        setInstalledError(text);
+        if (notifyError) onToast("danger", "读取已安装镜像失败", text);
+      } finally {
+        setLoadingInstalled(false);
+      }
+    },
+    [onToast],
+  );
+
+  const loadAllImages = useCallback(async () => {
+    setLoadingAll(true);
+    setAllImagesError("");
+    try {
+      const list = api.asArray((await api.Avd.ListImages(false)) as SystemImage[]);
+      setAllImages(list);
+      setAllImagesError("");
+    } catch (err) {
+      const text = errorText(err);
+      setAllImagesError(text);
+      onToast("danger", "读取可用镜像失败", text);
+    } finally {
+      setLoadingAll(false);
+    }
+  }, [onToast]);
+
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 设置页默认展示已安装镜像；初始化尚未完成时不发起 sdkmanager 查询。
+  useEffect(() => {
+    if (!env.report || env.report.needInit) return;
+    void loadInstalledImages(false);
+  }, [env.report?.checkedAt, env.report?.needInit, loadInstalledImages]);
+
+  // 镜像下载任务完成后刷新本地列表，并同步更新弹窗中的安装状态。
+  useEffect(() => {
+    const succeeded = new Set<string>();
+    for (const [path, jobId] of Object.entries(installJobs)) {
+      if (handledJobsRef.current.has(jobId)) continue;
+      const job = jobs.find((item) => item.id === jobId);
+      if (!job || job.status === "queued" || job.status === "running") continue;
+      handledJobsRef.current.add(jobId);
+      if (job.status === "succeeded") succeeded.add(path);
+    }
+    if (succeeded.size === 0) return;
+    setAllImages((prev) =>
+      prev.map((img) => (succeeded.has(img.path) ? { ...img, installed: true } : img)),
+    );
+    setInstalledImages((prev) => {
+      const byPath = new Map(prev.map((img) => [img.path, img]));
+      allImages.forEach((img) => {
+        if (succeeded.has(img.path)) byPath.set(img.path, { ...img, installed: true });
+      });
+      return [...byPath.values()];
+    });
+    void loadInstalledImages(false);
+  }, [allImages, installJobs, jobs, loadInstalledImages]);
 
   const patch = async (next: Partial<AppSettings>) => {
     try {
@@ -41,18 +123,46 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
     }
   };
 
-  const loadImages = async () => {
-    setLoadingImages(true);
+  const openImagePicker = () => {
+    setImagePickerOpen(true);
+    if (allImages.length === 0 && !loadingAll) void loadAllImages();
+  };
+
+  const startEnvironmentSetup = async (sourceId: string, jdkSourceId: string) => {
     try {
-      setImages(api.asArray((await api.Avd.ListImages(false)) as SystemImage[]));
+      await api.Env.PrepareFromSources(sourceId, jdkSourceId);
+      onToast("info", "已开始准备环境", "SDK / JDK 下载与补装进度已同步到底部任务区域。");
     } catch (err) {
-      onToast("danger", "读取系统镜像列表失败", errorText(err));
+      onToast("danger", "准备环境失败", errorText(err));
+      throw err;
+    }
+  };
+
+  const repairEnvironment = async (sourceId: string, jdkSourceId: string) => {
+    try {
+      await api.Env.RepairFromSources(sourceId, jdkSourceId);
+      onToast("warning", "已开始修复环境", "将重装核心 SDK 工具链，并在缺失时补装 JDK，进度已同步到底部任务区域。");
+    } catch (err) {
+      onToast("danger", "修复环境失败", errorText(err));
+      throw err;
+    }
+  };
+
+  const downloadImage = async (image: SystemImage) => {
+    setStartingPath(image.path);
+    try {
+      const id = await api.Avd.InstallImage(image.path);
+      setInstallJobs((prev) => ({ ...prev, [image.path]: id }));
+      onToast("info", "已开始下载系统镜像", `任务 ${id}，进度已同步到底部任务日志`);
+    } catch (err) {
+      onToast("danger", "下载失败", errorText(err));
     } finally {
-      setLoadingImages(false);
+      setStartingPath("");
     }
   };
 
   const report = env.report;
+  const jdkReady = report?.components.some((item) => item.id === "jdk" && item.state === "present") ?? false;
   // 「尚未初始化」已有横幅（含一个「立即准备」按钮），issue 列表不再重复渲染同类动作
   const issues = report
     ? report.issues.filter((issue) => !(report.needInit && issue.fixKind === "prepare"))
@@ -64,7 +174,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
         <div className="pageheader__text">
           <div className="pageheader__title">设置</div>
           <div className="pageheader__subtitle">
-            <span>软件自带 SDK 与模拟器环境</span>
+            <span>软件自带 JDK / SDK 与模拟器环境</span>
           </div>
         </div>
       </div>
@@ -75,9 +185,17 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
         <div className="section">
           <div className="section__header">
             <div className="section__title">环境检查</div>
-            <button className="btn btn--secondary" disabled={env.loading} onClick={() => void env.reload()}>
-              {env.loading ? "检查中…" : "重新检查"}
-            </button>
+            <div className="row row--wrap">
+              <button className="btn btn--secondary" onClick={() => setEnvironmentSetupOpen(true)}>
+                修复环境
+              </button>
+              <button className="btn btn--secondary" onClick={() => setEnvironmentSetupOpen(true)}>
+                下载 / 补充环境
+              </button>
+              <button className="btn btn--secondary" disabled={env.loading} onClick={() => void env.reload()}>
+                {env.loading ? "检查中…" : "重新检查"}
+              </button>
+            </div>
           </div>
           <div className="card">
             {report ? (
@@ -104,7 +222,10 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
                   <tbody>
                     {report.components.map((c) => (
                       <tr key={c.id}>
-                        <td>{c.name}</td>
+                        <td>
+                          <div>{c.name}</div>
+                          {c.detail ? <div className="muted" style={{ fontSize: 11 }}>{c.detail}</div> : null}
+                        </td>
                         <td>
                           <span
                             className={`chip ${c.state === "present" ? "chip--success" : "chip--warning"}`}
@@ -122,6 +243,10 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
                   </table>
                 </div>
 
+                <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                  JDK 只使用软件目录下的版本；系统 JAVA_HOME / PATH 中的 JDK 不参与检测与运行。
+                </div>
+
                 <div className="row row--wrap" style={{ gap: 16, marginTop: 12 }}>
                   <span className="muted">
                     已安装系统镜像：<span className="nums">{report.images}</span> 个
@@ -133,6 +258,15 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
                     可用空间：<span className="nums">{report.disk.freeGB}</span> GB
                     {report.disk.sufficient ? "" : "（不足）"}
                   </span>
+                  <span className="muted">
+                    SDK 镜像：<span>{report.mirrorSourceName || "Google 中国下载"}</span>
+                  </span>
+                  <span className="muted">
+                    JDK 镜像：<span>{report.jdkMirrorSourceName || "南京大学 NJU"}</span>
+                  </span>
+                  <button className="btn btn--ghost btn--sm" onClick={() => setEnvironmentSetupOpen(true)}>
+                    检测 / 更换
+                  </button>
                   {report.accel ? (
                     <span className="muted">
                       硬件加速：<span className="nums">{report.accel.available ? "可用" : "不可用"}</span>
@@ -144,13 +278,13 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
                   <div className="banner banner--info" style={{ marginTop: 12 }}>
                     <div className="banner__icon">⬇️</div>
                     <div className="banner__body">
-                      <div className="banner__title">需要初始化软件自带 SDK</div>
+                      <div className="banner__title">需要初始化软件自带环境</div>
                       <div className="banner__text">
-                        将下载官方命令行工具（约 150 MB），安装 platform-tools 与 emulator。进度显示在底部任务区域。
+                        将按所选 JDK 镜像下载 Eclipse Temurin 21（约 200 MB，缺失或版本过低时）与官方命令行工具（约 150 MB），并安装 platform-tools 与 emulator。所有 JDK 下载都会校验 SHA-256，进度显示在底部任务区域。
                       </div>
                     </div>
-                    <button className="btn btn--primary" onClick={() => void env.prepare()}>
-                      立即准备
+                    <button className="btn btn--primary" onClick={() => setEnvironmentSetupOpen(true)}>
+                      选择镜像并准备
                     </button>
                   </div>
                 ) : null}
@@ -173,8 +307,8 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
                             </div>
                           ) : null}
                         </div>
-                        {issue.fixLabel && issue.fixKind === "prepare" ? (
-                          <button className="btn btn--secondary" onClick={() => void env.prepare()}>
+                        {issue.fixLabel && (issue.fixKind === "prepare" || issue.fixKind === "install") ? (
+                          <button className="btn btn--secondary" onClick={() => setEnvironmentSetupOpen(true)}>
                             {issue.fixLabel}
                           </button>
                         ) : null}
@@ -199,40 +333,60 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
 
         {/* ---------------------------------------------------------- 系统镜像 */}
         <div className="section">
-          <div className="section__title">系统镜像</div>
-          <div className="card">
-            <div className="row row--wrap" style={{ justifyContent: "space-between", alignItems: "center" }}>
-              <span className="muted">
-                镜像由官方 sdkmanager 安装到软件自己的 SDK 目录。创建 AVD 时若缺少镜像会自动安装。
-              </span>
-              <button className="btn btn--secondary" disabled={loadingImages} onClick={() => void loadImages()}>
-                {loadingImages ? "读取中…" : "查看可用镜像"}
-              </button>
+          <div className="section__header section__header--start">
+            <div>
+              <div className="section__title">系统镜像</div>
+              <div className="muted">
+                默认展示已安装镜像。点击「查看全部镜像」可按版本、架构与 Root 支持筛选并下载。
+              </div>
             </div>
-            {images.length > 0 ? (
+            <button className="btn btn--secondary" disabled={loadingAll} onClick={openImagePicker}>
+              {loadingAll ? "读取中…" : "查看全部镜像"}
+            </button>
+          </div>
+          <div className="card">
+            {loadingInstalled && installedImages.length === 0 ? (
+              <div className="image-list-state">
+                <span className="spinner" />
+                <span>正在读取已安装镜像…</span>
+              </div>
+            ) : installedError ? (
+              <div className="image-list-state image-list-state--error">
+                <span>读取已安装镜像失败：{installedError}</span>
+                <button className="btn btn--secondary btn--sm" onClick={() => void loadInstalledImages(true)}>
+                  重试
+                </button>
+              </div>
+            ) : installedImages.length > 0 ? (
               <div className="table-scroll">
                 <table className="table table--images">
-                <thead>
-                  <tr>
-                    <th>Android</th>
-                    <th>类型</th>
-                    <th>ABI</th>
-                    <th>状态</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {images
-                    .filter((img) => img.installed)
-                    .concat(images.filter((img) => !img.installed).slice(0, 40))
-                    .map((img) => (
+                  <thead>
+                    <tr>
+                      <th>Android 版本</th>
+                      <th>类型</th>
+                      <th>架构</th>
+                      <th>是否支持 Root</th>
+                      <th>状态</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {installedImages.map((img) => (
                       <tr key={img.path}>
-                        <td className="nums">API {img.api}</td>
-                        <td>{img.tag}</td>
-                        <td className="nums">{img.abi}</td>
                         <td>
-                          <span className={`chip ${img.installed ? "chip--success" : "chip--sm"}`}>
-                            {img.installed ? "已安装" : "未安装"}
+                          <div className="image-version">
+                            <span>{androidVersionLabel(img)}</span>
+                            <span className="muted nums">API {img.api || "?"}</span>
+                          </div>
+                        </td>
+                        <td>{imageTagLabel(img.tag)}</td>
+                        <td className="nums">{img.abi || "—"}</td>
+                        <td>
+                          <span className={`chip chip--sm ${imageRootSupported(img) ? "chip--success" : "chip--warning"}`}>
+                            {imageRootSupported(img) ? "支持" : "不支持"}
                           </span>
+                        </td>
+                        <td>
+                          <span className="chip chip--sm chip--success">已安装</span>
                         </td>
                       </tr>
                     ))}
@@ -240,8 +394,8 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
                 </table>
               </div>
             ) : (
-              <div className="muted" style={{ marginTop: 8 }}>
-                {report ? `已安装 ${report.images} 个镜像` : ""}
+              <div className="muted">
+                {report?.needInit ? "初始化 SDK 后将在这里显示已安装镜像。" : "尚未安装系统镜像。"}
               </div>
             )}
           </div>
@@ -255,7 +409,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
               { label: "软件目录", value: paths?.appRoot },
               { label: "SDK", value: paths?.sdkRoot },
               { label: "AVD", value: paths?.avdHome },
-              { label: "JDK", value: paths?.javaPath },
+              { label: "JDK", value: paths?.jdkRoot },
               { label: "日志", value: paths?.logDir },
             ].map((row) => (
               <div className="field" key={row.label}>
@@ -335,6 +489,33 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
         </div>
         </div>
       </div>
+
+      {imagePickerOpen ? (
+        <SystemImageModal
+          mode="download"
+          images={allImages}
+          loading={loadingAll}
+          error={allImagesError}
+          installJobs={installJobs}
+          jobs={jobs}
+          busyPath={startingPath}
+          sourceName={report?.mirrorSourceName}
+          onClose={() => setImagePickerOpen(false)}
+          onReload={() => void loadAllImages()}
+          onDownload={downloadImage}
+        />
+      ) : null}
+
+      {environmentSetupOpen ? (
+        <EnvironmentSetupModal
+          currentSourceId={report?.mirrorSourceId || settings?.mirrorSourceId || ""}
+          currentJdkSourceId={report?.jdkMirrorSourceId || settings?.jdkMirrorSourceId || ""}
+          jdkReady={jdkReady}
+          onClose={() => setEnvironmentSetupOpen(false)}
+          onStart={startEnvironmentSetup}
+          onRepair={repairEnvironment}
+        />
+      ) : null}
     </div>
   );
 }

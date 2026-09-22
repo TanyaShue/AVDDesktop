@@ -87,6 +87,51 @@ type EnvIssue struct {
 	FixPayload string        `json:"fixPayload,omitempty"`
 }
 
+// MirrorSource 是一个可用于软件组件下载的镜像站（Android SDK 或 JDK）。
+type MirrorSource struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	BaseURL  string `json:"baseURL"`
+	Region   string `json:"region,omitempty"`
+	Note     string `json:"note,omitempty"`
+	Official bool   `json:"official,omitempty"`
+	Active   bool   `json:"active,omitempty"`
+}
+
+// MirrorResource 是镜像站上一次资源探测的结果。
+//
+// Required 表示当前这台机器是否真的需要它；Available 表示镜像站是否提供了它。
+// 这样同一张镜像表既能指导首次安装，也能用于已有环境的补装。
+type MirrorResource struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Path       string `json:"path,omitempty"`
+	URL        string `json:"url,omitempty"`
+	Required   bool   `json:"required"`
+	Available  bool   `json:"available"`
+	StatusCode int    `json:"statusCode,omitempty"`
+	SizeBytes  int64  `json:"sizeBytes,omitempty"`
+	LatencyMs  int64  `json:"latencyMs,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+// MirrorCheck 是一次镜像站连通性、延迟、吞吐与资源完整性检测。
+type MirrorCheck struct {
+	SourceID      string           `json:"sourceId"`
+	SourceName    string           `json:"sourceName"`
+	BaseURL       string           `json:"baseURL"`
+	Region        string           `json:"region,omitempty"`
+	Reachable     bool             `json:"reachable"`
+	Compatible    bool             `json:"compatible"`
+	Recommended   bool             `json:"recommended"`
+	LatencyMs     int64            `json:"latencyMs"`
+	ThroughputBps int64            `json:"throughputBps"`
+	Resources     []MirrorResource `json:"resources"`
+	CheckedAt     int64            `json:"checkedAt"`
+	ElapsedMs     int64            `json:"elapsedMs"`
+	Error         string           `json:"error,omitempty"`
+}
+
 // DiskInfo 描述一个分区/目录所在磁盘的空间。
 type DiskInfo struct {
 	Path       string `json:"path"`
@@ -106,13 +151,20 @@ type HostInfo struct {
 // EnvReport 是唯一的环境检查结果（设置页与自动准备共用）。
 type EnvReport struct {
 	AppRoot  string `json:"appRoot"`
+	JdkRoot  string `json:"jdkRoot"`
 	SdkRoot  string `json:"sdkRoot"`
 	AvdHome  string `json:"avdHome"`
 	JavaPath string `json:"javaPath,omitempty"`
+	// MirrorSourceID / MirrorSourceName 是当前 Android SDK 组件下载源。
+	MirrorSourceID   string `json:"mirrorSourceId,omitempty"`
+	MirrorSourceName string `json:"mirrorSourceName,omitempty"`
+	// JDKMirrorSourceID / JDKMirrorSourceName 是当前 JDK 下载源。
+	JDKMirrorSourceID   string `json:"jdkMirrorSourceId,omitempty"`
+	JDKMirrorSourceName string `json:"jdkMirrorSourceName,omitempty"`
 
 	// Ready 表示创建 AVD 与启动模拟器所需的工具链已齐备。
 	Ready bool `json:"ready"`
-	// NeedInit 表示软件自己的 SDK 尚未初始化（缺少 sdkmanager）。
+	// NeedInit 表示软件自带 JDK 或 SDK 尚未初始化（缺少 JDK / sdkmanager）。
 	NeedInit bool `json:"needInit"`
 
 	Components []ToolStatus `json:"components"`
@@ -139,7 +191,12 @@ type SystemImage struct {
 	ABI         string `json:"abi"`
 	Version     string `json:"version,omitempty"`
 	Description string `json:"description,omitempty"`
-	Installed   bool   `json:"installed"`
+
+	// AndroidVersion 是可读的 Android 版本（例如 Android 14），供界面直接展示。
+	AndroidVersion string `json:"androidVersion"`
+	// RootSupported 表示该镜像是否支持 `adb root`。Google Play 镜像不可 root，其余镜像按可 root 展示。
+	RootSupported bool `json:"rootSupported"`
+	Installed     bool `json:"installed"`
 }
 
 // ---------------------------------------------------------------- AVD
@@ -296,4 +353,9 @@ type AppSettings struct {
 	// 日志
 	LogLevel    string `json:"logLevel"`
 	KeepLogDays int    `json:"keepLogDays"`
+
+	// MirrorSourceID 是 Android SDK 组件默认下载源；空值时使用内置默认源。
+	MirrorSourceID string `json:"mirrorSourceId"`
+	// JDKMirrorSourceID 是 JDK 默认下载源；空值时使用内置默认源。
+	JDKMirrorSourceID string `json:"jdkMirrorSourceId"`
 }

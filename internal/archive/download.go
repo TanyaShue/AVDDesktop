@@ -1,9 +1,12 @@
-package sdk
+// Package archive 提供下载、校验与归档解压能力，供 SDK / JDK 自举共用。
+package archive
 
 import (
 	"context"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
+	"hash"
 	"io"
 	"net/http"
 	"os"
@@ -14,14 +17,29 @@ import (
 	"AVDDesktop/internal/domain"
 )
 
-// Download 以单连接方式下载 url 到 dest，并校验 SHA-1（wantSHA1 为空时跳过校验）。
+// Download 以单连接方式下载 url 到 dest，并校验 SHA-1 或 SHA-256（wantSHA 为空时跳过校验）。
 //
-// 首次初始化只需要下载一个归档，因此这里不做分片、断点续传或限速。
-// 代理走标准库的 ProxyFromEnvironment（HTTPS_PROXY / HTTP_PROXY）。
-func Download(ctx context.Context, url, dest, wantSHA1 string, onProgress ProgressFunc) error {
+// 校验值长度决定算法：40 位为 SHA-1，64 位为 SHA-256。首次初始化只需要
+// 下载一个归档，因此这里不做分片、断点续传或限速。代理走标准库的
+// ProxyFromEnvironment（HTTPS_PROXY / HTTP_PROXY）。
+func Download(ctx context.Context, url, dest, wantSHA string, onProgress func(done, total int64)) error {
 	if strings.TrimSpace(url) == "" {
 		return domain.Err(domain.CodeInvalidArgument, "下载地址为空")
 	}
+	wantSHA = strings.TrimSpace(wantSHA)
+	var hasher hash.Hash
+	switch len(wantSHA) {
+	case 0:
+		// 未提供校验值：仅用于测试或调用方明确接受风险时。
+	case 40:
+		hasher = sha1.New()
+	case 64:
+		hasher = sha256.New()
+	default:
+		return domain.ErrDetail(domain.CodeInvalidArgument,
+			"不支持的校验值长度", "期望 40 位 SHA-1 或 64 位 SHA-256，实际 "+wantSHA)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return domain.Wrap(domain.CodePermissionDenied, "无法创建下载目录", err)
 	}
@@ -47,7 +65,6 @@ func Download(ctx context.Context, url, dest, wantSHA1 string, onProgress Progre
 		return domain.Wrap(domain.CodePermissionDenied, "无法写入下载文件", err)
 	}
 
-	hash := sha1.New()
 	total := resp.ContentLength
 	lastReport := time.Now()
 	var done int64
@@ -66,7 +83,9 @@ func Download(ctx context.Context, url, dest, wantSHA1 string, onProgress Progre
 				_ = os.Remove(tmp)
 				return domain.Wrap(domain.CodePermissionDenied, "写入下载文件失败", werr)
 			}
-			_, _ = hash.Write(buf[:n])
+			if hasher != nil {
+				_, _ = hasher.Write(buf[:n])
+			}
 			done += int64(n)
 			if onProgress != nil && time.Since(lastReport) > 200*time.Millisecond {
 				lastReport = time.Now()
@@ -90,12 +109,12 @@ func Download(ctx context.Context, url, dest, wantSHA1 string, onProgress Progre
 		onProgress(done, total)
 	}
 
-	if wantSHA1 != "" {
-		got := hex.EncodeToString(hash.Sum(nil))
-		if !strings.EqualFold(got, wantSHA1) {
+	if hasher != nil {
+		got := hex.EncodeToString(hasher.Sum(nil))
+		if !strings.EqualFold(got, wantSHA) {
 			_ = os.Remove(tmp)
 			return domain.ErrDetail(domain.CodeArchiveFailed,
-				"下载文件校验失败（SHA-1 不匹配）", "期望 "+wantSHA1+"，实际 "+got)
+				"下载文件校验失败", "期望 "+wantSHA+"，实际 "+got)
 		}
 	}
 

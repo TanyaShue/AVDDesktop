@@ -32,6 +32,17 @@ Available Packages:
   system-images;android-35;google_apis;arm64-v8a           | 6       | Google APIs ARM 64 v8a System Image         |
 `
 
+const androidCLISample = `WARNING: The SDK Manager CLI tool (sdkmanager) is deprecated. Android CLI will be used instead.
+
+Installed packages:
+  cmdline-tools/latest         unknown   ->        23.0.0  Android SDK Command-line Tools (latest)
+  emulator                     37.1.11                     Android Emulator
+  platform-tools               37.0.1                      Android SDK Platform-Tools
+  system-images/android-36.1/google_apis_playstore/x86_64 4.0.0 Google Play Intel x86_64 Atom System Image
+Available packages:
+  system-images/android-35/google_apis/x86_64             9.0.0 Google APIs Intel x86_64 Atom System Image
+`
+
 func TestParsePackagesInstalled(t *testing.T) {
 	pkgs := ParsePackages(installedSample)
 	if len(pkgs) != 4 {
@@ -83,6 +94,29 @@ func TestParsePackagesAvailableOnly(t *testing.T) {
 	}
 }
 
+func TestParsePackagesAndroidCLIFormat(t *testing.T) {
+	pkgs := ParsePackages(androidCLISample)
+	byPath := map[string]Package{}
+	for _, pkg := range pkgs {
+		byPath[pkg.Path] = pkg
+	}
+	if len(pkgs) != 5 {
+		t.Fatalf("期望解析出 5 个包，实际 %d: %+v", len(pkgs), pkgs)
+	}
+	cmdline := byPath["cmdline-tools;latest"]
+	if !cmdline.Installed || cmdline.Version != "23.0.0" {
+		t.Fatalf("cmdline-tools 解析错误: %+v", cmdline)
+	}
+	installedImage := byPath["system-images;android-36.1;google_apis_playstore;x86_64"]
+	if !installedImage.Installed || installedImage.Version != "4.0.0" {
+		t.Fatalf("已安装系统镜像解析错误: %+v", installedImage)
+	}
+	availableImage := byPath["system-images;android-35;google_apis;x86_64"]
+	if availableImage.Installed || availableImage.Version != "9.0.0" {
+		t.Fatalf("可安装系统镜像解析错误: %+v", availableImage)
+	}
+}
+
 func TestSplitImageAndDir(t *testing.T) {
 	api, tag, abi, err := SplitImage("system-images;android-36.1;google_apis_playstore;x86_64")
 	if err != nil {
@@ -104,6 +138,26 @@ func TestSplitImageAndDir(t *testing.T) {
 	for _, bad := range []string{"", "platform-tools", "system-images;android-34;x86_64"} {
 		if _, _, _, err := SplitImage(bad); err == nil {
 			t.Errorf("非法镜像路径应报错: %q", bad)
+		}
+	}
+}
+
+func TestCLIPackageArgsNormalizeSemicolonPaths(t *testing.T) {
+	got := cliPackageArgs([]string{
+		"system-images;android-36.1;google_apis;arm64-v8a",
+		" platform-tools ",
+		"",
+	})
+	want := []string{
+		"system-images/android-36.1/google_apis/arm64-v8a",
+		"platform-tools",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("clI 包参数数量 = %d，期望 %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("clI 包参数[%d] = %q，期望 %q", i, got[i], want[i])
 		}
 	}
 }

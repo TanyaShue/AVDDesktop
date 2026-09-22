@@ -51,3 +51,19 @@ func TestSortImagesForHost(t *testing.T) {
 		}
 	}
 }
+
+func TestAndroidVersionAndRootSupport(t *testing.T) {
+	images := domainsFromPackages([]Package{
+		{Path: "system-images;android-34;google_apis;x86_64", Version: "14"},
+		{Path: "system-images;android-36.1;google_apis_playstore;x86_64", Version: "4"},
+	})
+	if len(images) != 2 {
+		t.Fatalf("期望转换出 2 个镜像，实际 %d", len(images))
+	}
+	if images[0].AndroidVersion != "Android 14" || !images[0].RootSupported {
+		t.Fatalf("Google APIs 镜像元数据错误: %+v", images[0])
+	}
+	if images[1].AndroidVersion != "Android 16" || images[1].RootSupported {
+		t.Fatalf("Google Play 镜像元数据错误: %+v", images[1])
+	}
+}

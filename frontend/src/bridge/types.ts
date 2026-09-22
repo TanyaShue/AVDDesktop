@@ -9,6 +9,9 @@ export type EnvReport = Omit<domain.EnvReport, "convertValues">;
 export type AvdState = "stopped" | "starting" | "booting" | "running" | "stopping" | "error";
 
 export type SystemImage = domain.SystemImage;
+export type MirrorSource = domain.MirrorSource;
+export type MirrorResource = domain.MirrorResource;
+export type MirrorCheck = domain.MirrorCheck;
 export type DeviceProfile = domain.DeviceProfile;
 export type AvdSpec = domain.AvdSpec;
 export type AvdSummary = domain.AvdSummary;

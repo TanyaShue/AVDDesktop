@@ -2,6 +2,17 @@
 
 > 本文件是重构开始前的代码审计与执行方案（对应任务书 Phase 0）。
 > 审计基线：`master @ 5dc7d31`，Go 69 文件 / 约 17.8k 行，前端 24 文件 / 约 4.5k 行。
+>
+> 后续变更（2026-09-22）：JDK 已从「依赖系统环境」改为软件自带。
+> 环境检查只认 `<Root>/jdk`，缺失或版本低于 17 时自动下载 Eclipse Temurin 21，
+> 子进程的 `JAVA_HOME` / `PATH` 也始终指向软件目录。
+>
+> 后续变更（2026-09-22）：重新加入最小化镜像能力。仍由官方 `sdkmanager` 负责安装，
+> 仅通过 `SDK_TEST_BASE_URL` 切换仓库根地址；同时提供连接、延迟、吞吐和资源完整性检测。
+> 未恢复自研仓库安装器、分片下载器或本地 package.xml 写入逻辑。
+>
+> 后续变更（2026-09-22）：JDK 增加独立镜像能力，内置南京大学 NJU、清华 TUNA、北外 BFSU 与
+> GitHub 官方源，支持与 SDK 相同维度的延迟/采样速度检测；所有源继续使用内置 SHA-256 校验。
 
 ## 1. 当前架构问题
 
@@ -133,10 +144,10 @@ UI → service（参数校验 + 注册 Job）→ sdk/avd/adb（解析必要输�
 
 | 风险 | 决策 |
 |---|---|
-| `sdkmanager` 需要 JDK，软件不能替用户装 JDK | 环境检查里显式检测 JDK（`JAVA_HOME` → `PATH`），缺失时给出明确指引；不扫描 Android Studio 自带 JBR |
+| `sdkmanager` 需要 JDK | 已变更：JDK 由软件自带并自动下载到 `<Root>/jdk`；环境检查只认软件目录，系统 `JAVA_HOME` / `PATH` 不参与 |
 | `sdkmanager` 许可确认会交互阻塞 | 通过 stdin 预置 `y` 行（`proc.StdinLines`），不维护许可哈希常量表 |
 | `sdkmanager --list` 输出格式随版本变化 | 只解析「含 `|` 的行 → 第 1 列包路径」，单测固定样本；解析失败给明确错误 |
-| 首次自举需要下载 150MB zip | 单连接 + 进度回调 + 超时；官方 `dl.google.com` 固定 URL/SHA-1 常量 |
+| 首次自举需要下载 JDK 约 200MB + cmdline-tools 约 150MB | 单连接 + 进度回调 + 超时；JDK 可选择国内 Adoptium 镜像或 GitHub 官方源（SHA-256），cmdline-tools 来自所选 SDK 镜像（SHA-1） |
 | 软件根目录不可写（安装在 `Program Files`） | 回退用户数据目录，并在设置页显示实际根目录 |
-| 删掉 `avdmanager` 直写后端后无 JDK 时无法创建 AVD | 接受：任务书要求「AVD 创建尽可能直接使用 avdmanager」 |
+| 删掉 `avdmanager` 直写后端后无 JDK 时无法创建 AVD | 已解决：`Prepare` 先补齐软件自带 JDK，后续 `avdmanager` 始终使用它 |
 | 以前依赖系统 SDK 的用户会看不到旧设备 | 接受：任务书要求软件自有 SDK/AVD 目录，与系统 SDK 相互独立 |

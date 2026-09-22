@@ -30,6 +30,7 @@ type App struct {
 	log *logging.Logger
 
 	Env      *service.EnvService
+	Mirror   *service.MirrorService
 	Avd      *service.AvdService
 	Emulator *service.EmulatorService
 	Settings *service.SettingsService
@@ -83,6 +84,7 @@ func NewApp() (*App, error) {
 		rt:       rt,
 		log:      logger,
 		Env:      service.NewEnvService(rt),
+		Mirror:   service.NewMirrorService(rt),
 		Avd:      service.NewAvdService(rt),
 		Emulator: service.NewEmulatorService(rt),
 		Settings: service.NewSettingsService(rt),
@@ -100,7 +102,7 @@ func (a *App) startup(ctx context.Context) {
 	a.rt.SetContext(ctx)
 	a.log.Info("app", "窗口已就绪（%s/%s）", runtime.GOOS, runtime.GOARCH)
 
-	// 首次运行且软件自带 SDK 尚未初始化时，自动准备环境（进度显示在底部任务区域）
+	// 首次运行且软件自带 JDK / SDK 尚未初始化时，自动准备环境（进度显示在底部任务区域）
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -114,9 +116,9 @@ func (a *App) startup(ctx context.Context) {
 		}
 		a.rt.Emit("env:changed", report)
 		if report.NeedInit {
-			a.log.Info("app", "软件自带 SDK 尚未初始化，开始自动准备")
+			a.log.Info("app", "软件自带环境尚未初始化，开始自动准备（JDK / SDK）")
 			if _, err := a.Env.Prepare(); err != nil {
-				a.log.Error("app", "自动准备 SDK 失败: %v", err)
+				a.log.Error("app", "自动准备环境失败: %v", err)
 			}
 		}
 	}()
