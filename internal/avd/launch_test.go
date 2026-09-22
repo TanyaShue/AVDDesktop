@@ -19,6 +19,17 @@ import (
 	"AVDDesktop/internal/platform"
 )
 
+// fakeADB 为状态机测试提供可控的设备列表。
+type fakeADB struct {
+	devices []domain.AdbDevice
+	err     error
+}
+
+func (f *fakeADB) WaitForDevice(context.Context, string, time.Duration) error { return nil }
+func (f *fakeADB) WaitForBoot(context.Context, string, time.Duration) error   { return nil }
+func (f *fakeADB) Devices(context.Context) ([]domain.AdbDevice, error)        { return f.devices, f.err }
+func (f *fakeADB) EmuKill(context.Context, string) error                      { return nil }
+
 // newTestLauncher 返回一个不接触真实工具链的启动器。
 func newTestLauncher() *Launcher {
 	return NewLauncher(platform.Tools{}, nil, nil, nil, nil, logging.Nop())
@@ -123,6 +134,7 @@ func TestExplainExit(t *testing.T) {
 		{"端口占用", "Failed to bind to console port 5554: Address already in use", "端口"},
 		{"内存不足", "qemu-system-x86_64: cannot allocate memory", "内存"},
 		{"其它", "unknown failure", "异常退出"},
+		{"正常日志含 hypervisor", "Checking: hasCompatibleHypervisor\nOk: Hypervisor compatibility to run avd", "异常退出"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -213,6 +225,108 @@ func TestMonitorConvergesOnPrematureExit(t *testing.T) {
 	}
 	if snap.State != domain.AvdStopped {
 		t.Fatalf("进程提前退出后状态 = %s，期望 %s", snap.State, domain.AvdStopped)
+	}
+}
+
+// TestMonitorMarksManualCloseStopped 回归测试：手动关闭模拟器窗口导致 adb 断开后，
+// 界面应先进入 stopping；即使 emulator.exe 最后以非零退出，也应收敛为 stopped 而不是 error。
+func TestMonitorMarksManualCloseStopped(t *testing.T) {
+	port, _ := freePortRange(t, 1)
+	l := NewLauncher(platform.Tools{}, nil, nil, &fakeADB{}, nil, logging.Nop())
+	l.runningProbe = 10 * time.Millisecond
+	l.deviceLostFor = 25 * time.Millisecond
+
+	inst := testInstance("Dev1", port)
+	registerInstance(l, inst)
+	done := make(chan struct{})
+	go func() {
+		l.monitor(context.Background(), inst)
+		close(done)
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		snap, _ := l.Get(inst.info.ID)
+		if snap.State == domain.AvdStopping {
+			break
+		}
+		if time.Now().After(deadline) {
+			close(inst.exit)
+			t.Fatal("设备从 adb 断开后，实例未进入 stopping")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	inst.code = 1
+	close(inst.exit)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("monitor 未在进程退出后结束")
+	}
+
+	snap, _ := l.Get(inst.info.ID)
+	if snap.State != domain.AvdStopped {
+		t.Fatalf("手动关闭后状态 = %s，期望 %s", snap.State, domain.AvdStopped)
+	}
+	if !strings.Contains(snap.LastError, "窗口") {
+		t.Fatalf("手动关闭原因不明确: %q", snap.LastError)
+	}
+}
+
+// TestNormalShutdownMessage 验证模拟器快照保存/优雅等待被识别为正常关闭。
+func TestNormalShutdownMessage(t *testing.T) {
+	cases := []struct {
+		name string
+		log  string
+		want string
+	}{
+		{"优雅等待", "Wait for emulator (pid 40184) 20 seconds to shutdown gracefully before kill", "窗口"},
+		{"保存快照", "Saving with gfxstream=1\nSaving snapshot 'default_boot' using 788 ms", "快照"},
+		{"崩溃日志", "bad color buffer handle 116\nunknown failure", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalShutdownMessage(tc.log)
+			if tc.want == "" {
+				if got != "" {
+					t.Fatalf("normalShutdownMessage(%q) = %q，期望空", tc.log, got)
+				}
+				return
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("normalShutdownMessage(%q) = %q，应包含 %q", tc.log, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestMonitorTreatsEmulatorShutdownAsStopped 验证即使 adb 尚未稳定断开，
+// 日志已经出现完整关闭流程时也归为 stopped，而不是误报硬件加速失败。
+func TestMonitorTreatsEmulatorShutdownAsStopped(t *testing.T) {
+	port, _ := freePortRange(t, 1)
+	client := &fakeADB{devices: []domain.AdbDevice{{Serial: adb.SerialForPort(port), State: "device"}}}
+	l := NewLauncher(platform.Tools{}, nil, nil, client, nil, logging.Nop())
+	inst := testInstance("Dev1", port)
+	inst.code = 1
+	inst.ring = []string{
+		"Checking: hasCompatibleHypervisor",
+		"Ok: Hypervisor compatibility to run avd",
+		"Saving with gfxstream=1",
+		"Saving snapshot 'default_boot' using 788 ms",
+		"pc_memory_init: above 4g size: 40000000",
+	}
+	registerInstance(l, inst)
+	close(inst.exit)
+
+	l.monitor(context.Background(), inst)
+
+	snap, _ := l.Get(inst.info.ID)
+	if snap.State != domain.AvdStopped {
+		t.Fatalf("快照保存关闭后的状态 = %s，期望 %s", snap.State, domain.AvdStopped)
+	}
+	if !strings.Contains(snap.LastError, "快照") {
+		t.Fatalf("快照保存关闭原因不明确: %q", snap.LastError)
 	}
 }
 

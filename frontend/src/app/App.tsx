@@ -59,15 +59,21 @@ export default function App() {
     return settingsRef.current?.showTaskDrawer ?? true;
   }, [loadSettings]);
 
-  useWailsEvent<JobInfo>(EVENTS.jobCreated, () => {
+  useWailsEvent<JobInfo>(EVENTS.jobCreated, (info) => {
+    // 启动模拟器属于用户主动操作，进度在设备卡片上有明确状态；
+    // 不要因为这个短任务自动展开底部日志面板。
+    if (info?.kind === "emulator-start") return;
     void shouldAutoExpand().then((open) => {
       if (open) setDrawerOpen(true);
     });
   });
-  useWailsEvent<{ status: string; error?: { message?: string } }>(EVENTS.jobFailed, (info) => {
-    void shouldAutoExpand().then((open) => {
-      if (open) setDrawerOpen(true);
-    });
+  useWailsEvent<JobInfo>(EVENTS.jobFailed, (info) => {
+    // 启动失败用 Toast 提示即可；用户没有主动要求查看日志时不要打断当前页面布局。
+    if (info?.kind !== "emulator-start") {
+      void shouldAutoExpand().then((open) => {
+        if (open) setDrawerOpen(true);
+      });
+    }
     push("danger", "任务失败", info?.error?.message);
   });
 
@@ -75,7 +81,7 @@ export default function App() {
   const autoExpandApplied = useRef(false);
   useEffect(() => {
     if (autoExpandApplied.current || !settings) return;
-    if (!jobs.some((j) => j.status === "running" || j.status === "queued")) return;
+    if (!jobs.some((j) => (j.status === "running" || j.status === "queued") && j.kind !== "emulator-start")) return;
     autoExpandApplied.current = true;
     if (settings.showTaskDrawer) setDrawerOpen(true);
   }, [settings, jobs]);

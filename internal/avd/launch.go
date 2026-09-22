@@ -33,18 +33,31 @@ const (
 	bootWaitTimeout                   = 5 * time.Minute
 	stopGraceTimeout                  = 30 * time.Second
 	killWaitTimeout                   = 15 * time.Second
+	runningProbeInterval              = 2 * time.Second
+	deviceLostGrace                   = 3 * time.Second
 	ringLimit                         = 200
 )
+
+// adbClient 是启动状态机所需的 adb 能力，便于测试替换。
+type adbClient interface {
+	WaitForDevice(ctx context.Context, serial string, timeout time.Duration) error
+	WaitForBoot(ctx context.Context, serial string, timeout time.Duration) error
+	Devices(ctx context.Context) ([]domain.AdbDevice, error)
+	EmuKill(ctx context.Context, serial string) error
+}
 
 // Launcher 管理模拟器实例：端口分配、启动、状态机与停止。
 type Launcher struct {
 	tools       platform.Tools
 	env         []string
 	store       *Store
-	adb         *adb.Client
+	adb         adbClient
 	log         logging.Interface
 	sink        func(event string, payload any)
 	first, last int // 端口范围，0 表示默认 5554-5680
+
+	runningProbe  time.Duration
+	deviceLostFor time.Duration
 
 	mu        sync.Mutex
 	instances map[string]*instance
@@ -60,15 +73,18 @@ type instance struct {
 
 	// stopRequested 表示用户已请求停止（受 Launcher.mu 保护）：之后的非 0 退出记为 stopped 而非 error。
 	stopRequested bool
+	// deviceLost 表示运行中已观测到设备从 adb 消失：通常来自手动关闭模拟器窗口。
+	deviceLost bool
 
 	ringMu sync.Mutex
 	ring   []string // 最近若干行原始输出，用于分析退出原因
 }
 
 // NewLauncher 创建启动器。log 为 nil 时使用空日志器。
-func NewLauncher(tools platform.Tools, env []string, store *Store, adbClient *adb.Client, sink func(string, any), log logging.Interface) *Launcher {
+func NewLauncher(tools platform.Tools, env []string, store *Store, adbClient adbClient, sink func(string, any), log logging.Interface) *Launcher {
 	return &Launcher{tools: tools, env: env, store: store, adb: adbClient, sink: sink, log: logging.Or(log),
-		instances: map[string]*instance{}, ports: map[int]bool{}}
+		instances: map[string]*instance{}, ports: map[int]bool{},
+		runningProbe: runningProbeInterval, deviceLostFor: deviceLostGrace}
 }
 
 // BuildArgs 组装 emulator 命令行参数（纯函数，便于测试与"查看等效命令"）。
@@ -205,6 +221,9 @@ func (l *Launcher) monitor(ctx context.Context, inst *instance) {
 		l.setState(inst, domain.AvdRunning, "")
 		l.log.Info("emulator", "%s（%s）已开机完成，耗时 %s", inst.info.AvdName, inst.info.Serial,
 			time.Since(started).Round(time.Second))
+		if l.adb != nil {
+			l.watchRunningDevice(waitCtx, inst)
+		}
 	case !processExited(inst.exit) && ctx.Err() == nil: // 进程仍在运行：等待失败或超时（应用退出导致的取消不算失败）
 		l.setState(inst, domain.AvdError, err.Error())
 	}
@@ -225,14 +244,96 @@ func (l *Launcher) monitor(ctx context.Context, inst *instance) {
 	reason := explainExit(logText, code)
 	l.mu.Lock()
 	requested := inst.stopRequested
+	deviceLost := inst.deviceLost
 	l.mu.Unlock()
 	if requested {
 		l.setState(inst, domain.AvdStopped, reason)
 		l.log.Info("emulator", "%s（%s）已按用户请求停止（退出码 %d）：%s", inst.info.AvdName, inst.info.Serial, code, reason)
 		return
 	}
+	if deviceLost {
+		const message = "模拟器窗口已关闭，或设备已从 adb 断开"
+		l.setState(inst, domain.AvdStopped, message)
+		l.log.Info("emulator", "%s（%s）已停止：%s（退出码 %d）", inst.info.AvdName, inst.info.Serial, message, code)
+		return
+	}
+	if message := normalShutdownMessage(logText); message != "" {
+		l.setState(inst, domain.AvdStopped, message)
+		l.log.Info("emulator", "%s（%s）已停止：%s（退出码 %d）", inst.info.AvdName, inst.info.Serial, message, code)
+		return
+	}
 	l.setState(inst, domain.AvdError, reason)
 	l.log.Error("emulator", "%s（%s）异常退出：%s", inst.info.AvdName, inst.info.Serial, reason)
+}
+
+// watchRunningDevice 在实例运行期间持续探测 adb 连接。
+//
+// Windows 上手动关闭模拟器窗口后，emulator.exe 可能还会等待约 20 秒让 QEMU 收尾，
+// 父进程因此保持存活。这里一旦观测到设备持续从 adb 消失，就先切到 stopping，
+// 避免界面继续显示 running；进程真正退出后再收敛为 stopped。
+func (l *Launcher) watchRunningDevice(ctx context.Context, inst *instance) {
+	interval := l.runningProbe
+	if interval <= 0 {
+		interval = runningProbeInterval
+	}
+	grace := l.deviceLostFor
+	if grace <= 0 {
+		grace = deviceLostGrace
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	var missingSince time.Time
+	stopping := false
+	for {
+		select {
+		case <-inst.exit:
+			return
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		l.mu.Lock()
+		requested := inst.stopRequested
+		l.mu.Unlock()
+		if requested {
+			return // 应用内停止流程会自行维护状态，避免短暂重连覆盖 stopping。
+		}
+
+		devices, err := l.adb.Devices(ctx)
+		if err != nil {
+			continue // adb 暂时不可用不等于设备已退出，避免误报。
+		}
+		present := false
+		for _, d := range devices {
+			if d.Serial == inst.info.Serial && d.State == "device" {
+				present = true
+				break
+			}
+		}
+		if present {
+			missingSince = time.Time{}
+			l.setDeviceLost(inst, false)
+			if stopping {
+				stopping = false
+				l.setState(inst, domain.AvdRunning, "")
+				l.log.Info("emulator", "%s 已重新连接 adb，恢复为运行中", inst.info.Serial)
+			}
+			continue
+		}
+
+		if missingSince.IsZero() {
+			missingSince = time.Now()
+			continue
+		}
+		if !stopping && time.Since(missingSince) >= grace {
+			stopping = true
+			l.setDeviceLost(inst, true)
+			l.setState(inst, domain.AvdStopping, "")
+			l.log.Info("emulator", "%s 已从 adb 断开，等待模拟器进程退出收尾", inst.info.Serial)
+		}
+	}
 }
 
 // capture 逐行读取模拟器输出：写应用日志（module=emulator）并保留最近输出用于退出分析。
@@ -341,6 +442,12 @@ func (l *Launcher) ByAvd(avdName string) (domain.EmulatorInstance, bool) {
 	return domain.EmulatorInstance{}, false
 }
 
+func (l *Launcher) setDeviceLost(inst *instance, lost bool) {
+	l.mu.Lock()
+	inst.deviceLost = lost
+	l.mu.Unlock()
+}
+
 func (l *Launcher) setState(inst *instance, state domain.AvdState, errMsg string) {
 	l.mu.Lock()
 	inst.info.State = state
@@ -389,11 +496,31 @@ func waitClosed(ch <-chan struct{}, timeout time.Duration) bool {
 	}
 }
 
+// normalShutdownMessage 识别模拟器自身的正常关闭流程。
+//
+// 手动关闭窗口、退出应用等场景可能返回非 0 退出码，日志却已经出现快照保存完成或优雅等待，
+// 这类退出不应再被归类为硬件加速等启动失败。
+func normalShutdownMessage(logText string) string {
+	lower := strings.ToLower(logText)
+	switch {
+	case strings.Contains(lower, "shutdown gracefully before kill"):
+		return "模拟器窗口已关闭"
+	case strings.Contains(lower, "saving with gfxstream") && strings.Contains(lower, "saving snapshot"):
+		return "模拟器已完成快照保存并关闭"
+	default:
+		return ""
+	}
+}
+
 // explainExit 按日志关键词把退出码翻译为可操作的中文说明（纯函数，便于测试）。
 func explainExit(logText string, code int) string {
 	lower := strings.ToLower(logText)
 	switch {
-	case strings.Contains(lower, "accel") || strings.Contains(lower, "hypervisor") || strings.Contains(lower, "whpx"):
+	case strings.Contains(lower, "requires hardware acceleration") ||
+		strings.Contains(lower, "hardware acceleration is not available") ||
+		strings.Contains(lower, "whpx is not installed") ||
+		strings.Contains(lower, "haxm is not installed") ||
+		strings.Contains(lower, "aehd is not installed"):
 		// 加速不可用的排查方式各平台完全不同，必须按宿主平台给建议。
 		return fmt.Sprintf("模拟器因硬件加速不可用而退出（退出码 %d）：%s", code, platform.AccelAdvice(runtime.GOOS))
 	case strings.Contains(lower, "permission") || strings.Contains(lower, "access is denied"):
