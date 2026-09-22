@@ -67,18 +67,18 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
             <span>软件自带 SDK 与模拟器环境</span>
           </div>
         </div>
-        <div className="pageheader__actions">
-          <button className="btn btn--secondary" disabled={env.loading} onClick={() => void env.reload()}>
-            {env.loading ? "检查中…" : "重新检查"}
-          </button>
-        </div>
       </div>
 
       <div className="pagecontent">
         <div className="settings-content">
         {/* ---------------------------------------------------------- 环境检查 */}
         <div className="section">
-          <div className="section__title">环境检查</div>
+          <div className="section__header">
+            <div className="section__title">环境检查</div>
+            <button className="btn btn--secondary" disabled={env.loading} onClick={() => void env.reload()}>
+              {env.loading ? "检查中…" : "重新检查"}
+            </button>
+          </div>
           <div className="card">
             {report ? (
               <>
@@ -285,7 +285,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
               <div className="field__label">主题</div>
               <div className="field__control">
                 <select
-                  className="input"
+                  className="select"
                   value={settings?.theme ?? "light"}
                   onChange={(e) => void patch({ theme: e.target.value })}
                 >
@@ -299,7 +299,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env }: Props) {
               <div className="field__label">日志级别</div>
               <div className="field__control">
                 <select
-                  className="input"
+                  className="select"
                   value={settings?.logLevel ?? "info"}
                   onChange={(e) => void patch({ logLevel: e.target.value })}
                 >

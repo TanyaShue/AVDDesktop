@@ -89,7 +89,7 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 
 	emulatorVersion := ""
 	if tools.HasEmulator() {
-		emulatorVersion = parseEmulatorVersion(sdk.ToolVersion(ctx, tools.Emulator, []string{"-version"}, env, emulatorProbe))
+		emulatorVersion = parseEmulatorVersion(sdk.ToolOutput(ctx, tools.Emulator, []string{"-version"}, env, emulatorProbe))
 	}
 	report.Components = append(report.Components, toolStatus(domain.ToolEmulator, "emulator", tools.HasEmulator(), emulatorVersion, tools.Emulator, &domain.ToolFix{
 		Kind:    domain.FixInstall,
@@ -371,13 +371,5 @@ func parseToolVersionLine(out string) string {
 			return strings.TrimSpace(fields[i+1])
 		}
 	}
-	return firstLineOrEmpty(out)
-}
-
-func firstLineOrEmpty(out string) string {
-	lines := platform.SplitLines(out)
-	if len(lines) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(lines[0])
+	return ""
 }

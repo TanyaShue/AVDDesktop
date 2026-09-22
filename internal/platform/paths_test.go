@@ -91,6 +91,9 @@ func TestChildEnvInjectsOwnSdk(t *testing.T) {
 	if got["ANDROID_AVD_HOME"] != avdHome {
 		t.Errorf("ANDROID_AVD_HOME 应为 AVD 目录本身，实际 %q", got["ANDROID_AVD_HOME"])
 	}
+	if got["ANDROID_EMU_ENABLE_CRASH_REPORTING"] != "0" {
+		t.Errorf("应禁用模拟器外部崩溃报告，实际 %q", got["ANDROID_EMU_ENABLE_CRASH_REPORTING"])
+	}
 	// PATH 必须把自带工具链放在前面，且保留原 PATH
 	path := got["PATH"]
 	if !strings.HasPrefix(path, filepath.Join(root, "platform-tools")) {

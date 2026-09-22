@@ -162,8 +162,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
               onChange={(e) => setQuery(e.target.value)}
             />
             <select
-              className="input"
-              style={{ width: 120, height: 36 }}
+              className="select select--compact"
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
               aria-label="排序方式"

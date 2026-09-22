@@ -471,8 +471,11 @@ func TestMonitorRequestedStopNonZeroExit(t *testing.T) {
 			if snap.State != tc.want {
 				t.Fatalf("退出码 1 后状态 = %s，期望 %s", snap.State, tc.want)
 			}
-			if snap.LastError == "" {
-				t.Error("应保留退出原因（LastError）")
+			if tc.stopRequested && snap.LastError != "" {
+				t.Errorf("用户请求停止不应保留异常原因: %q", snap.LastError)
+			}
+			if !tc.stopRequested && snap.LastError == "" {
+				t.Error("非请求退出应保留退出原因（LastError）")
 			}
 		})
 	}

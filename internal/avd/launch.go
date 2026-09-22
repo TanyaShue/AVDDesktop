@@ -247,19 +247,20 @@ func (l *Launcher) monitor(ctx context.Context, inst *instance) {
 	deviceLost := inst.deviceLost
 	l.mu.Unlock()
 	if requested {
-		l.setState(inst, domain.AvdStopped, reason)
-		l.log.Info("emulator", "%s（%s）已按用户请求停止（退出码 %d）：%s", inst.info.AvdName, inst.info.Serial, code, reason)
+		l.clearLastError(inst)
+		l.setState(inst, domain.AvdStopped, "")
+		l.log.Info("emulator", "%s（%s）已按用户请求停止", inst.info.AvdName, inst.info.Serial)
 		return
 	}
 	if deviceLost {
 		const message = "模拟器窗口已关闭，或设备已从 adb 断开"
 		l.setState(inst, domain.AvdStopped, message)
-		l.log.Info("emulator", "%s（%s）已停止：%s（退出码 %d）", inst.info.AvdName, inst.info.Serial, message, code)
+		l.log.Info("emulator", "%s（%s）已停止：%s", inst.info.AvdName, inst.info.Serial, message)
 		return
 	}
 	if message := normalShutdownMessage(logText); message != "" {
 		l.setState(inst, domain.AvdStopped, message)
-		l.log.Info("emulator", "%s（%s）已停止：%s（退出码 %d）", inst.info.AvdName, inst.info.Serial, message, code)
+		l.log.Info("emulator", "%s（%s）已停止：%s", inst.info.AvdName, inst.info.Serial, message)
 		return
 	}
 	l.setState(inst, domain.AvdError, reason)
@@ -440,6 +441,12 @@ func (l *Launcher) ByAvd(avdName string) (domain.EmulatorInstance, bool) {
 		}
 	}
 	return domain.EmulatorInstance{}, false
+}
+
+func (l *Launcher) clearLastError(inst *instance) {
+	l.mu.Lock()
+	inst.info.LastError = ""
+	l.mu.Unlock()
 }
 
 func (l *Launcher) setDeviceLost(inst *instance, lost bool) {

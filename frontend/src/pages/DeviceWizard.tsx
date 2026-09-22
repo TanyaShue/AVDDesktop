@@ -148,7 +148,7 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
         <div className="field__label">System Image</div>
         <div className="field__control">
           <select
-            className="input"
+            className="select"
             value={imagePath}
             onChange={(e) => setImagePath(e.target.value)}
             disabled={loadingImages || images.length === 0}
@@ -182,7 +182,7 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
       <div className="field">
         <div className="field__label">设备档案</div>
         <div className="field__control">
-          <select className="input" value={profileId} onChange={(e) => setProfileId(e.target.value)}>
+          <select className="select" value={profileId} onChange={(e) => setProfileId(e.target.value)}>
             {profiles.length === 0 ? <option value="">（由 avdmanager 决定）</option> : null}
             {profiles.map((p) => (
               <option key={p.id} value={p.id}>

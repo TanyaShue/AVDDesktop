@@ -119,6 +119,9 @@ func ChildEnv(t Tools, avdHome string) []string {
 	set("ANDROID_SDK_ROOT", t.SdkRoot)
 	// ANDROID_AVD_HOME 指向「包含 <name>.avd 与 <name>.ini 的目录」本身，而不是它的父目录。
 	set("ANDROID_AVD_HOME", avdHome)
+	// 应用负责捕获 emulator 输出并在界面中展示；关闭模拟器自带的外部崩溃报告窗口，
+	// 避免用户在我们的停止流程中看到误导性的 “Android Emulator closed unexpectedly”。
+	set("ANDROID_EMU_ENABLE_CRASH_REPORTING", "0")
 
 	paths := []string{t.PlatformTools, t.EmulatorDir, filepath.Join(t.CmdlineTools, "bin")}
 	if old := os.Getenv("PATH"); old != "" {

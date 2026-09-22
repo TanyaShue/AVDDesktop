@@ -310,10 +310,17 @@ func ImageDir(pkgPath string) (string, error) {
 	return filepath.Join(parts[0], parts[1], parts[2], parts[3]), nil
 }
 
-// ToolVersion 运行外部工具并返回版本文本（失败返回空串，不阻塞环境检查）。
+// ToolVersion 运行外部工具并返回首个非空输出行（失败返回空串，不阻塞环境检查）。
 //
 // 注意：`java -version` 把版本写到 stderr，因此这里用合并输出。
 func ToolVersion(ctx context.Context, exe string, args []string, env []string, timeout time.Duration) string {
+	return firstNonEmptyLine(ToolOutput(ctx, exe, args, env, timeout))
+}
+
+// ToolOutput 运行外部工具并返回完整的合并输出（失败返回空串）。
+//
+// 部分工具会在版本行之前输出 INFO/警告，调用方需要从全文里定位版本信息。
+func ToolOutput(ctx context.Context, exe string, args []string, env []string, timeout time.Duration) string {
 	if exe == "" {
 		return ""
 	}
@@ -321,7 +328,7 @@ func ToolVersion(ctx context.Context, exe string, args []string, env []string, t
 	if err != nil && res.ExitCode != 0 {
 		return ""
 	}
-	return firstNonEmptyLine(res.Combined())
+	return strings.TrimSpace(res.Combined())
 }
 
 // runSdkmanager 调用软件自带的 sdkmanager。
