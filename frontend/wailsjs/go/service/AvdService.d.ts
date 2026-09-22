@@ -6,6 +6,8 @@ export function Create(arg1:domain.AvdSpec):Promise<string>;
 
 export function Delete(arg1:string):Promise<string>;
 
+export function DeleteImage(arg1:string):Promise<string>;
+
 export function InstallImage(arg1:string):Promise<string>;
 
 export function List():Promise<Array<domain.AvdSummary>>;

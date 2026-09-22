@@ -1,20 +1,33 @@
 // 通用 UI 组件：弹窗、Toast 容器、状态徽标、进度条。
+import { useEffect } from "react";
 import type { ReactNode } from "react";
 import type { JobInfo, Toast } from "../bridge/types";
 
 export function Modal({
   title,
   size = "md",
+  className = "",
+  bodyClassName = "",
   onClose,
   children,
   footer,
 }: {
   title: string;
   size?: "sm" | "md" | "lg" | "xl";
+  /** 追加在 modal 根节点上的类名（用于需要固定高度、内部自行滚动的弹窗）。 */
+  className?: string;
+  /** 追加在 modal__body 上的类名（用于把滚动交给内部表格等元素）。 */
+  bodyClassName?: string;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
 }) {
+  // 弹窗打开期间锁住底层页面滚动：否则弹窗背后会多出一条滚动条。
+  useEffect(() => {
+    document.body.classList.add("modal-open");
+    return () => document.body.classList.remove("modal-open");
+  }, []);
+
   return (
     <div
       className="modal-mask"
@@ -23,7 +36,7 @@ export function Modal({
       }}
     >
       <div
-        className={`modal modal--${size}`}
+        className={`modal modal--${size}${className ? ` ${className}` : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -35,7 +48,7 @@ export function Modal({
             ✕
           </button>
         </div>
-        <div className="modal__body">{children}</div>
+        <div className={`modal__body${bodyClassName ? ` ${bodyClassName}` : ""}`}>{children}</div>
         {footer ? <div className="modal__foot">{footer}</div> : null}
       </div>
     </div>

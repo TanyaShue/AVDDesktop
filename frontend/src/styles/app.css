@@ -644,6 +644,11 @@ select {
 
 /* ---------------------------------------------------------------- 弹窗 */
 
+/* 弹窗打开期间冻结底层页面：否则弹窗右侧会同时出现页面滚动条。 */
+body.modal-open .pagecontent {
+  overflow: hidden;
+}
+
 .modal-mask {
   position: fixed;
   inset: 0;
@@ -703,6 +708,19 @@ select {
   padding: var(--sp-6);
   overflow: auto;
   min-height: 0;
+  flex: 1 1 auto;
+}
+
+/* 固定高度的弹窗：滚动交给内部元素（例如系统镜像表格），弹窗本身不出现滚动条。 */
+.modal--fill {
+  height: min(88vh, 820px);
+}
+
+.modal__body--fill {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: var(--sp-4) var(--sp-5);
 }
 
 .modal__foot {
@@ -1261,6 +1279,14 @@ select {
 }
 /* ------------------------------------------------------- 系统镜像弹窗 / 列表 */
 
+.image-modal {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
 .modal--sm {
   width: 440px;
 }
@@ -1288,24 +1314,56 @@ select {
 }
 
 .image-modal__table-scroll {
+  flex: 1 1 auto;
+  min-height: 180px;
   margin-top: 0;
-  max-height: min(62vh, 620px);
+  max-height: none;
+  overflow: auto;
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-lg);
 }
 
+/* 固定表格布局 + 百分比列宽：内容按单元格换行，不撑出横向滚动条。 */
 .table--image-picker {
-  min-width: 900px;
+  min-width: 0;
+  width: 100%;
+  table-layout: fixed;
+  /* sticky 表头要求表格自身不裁剪内容：滚动与圆角交给外层滚动容器。 */
+  overflow: visible;
+  border-radius: 0;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .table--image-picker th {
   vertical-align: top;
-  padding-top: 10px;
-  padding-bottom: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.table--image-picker td {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.table--image-picker .image-version {
+  font-size: 12px;
+}
+
+.table--image-picker .image-version .muted {
+  font-size: 11px;
+}
+
+.image-tag-cell {
+  color: var(--text-secondary);
+  word-break: break-word;
 }
 
 .table-filter {
-  min-width: 128px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1330,15 +1388,14 @@ select {
   font-size: 11px;
 }
 
-.image-action-head,
-.image-action-cell {
-  width: 176px;
-  min-width: 176px;
-  text-align: right;
+/* 动作列与其它列统一左对齐；.table th 自带 text-align:left，这里显式声明父级类保证一致。 */
+.table--image-picker .image-action-head,
+.table--image-picker .image-action-cell {
+  text-align: left;
 }
 
 .image-download {
-  min-width: 150px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -1346,12 +1403,121 @@ select {
 }
 
 .image-download > .btn {
-  align-self: flex-end;
+  align-self: flex-start;
 }
 
 .image-download__error {
   max-width: 160px;
-  text-align: right;
+  text-align: left;
+}
+
+/* 下载源：一排状态按钮，直接显示连接结果，点击即切换。 */
+.image-modal__sources {
+  /* 不参与压缩：否则窄窗口下会被表格挤掉，下载源按钮不可见。 */
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-lg);
+  background: var(--bg-subtle);
+}
+
+.image-modal__sources-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.image-modal__sources-title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.image-modal__sources-head .muted {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.image-modal__source-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  max-width: 100%;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.source-chip:hover:not(:disabled) {
+  border-color: var(--primary-border);
+}
+
+.source-chip--active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.source-chip:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.source-chip__name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-chip__meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.source-chip--active .source-chip__meta {
+  color: inherit;
+}
+
+.source-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: var(--r-full);
+  background: var(--neutral);
+}
+
+.source-dot--ok {
+  background: var(--success);
+}
+
+.source-dot--warn {
+  background: var(--warning);
+}
+
+.source-dot--bad {
+  background: var(--danger);
+}
+
+.image-modal__sources-warn {
+  font-size: 12px;
+  color: var(--warning);
 }
 
 .image-modal__foot {
@@ -1380,6 +1546,12 @@ select {
 .image-modal__state--error,
 .image-list-state--error {
   color: var(--danger);
+}
+
+.table--installed .image-delete-head,
+.table--installed .image-delete-cell {
+  width: 88px;
+  text-align: left;
 }
 
 .selected-image-tags {
@@ -1750,7 +1922,7 @@ select {
   }
 
   .table--environment,
-  .table--images {
+  .table--installed {
     min-width: 560px;
   }
 

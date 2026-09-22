@@ -58,6 +58,8 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
   误判为可用组件。设置页「修复环境 → 一键修复」会强制重装 cmdline-tools、platform-tools 与
   emulator，并保留 licenses、system-images 与 AVD。
 - JDK 不依赖 Android SDK 镜像，使用独立的 JDK 镜像选择；下载内容仍强制通过内置 SHA-256 校验。
+- 删除本机系统镜像同样交给 `sdkmanager --uninstall`（包路径同样转成斜杠形式，超时 10min），
+  并以目录是否真的消失为最终判据；仍被 AVD 引用的镜像（按 `config.ini` 的 `image.sysdir.1` 判定）会被拒绝删除。
 - 需要的组件：`platform-tools`（adb）、`emulator`，以及用户选择的 system image。
   许可通过向 `sdkmanager --licenses` 写入 `y` 行完成。
 
@@ -89,7 +91,7 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
 
 所有外部命令都必须带超时（`proc.Options.Timeout`），并随 `context` 支持取消：
 探测类 15–90s、列表/许可 60s–3min、创建 AVD 3min、JDK 安装 30min、SDK 自举 30min、
-安装组件 45min、启动等待 3–5min、终止 10–30s。下载由 `context` 控制超时。
+安装组件 45min、卸载组件 10min、启动等待 3–5min、终止 10–30s。下载由 `context` 控制超时。
 
 ## 测试
 

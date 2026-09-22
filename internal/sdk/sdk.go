@@ -42,6 +42,7 @@ const (
 	listTimeout      = 3 * time.Minute  // --list（需要访问官方仓库）
 	licenseTimeout   = 3 * time.Minute  // --licenses
 	installTimeout   = 45 * time.Minute // 下载安装组件（system image 约 1-2 GB）
+	uninstallTimeout = 10 * time.Minute // 删除本地组件（只操作本地目录，不下载）
 	licenseFeed      = 80               // 许可确认时预置的 "y" 行数
 	bootstrapTimeout = 30 * time.Minute // 自举整体上限（下载 + 解压）
 )
@@ -240,6 +241,71 @@ func RepairPackages(ctx context.Context, tools platform.Tools, env []string, pac
 	return installPackages(ctx, tools, env, packages, true, onLine)
 }
 
+// UninstallPackages 删除 SDK 目录里已安装的组件（当前只有系统镜像走这条链路）。
+//
+// 与安装一样把包路径转成斜杠形式，避免 Windows 批处理把分号当参数分隔符；
+// 最终判据是「组件目录是否真的消失」而不是退出码：官方脚本在遥测上传失败时
+// 可能返回非零退出码，也可能只删掉内容留下空目录，因此这里失败后还会再兜底清理一次。
+func UninstallPackages(ctx context.Context, tools platform.Tools, env []string, packages []string, onLine LineFunc) error {
+	cleaned := normalizePackagePaths(packages)
+	if len(cleaned) == 0 {
+		return domain.Err(domain.CodeInvalidArgument, "未指定要删除的 SDK 组件")
+	}
+
+	args := append([]string{"--verbose", "--sdk_root=" + tools.SdkRoot, "--uninstall"}, cliPackageArgs(cleaned)...)
+	res, runErr := runSdkmanager(ctx, tools, env, args, uninstallTimeout, onLine, yesLines(licenseFeed))
+	if remaining := remainingPackageDirs(tools, cleaned); len(remaining) > 0 {
+		// sdkmanager 可能只清理了内容：把残留目录一并删掉，避免残骸被本地扫描当成已安装包。
+		for _, dir := range remaining {
+			if err := os.RemoveAll(dir); err != nil {
+				return domain.Wrap(domain.CodePermissionDenied,
+					"无法删除系统镜像目录（可能被运行中的模拟器占用）", err).
+					WithHint("请先停止使用该镜像的模拟器，再重试")
+			}
+		}
+	}
+	if remaining := remainingPackageDirs(tools, cleaned); len(remaining) > 0 {
+		if runErr != nil {
+			return runErr
+		}
+		return domain.ErrDetail(domain.CodeProcessFailed,
+			"sdkmanager 未删除指定组件", strings.Join(remaining, "；"))
+	}
+	if runErr != nil && res.ExitCode != 0 && onLine != nil {
+		onLine("stderr", "sdkmanager 返回退出码 "+itoa(res.ExitCode)+
+			"，但目标组件已从本地删除；这通常是遥测或版本提示导致的非零退出，按成功处理")
+	}
+	return nil
+}
+
+// normalizePackagePaths 去掉空白与重复项（保持输入顺序）。
+func normalizePackagePaths(packages []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(packages))
+	for _, pkgPath := range packages {
+		pkgPath = strings.TrimSpace(pkgPath)
+		if pkgPath == "" || seen[pkgPath] {
+			continue
+		}
+		seen[pkgPath] = true
+		out = append(out, pkgPath)
+	}
+	return out
+}
+
+// remainingPackageDirs 返回仍然存在于磁盘上的组件目录。
+func remainingPackageDirs(tools platform.Tools, packages []string) []string {
+	var out []string
+	for _, pkgPath := range packages {
+		dir, err := PackageDirectory(tools, pkgPath)
+		if err != nil || !platform.DirExists(dir) {
+			continue
+		}
+		out = append(out, dir)
+	}
+	return out
+}
+
 func installPackages(ctx context.Context, tools platform.Tools, env []string, packages []string, force bool, onLine LineFunc) error {
 	staged, err := stagePackages(tools, packages, force)
 	if err != nil {
@@ -366,6 +432,12 @@ func itoa(n int) string {
 // InstallCommand 返回可复制执行的等价命令行（供界面展示）。
 func InstallCommand(tools platform.Tools, packages []string) string {
 	return tools.Sdkmanager + " --sdk_root=" + tools.SdkRoot + " " + strings.Join(cliPackageArgs(packages), " ")
+}
+
+// UninstallCommand 返回删除本地组件的等价命令行（供界面展示）。
+func UninstallCommand(tools platform.Tools, packages []string) string {
+	return tools.Sdkmanager + " --sdk_root=" + tools.SdkRoot + " --uninstall " +
+		strings.Join(cliPackageArgs(packages), " ")
 }
 
 // cliPackageArgs 把 sdkmanager 的 SDK 路径转换为 Android CLI 的斜杠形式。

@@ -32,8 +32,11 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
   const [imagePickerOpen, setImagePickerOpen] = useState(false);
   const [environmentSetupOpen, setEnvironmentSetupOpen] = useState(false);
   const [installJobs, setInstallJobs] = useState<Record<string, string>>({});
+  const [deleteJobs, setDeleteJobs] = useState<Record<string, string>>({});
   const [startingPath, setStartingPath] = useState("");
+  const [deletingPath, setDeletingPath] = useState("");
   const handledJobsRef = useRef(new Set<string>());
+  const handledDeleteJobsRef = useRef(new Set<string>());
 
   const load = useCallback(async () => {
     try {
@@ -113,6 +116,31 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
     void loadInstalledImages(false);
   }, [allImages, installJobs, jobs, loadInstalledImages]);
 
+  // 镜像删除任务完成后把条目移出本地列表，并同步弹窗中的安装状态。
+  useEffect(() => {
+    const removed = new Set<string>();
+    for (const [path, jobId] of Object.entries(deleteJobs)) {
+      if (handledDeleteJobsRef.current.has(jobId)) continue;
+      const job = jobs.find((item) => item.id === jobId);
+      if (!job || job.status === "queued" || job.status === "running") continue;
+      handledDeleteJobsRef.current.add(jobId);
+      setDeleteJobs((prev) => {
+        if (!(path in prev)) return prev;
+        const next = { ...prev };
+        delete next[path];
+        return next;
+      });
+      if (job.status !== "succeeded") continue;
+      removed.add(path);
+      onToast("success", "系统镜像已删除", path);
+    }
+    if (removed.size === 0) return;
+    setInstalledImages((prev) => prev.filter((img) => !removed.has(img.path)));
+    setAllImages((prev) =>
+      prev.map((img) => (removed.has(img.path) ? { ...img, installed: false } : img)),
+    );
+  }, [deleteJobs, jobs, onToast]);
+
   const patch = async (next: Partial<AppSettings>) => {
     try {
       const updated = (await api.Settings.Update(next)) as AppSettings;
@@ -147,6 +175,32 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
       throw err;
     }
   };
+
+  const deleteImage = async (image: SystemImage) => {
+    const label = `${androidVersionLabel(image)} · ${imageTagLabel(image.tag)} · ${image.abi || "未知架构"}`;
+    const confirmed = window.confirm(
+      `确认删除本机的系统镜像「${label}」？\n\n` +
+        "删除后如需再次使用必须重新下载（约 1-2 GB）。仍在被设备使用的镜像会被拒绝删除。",
+    );
+    if (!confirmed) return;
+    setDeletingPath(image.path);
+    try {
+      const id = await api.Avd.DeleteImage(image.path);
+      setDeleteJobs((prev) => ({ ...prev, [image.path]: id }));
+      onToast("info", "正在删除系统镜像", `任务 ${id}，进度已同步到底部任务区域`);
+    } catch (err) {
+      onToast("danger", "删除镜像失败", errorText(err));
+    } finally {
+      setDeletingPath("");
+    }
+  };
+
+  // 切换下载源后按新源重新加载列表，并刷新环境报告里的当前镜像源。
+  const handleSourceChanged = useCallback(async () => {
+    await loadAllImages();
+    onToast("info", "已切换下载源", "系统镜像列表已按新的下载源重新加载。");
+    void env.reload();
+  }, [env, loadAllImages, onToast]);
 
   const downloadImage = async (image: SystemImage) => {
     setStartingPath(image.path);
@@ -337,7 +391,8 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
             <div>
               <div className="section__title">系统镜像</div>
               <div className="muted">
-                默认展示已安装镜像。点击「查看全部镜像」可按版本、架构与 Root 支持筛选并下载。
+                默认展示已安装镜像，可直接删除释放磁盘空间；点击「查看全部镜像」可切换下载源，
+                并按版本、架构与 Root 支持筛选下载。
               </div>
             </div>
             <button className="btn btn--secondary" disabled={loadingAll} onClick={openImagePicker}>
@@ -359,7 +414,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
               </div>
             ) : installedImages.length > 0 ? (
               <div className="table-scroll">
-                <table className="table table--images">
+                <table className="table table--images table--installed">
                   <thead>
                     <tr>
                       <th>Android 版本</th>
@@ -367,6 +422,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
                       <th>架构</th>
                       <th>是否支持 Root</th>
                       <th>状态</th>
+                      <th className="image-delete-head">操作</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -387,6 +443,20 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
                         </td>
                         <td>
                           <span className="chip chip--sm chip--success">已安装</span>
+                        </td>
+                        <td className="image-delete-cell">
+                          <button
+                            className="btn btn--danger-ghost btn--sm"
+                            disabled={deletingPath === img.path || Boolean(deleteJobs[img.path])}
+                            title="删除本机已安装的镜像"
+                            onClick={() => void deleteImage(img)}
+                          >
+                            {deletingPath === img.path || deleteJobs[img.path] ? (
+                              <span className="spinner" />
+                            ) : (
+                              "删除"
+                            )}
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -499,10 +569,11 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
           installJobs={installJobs}
           jobs={jobs}
           busyPath={startingPath}
-          sourceName={report?.mirrorSourceName}
+          activeSourceId={report?.mirrorSourceId || settings?.mirrorSourceId || ""}
           onClose={() => setImagePickerOpen(false)}
           onReload={() => void loadAllImages()}
           onDownload={downloadImage}
+          onSourceChanged={handleSourceChanged}
         />
       ) : null}
 

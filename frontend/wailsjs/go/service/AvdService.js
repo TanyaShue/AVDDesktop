@@ -10,6 +10,10 @@ export function Delete(arg1) {
   return window['go']['service']['AvdService']['Delete'](arg1);
 }
 
+export function DeleteImage(arg1) {
+  return window['go']['service']['AvdService']['DeleteImage'](arg1);
+}
+
 export function InstallImage(arg1) {
   return window['go']['service']['AvdService']['InstallImage'](arg1);
 }

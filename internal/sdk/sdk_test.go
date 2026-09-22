@@ -1,8 +1,12 @@
 package sdk
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"AVDDesktop/internal/platform"
 )
 
 // 样本取自本机 `sdkmanager --list_installed` / `--list` 的真实输出（仅保留结构）。
@@ -185,3 +189,56 @@ func indexOf(s, sub string) int {
 }
 
 func contains(s, sub string) bool { return indexOf(s, sub) >= 0 }
+
+func TestUninstallCommandUsesSlashPaths(t *testing.T) {
+	tools := platform.NewTools(filepath.Join("C:", "sdk"))
+	got := UninstallCommand(tools, []string{"system-images;android-36;google_apis;x86_64"})
+	if !strings.Contains(got, "--uninstall") {
+		t.Fatalf("命令行缺少 --uninstall: %q", got)
+	}
+	if !strings.Contains(got, "system-images/android-36/google_apis/x86_64") {
+		t.Fatalf("命令行未使用斜杠形式的包路径: %q", got)
+	}
+	if strings.Contains(got, ";") {
+		t.Fatalf("命令行仍包含分号（Windows 批处理会拆参数）: %q", got)
+	}
+}
+
+func TestNormalizePackagePaths(t *testing.T) {
+	got := normalizePackagePaths([]string{
+		" system-images;android-36;google_apis;x86_64 ",
+		"",
+		"system-images;android-36;google_apis;x86_64",
+		"platform-tools",
+	})
+	want := []string{"system-images;android-36;google_apis;x86_64", "platform-tools"}
+	if len(got) != len(want) {
+		t.Fatalf("去重后数量 = %d，期望 %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("包路径[%d] = %q，期望 %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestRemainingPackageDirs(t *testing.T) {
+	sdkRoot := t.TempDir()
+	tools := platform.NewTools(sdkRoot)
+	pkgPath := "system-images;android-36;google_apis;x86_64"
+	rel, err := ImageDir(pkgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(sdkRoot, rel)
+	if remaining := remainingPackageDirs(tools, []string{pkgPath}); len(remaining) != 0 {
+		t.Fatalf("镜像尚未安装时不应报告残留目录: %#v", remaining)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	remaining := remainingPackageDirs(tools, []string{pkgPath, "not-a-package;path"})
+	if len(remaining) != 1 || remaining[0] != dir {
+		t.Fatalf("残留目录检测错误: %#v（期望 %q）", remaining, dir)
+	}
+}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 
 	"AVDDesktop/internal/avd"
@@ -186,4 +187,86 @@ func (s *AvdService) InstallImage(pkgPath string) (string, error) {
 		return nil
 	})
 	return j.ID(), nil
+}
+
+// DeleteImage 删除本机已安装的系统镜像，返回 jobID。
+//
+// 只删除软件自带 SDK 目录里的镜像，不联网；仍在被 AVD 引用的镜像会被拒绝，
+// 因为设备配置里记录的是镜像目录，删掉后设备会直接损坏。
+func (s *AvdService) DeleteImage(pkgPath string) (string, error) {
+	pkgPath = strings.TrimSpace(pkgPath)
+	if _, _, _, err := sdk.SplitImage(pkgPath); err != nil {
+		return "", err
+	}
+	comp := s.rt.Components()
+	if err := sdk.VerifyPackage(comp.Tools, pkgPath); err != nil {
+		return "", domain.ErrDetail(domain.CodePathNotFound,
+			"本机没有安装该系统镜像", pkgPath+"："+err.Error()).
+			WithHint("列表里只有已安装的镜像才能删除，请先重新加载列表")
+	}
+	if users := devicesUsingImage(comp.Store, pkgPath); len(users) > 0 {
+		return "", domain.ErrDetail(domain.CodeFileInUse,
+			"仍有设备在使用该系统镜像", strings.Join(users, "、")).
+			WithHint("请先删除这些设备，或把它们改用其它系统镜像")
+	}
+
+	unlock, ok := s.rt.locks.TryLock("sdk:" + comp.Tools.SdkRoot)
+	if !ok {
+		return "", domain.Err(domain.CodeJobBusy, "已有 SDK 安装或删除任务正在进行").
+			WithHint("请等待当前任务完成，或在底部任务区域取消它")
+	}
+
+	j := s.rt.jobs.Start(s.rt.Context(), job.Spec{
+		Kind:     domain.JobImageDelete,
+		Title:    "删除系统镜像 " + pkgPath,
+		Subtitle: sdk.UninstallCommand(comp.Tools, []string{pkgPath}),
+	}, func(ctx context.Context, j *job.Job) error {
+		defer unlock()
+
+		j.SetPhase("正在删除本地镜像")
+		if err := sdk.UninstallPackages(ctx, comp.Tools, comp.Env, []string{pkgPath}, jobLine(j, "sdkmanager")); err != nil {
+			return err
+		}
+		j.Logf("info", "sdkmanager", "系统镜像已删除：%s", pkgPath)
+		s.rt.Emit("env:changed", nil)
+		return nil
+	})
+	return j.ID(), nil
+}
+
+// devicesUsingImage 返回仍在引用该系统镜像的设备名。
+//
+// 判据优先用 config.ini 的 image.sysdir.1（模拟器启动时实际读取的目录），
+// 配置缺失时退化为 API / tag / ABI 三元组匹配。
+func devicesUsingImage(store *avd.Store, pkgPath string) []string {
+	api, tag, abi, err := sdk.SplitImage(pkgPath)
+	if err != nil {
+		return nil
+	}
+	rel, err := sdk.ImageDir(pkgPath)
+	if err != nil {
+		return nil
+	}
+	want := strings.Trim(strings.ToLower(filepath.ToSlash(rel)), "/")
+
+	summaries, err := store.List()
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, sum := range summaries {
+		if config, cfgErr := store.ReadConfig(sum.Name); cfgErr == nil {
+			sysdir := strings.Trim(strings.ToLower(filepath.ToSlash(config["image.sysdir.1"])), "/")
+			if sysdir != "" {
+				if sysdir == want {
+					names = append(names, sum.Name)
+				}
+				continue
+			}
+		}
+		if sum.API == api && sum.Tag == tag && sum.ABI == abi {
+			names = append(names, sum.Name)
+		}
+	}
+	return names
 }

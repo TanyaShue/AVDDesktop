@@ -296,6 +296,7 @@ const (
 	JobBootstrap     JobKind = "bootstrap"
 	JobAvdCreate     JobKind = "avd-create"
 	JobAvdDelete     JobKind = "avd-delete"
+	JobImageDelete   JobKind = "image-delete"
 	JobEmulatorStart JobKind = "emulator-start"
 )
 
