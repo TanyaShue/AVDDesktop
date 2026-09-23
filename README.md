@@ -78,3 +78,7 @@ go test -tags e2e -count=1 -timeout 300m ./internal/e2e/ -v
 ## 文档
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：模块划分、数据流、JDK / SDK / AVD / emulator 的关键约束与超时策略。
+
+## 许可证
+
+本项目基于 [MIT License](LICENSE) 开源。
