@@ -156,13 +156,10 @@ func activeJDKSource(rt *Runtime) domain.MirrorSource {
 	return jdk.ResolveSource(rt.settings.Get().JDKMirrorSourceID)
 }
 
-func mirrorEnv(rt *Runtime, sourceID string) (domain.MirrorSource, []string) {
+// mirrorEnv 返回当前生效的 Android SDK 镜像，以及把仓库根地址指向该镜像的子进程环境。
+// 镜像源只能由 MirrorService 保存，这里不再接受调用方传入的源 ID（避免准备/安装路径偷偷改设置）。
+func mirrorEnv(rt *Runtime) (domain.MirrorSource, []string) {
 	source := activeMirrorSource(rt)
-	if strings.TrimSpace(sourceID) != "" {
-		if selected, ok := mirror.Find(sourceID); ok {
-			source = selected
-		}
-	}
 	return source, sdk.WithBaseURL(rt.Components().Env, source.BaseURL)
 }
 

@@ -1227,6 +1227,11 @@ body.modal-open .pagecontent {
   font-size: 13px;
 }
 
+/* 在 .muted 之后定义，保证同时使用时错误色生效（两者优先级相同）。 */
+.muted--danger {
+  color: var(--danger);
+}
+
 .spinner {
   width: 14px;
   height: 14px;
@@ -1411,9 +1416,9 @@ body.modal-open .pagecontent {
   text-align: left;
 }
 
-/* 下载源：一排状态按钮，直接显示连接结果，点击即切换。 */
+/* 下载源：只读显示当前生效的 SDK 镜像源；检测与切换在设置页的「下载镜像源」中完成。 */
 .image-modal__sources {
-  /* 不参与压缩：否则窄窗口下会被表格挤掉，下载源按钮不可见。 */
+  /* 不参与压缩：否则窄窗口下会被表格挤掉，下载源信息不可见。 */
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
@@ -1441,83 +1446,6 @@ body.modal-open .pagecontent {
   flex: 1 1 auto;
   min-width: 0;
   font-size: 12px;
-}
-
-.image-modal__source-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-}
-
-.source-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  max-width: 100%;
-  padding: 0 9px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-full);
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  font-size: 12px;
-  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
-}
-
-.source-chip:hover:not(:disabled) {
-  border-color: var(--primary-border);
-}
-
-.source-chip--active {
-  border-color: var(--primary);
-  background: var(--primary-soft);
-  color: var(--primary);
-  font-weight: 600;
-}
-
-.source-chip:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.source-chip__name {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.source-chip__meta {
-  font-size: 11px;
-  color: var(--text-tertiary);
-}
-
-.source-chip--active .source-chip__meta {
-  color: inherit;
-}
-
-.source-dot {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  border-radius: var(--r-full);
-  background: var(--neutral);
-}
-
-.source-dot--ok {
-  background: var(--success);
-}
-
-.source-dot--warn {
-  background: var(--warning);
-}
-
-.source-dot--bad {
-  background: var(--danger);
-}
-
-.image-modal__sources-warn {
-  font-size: 12px;
-  color: var(--warning);
 }
 
 .image-modal__foot {
@@ -1570,7 +1498,63 @@ body.modal-open .pagecontent {
   margin-bottom: 4px;
 }
 
-/* ------------------------------------------------------- 环境准备 / 镜像检测弹窗 */
+/* --------------------------------------------- 镜像源设置（设置页 + 两个弹窗） */
+
+/* 只读摘要：设置页「下载镜像源」/ 环境准备弹窗都用它展示当前生效的源。 */
+.mirror-summary,
+.env-setup__sources {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-3);
+}
+
+.env-setup__sources {
+  margin-top: var(--sp-4);
+}
+
+.mirror-summary__item {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-lg);
+  background: var(--bg-subtle);
+}
+
+.mirror-summary__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mirror-summary__title {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.mirror-summary__name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.mirror-summary__url {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* 弹窗底部：左侧说明 + 右侧按钮。 */
+.modal__foot-bar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+/* ------------------------------------------------------- 环境准备 / 镜像源弹窗 */
 
 .mirror-modal {
   min-width: 0;
@@ -1634,6 +1618,17 @@ body.modal-open .pagecontent {
   border-radius: var(--r-md);
   background: var(--danger-soft);
   color: var(--danger);
+  font-size: 13px;
+}
+
+/* 弹窗底部的不可保存提示：所选镜像不可用时给出原因。 */
+.mirror-modal__hint {
+  margin-top: var(--sp-3);
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  border-radius: var(--r-md);
+  background: var(--warning-soft);
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
@@ -1841,7 +1836,8 @@ body.modal-open .pagecontent {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .mirror-modal__foot {
+  .mirror-modal__foot,
+  .modal__foot-bar {
     align-items: flex-start;
     flex-direction: column;
   }

@@ -1,10 +1,12 @@
-// 设置页：环境检查（唯一入口）+ 基础偏好。
+// 设置页：环境检查（唯一入口）+ 下载镜像源（检测/设置独立一项）+ 系统镜像 + 基础偏好。
 import { useCallback, useEffect, useState } from "react";
 import * as api from "../bridge/api";
 import { errorText } from "../bridge/api";
-import type { AppSettings, JobInfo, ResolvedPaths, SystemImage } from "../bridge/types";
+import type { AppSettings, JobInfo, MirrorSource, ResolvedPaths, SystemImage } from "../bridge/types";
 import type { EnvCheck } from "../hooks/useEnvCheck";
 import { EnvironmentSetupModal } from "../components/EnvironmentSetupModal";
+import { MirrorSourceModal } from "../components/MirrorSourceModal";
+import type { MirrorSourceSelection } from "../components/MirrorSourceModal";
 import {
   androidVersionLabel,
   imageRootSupported,
@@ -44,6 +46,9 @@ function hasPendingImageJob(jobs: JobInfo[], path: string, prefix: string): bool
 export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [paths, setPaths] = useState<ResolvedPaths | null>(null);
+  // 当前生效的镜像源：设置页只读展示，检测与更换在 MirrorSourceModal 中完成。
+  const [sdkSource, setSdkSource] = useState<MirrorSource | null>(null);
+  const [jdkSource, setJdkSource] = useState<MirrorSource | null>(null);
   const [installedImages, setInstalledImages] = useState<SystemImage[]>([]);
   const [allImages, setAllImages] = useState<SystemImage[]>([]);
   const [loadingInstalled, setLoadingInstalled] = useState(false);
@@ -52,6 +57,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
   const [allImagesError, setAllImagesError] = useState("");
   const [imagePickerOpen, setImagePickerOpen] = useState(false);
   const [environmentSetupOpen, setEnvironmentSetupOpen] = useState(false);
+  const [mirrorSettingsOpen, setMirrorSettingsOpen] = useState(false);
   const [installJobs, setInstallJobs] = useState<Record<string, string>>({});
   const [deleteJobs, setDeleteJobs] = useState<Record<string, string>>({});
   const [startingPath, setStartingPath] = useState("");
@@ -59,8 +65,16 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
 
   const load = useCallback(async () => {
     try {
-      setSettings((await api.Settings.Get()) as AppSettings);
-      setPaths((await api.Env.Resolved()) as ResolvedPaths);
+      const [nextSettings, nextPaths, sdkSources, jdkSources] = await Promise.all([
+        api.Settings.Get() as Promise<AppSettings>,
+        api.Env.Resolved() as Promise<ResolvedPaths>,
+        api.Mirror.ListSources() as Promise<MirrorSource[]>,
+        api.Mirror.ListJDKSources() as Promise<MirrorSource[]>,
+      ]);
+      setSettings(nextSettings);
+      setPaths(nextPaths);
+      setSdkSource(activeSource(sdkSources));
+      setJdkSource(activeSource(jdkSources));
     } catch (err) {
       onToast("danger", "读取设置失败", errorText(err));
     }
@@ -179,9 +193,10 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
     if (allImages.length === 0 && !loadingAll) void loadAllImages();
   };
 
-  const startEnvironmentSetup = async (sourceId: string, jdkSourceId: string) => {
+  const startEnvironmentSetup = async () => {
     try {
-      await api.Env.PrepareFromSources(sourceId, jdkSourceId);
+      // 镜像源已在「下载镜像源」中保存，这里直接用当前生效的源准备环境。
+      await api.Env.Prepare();
       onToast("info", "已开始准备环境", "SDK / JDK 下载与补装进度已同步到底部任务区域。");
     } catch (err) {
       onToast("danger", "准备环境失败", errorText(err));
@@ -189,9 +204,9 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
     }
   };
 
-  const repairEnvironment = async (sourceId: string, jdkSourceId: string) => {
+  const repairEnvironment = async () => {
     try {
-      await api.Env.RepairFromSources(sourceId, jdkSourceId);
+      await api.Env.Repair();
       onToast("warning", "已开始修复环境", "将重装核心 SDK 工具链，并在缺失时补装 JDK，进度已同步到底部任务区域。");
     } catch (err) {
       onToast("danger", "修复环境失败", errorText(err));
@@ -218,12 +233,23 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
     }
   };
 
-  // 切换下载源后按新源重新加载列表，并刷新环境报告里的当前镜像源。
-  const handleSourceChanged = useCallback(async () => {
-    await loadAllImages();
-    onToast("info", "已切换下载源", "系统镜像列表已按新的下载源重新加载。");
-    void env.reload();
-  }, [env, loadAllImages, onToast]);
+  // 保存镜像源后：刷新当前源展示；SDK 源变化时按新源重建镜像列表（列表来自所选仓库），
+  // 并重新检查环境报告里的当前镜像源。两侧都没改动时不重复跑一次完整的联网环境检查。
+  const handleMirrorApplied = useCallback(
+    async (next: MirrorSourceSelection) => {
+      const sdkChanged = Boolean(next.sourceId) && next.sourceId !== sdkSource?.id;
+      const jdkChanged = Boolean(next.jdkSourceId) && next.jdkSourceId !== jdkSource?.id;
+      await load();
+      if (sdkChanged) await loadAllImages();
+      if (sdkChanged || jdkChanged) void env.reload();
+      onToast(
+        sdkChanged || jdkChanged ? "success" : "info",
+        sdkChanged || jdkChanged ? "镜像源已更新" : "镜像源未变化",
+        `SDK：${next.sourceName || next.sourceId}　JDK：${next.jdkSourceName || next.jdkSourceId}`,
+      );
+    },
+    [env, jdkSource?.id, load, loadAllImages, onToast, sdkSource?.id],
+  );
 
   const downloadImage = async (image: SystemImage) => {
     setStartingPath(image.path);
@@ -263,11 +289,9 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
           <div className="section__header">
             <div className="section__title">环境检查</div>
             <div className="row row--wrap">
+              {/* 「准备 / 补装」与「一键修复」都在同一个弹窗里选择，这里只保留一个入口。 */}
               <button className="btn btn--secondary" onClick={() => setEnvironmentSetupOpen(true)}>
-                修复环境
-              </button>
-              <button className="btn btn--secondary" onClick={() => setEnvironmentSetupOpen(true)}>
-                下载 / 补充环境
+                准备 / 修复环境
               </button>
               <button className="btn btn--secondary" disabled={env.loading} onClick={() => void env.reload()}>
                 {env.loading ? "检查中…" : "重新检查"}
@@ -335,15 +359,6 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
                     可用空间：<span className="nums">{report.disk.freeGB}</span> GB
                     {report.disk.sufficient ? "" : "（不足）"}
                   </span>
-                  <span className="muted">
-                    SDK 镜像：<span>{report.mirrorSourceName || "Google 中国下载"}</span>
-                  </span>
-                  <span className="muted">
-                    JDK 镜像：<span>{report.jdkMirrorSourceName || "南京大学 NJU"}</span>
-                  </span>
-                  <button className="btn btn--ghost btn--sm" onClick={() => setEnvironmentSetupOpen(true)}>
-                    检测 / 更换
-                  </button>
                   {report.accel ? (
                     <span className="muted">
                       硬件加速：<span className="nums">{report.accel.available ? "可用" : "不可用"}</span>
@@ -357,11 +372,11 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
                     <div className="banner__body">
                       <div className="banner__title">需要初始化软件自带环境</div>
                       <div className="banner__text">
-                        将按所选 JDK 镜像下载 Eclipse Temurin 21（约 200 MB，缺失或版本过低时）与官方命令行工具（约 150 MB），并安装 platform-tools 与 emulator。所有 JDK 下载都会校验 SHA-256，进度显示在底部任务区域。
+                        将按当前 JDK 镜像下载 Eclipse Temurin 21（约 200 MB，缺失或版本过低时）与官方命令行工具（约 150 MB），并安装 platform-tools 与 emulator。所有 JDK 下载都会校验 SHA-256，进度显示在底部任务区域。
                       </div>
                     </div>
                     <button className="btn btn--primary" onClick={() => setEnvironmentSetupOpen(true)}>
-                      选择镜像并准备
+                      立即准备
                     </button>
                   </div>
                 ) : null}
@@ -408,14 +423,44 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
           </div>
         </div>
 
+        {/* ---------------------------------------------------------- 下载镜像源 */}
+        <div className="section">
+          <div className="section__header section__header--start">
+            <div>
+              <div className="section__title">下载镜像源</div>
+              <div className="muted">
+                Android SDK 与 JDK 分别使用独立的下载镜像；连接、延迟、采样速度与资源完整性
+                都在弹窗内检测，检测结果直接用来选择并保存镜像源。
+              </div>
+            </div>
+            <button className="btn btn--secondary" onClick={() => setMirrorSettingsOpen(true)}>
+              检测 / 更换镜像源
+            </button>
+          </div>
+          <div className="card">
+            <div className="mirror-summary">
+              <MirrorSummary
+                title="Android SDK 镜像源"
+                description="命令行工具、platform-tools、emulator 与系统镜像"
+                source={sdkSource}
+              />
+              <MirrorSummary
+                title="JDK 镜像源"
+                description="Eclipse Temurin 21（下载后强制校验 SHA-256）"
+                source={jdkSource}
+              />
+            </div>
+          </div>
+        </div>
+
         {/* ---------------------------------------------------------- 系统镜像 */}
         <div className="section">
           <div className="section__header section__header--start">
             <div>
               <div className="section__title">系统镜像</div>
               <div className="muted">
-                默认展示已安装镜像，可直接删除释放磁盘空间；点击「查看全部镜像」可切换下载源，
-                并按版本、架构与 Root 支持筛选下载。
+                默认展示已安装镜像，可直接删除释放磁盘空间；点击「查看全部镜像」
+                可按版本、架构与 Root 支持筛选下载，下载使用「下载镜像源」中的 SDK 镜像。
               </div>
             </div>
             <button className="btn btn--secondary" disabled={loadingAll} onClick={openImagePicker}>
@@ -588,24 +633,71 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
           installJobs={installJobs}
           jobs={jobs}
           busyPath={startingPath}
-          activeSourceId={report?.mirrorSourceId || settings?.mirrorSourceId || ""}
+          activeSourceName={sdkSource?.name || report?.mirrorSourceName || ""}
           onClose={() => setImagePickerOpen(false)}
           onReload={() => void loadAllImages()}
           onDownload={downloadImage}
-          onSourceChanged={handleSourceChanged}
         />
       ) : null}
 
       {environmentSetupOpen ? (
         <EnvironmentSetupModal
-          currentSourceId={report?.mirrorSourceId || settings?.mirrorSourceId || ""}
-          currentJdkSourceId={report?.jdkMirrorSourceId || settings?.jdkMirrorSourceId || ""}
           jdkReady={jdkReady}
           onClose={() => setEnvironmentSetupOpen(false)}
           onStart={startEnvironmentSetup}
           onRepair={repairEnvironment}
+          onOpenMirrorSettings={() => {
+            setEnvironmentSetupOpen(false);
+            setMirrorSettingsOpen(true);
+          }}
         />
       ) : null}
+
+      {mirrorSettingsOpen ? (
+        <MirrorSourceModal
+          currentSourceId={sdkSource?.id || report?.mirrorSourceId || settings?.mirrorSourceId || ""}
+          currentJdkSourceId={
+            jdkSource?.id || report?.jdkMirrorSourceId || settings?.jdkMirrorSourceId || ""
+          }
+          onClose={() => setMirrorSettingsOpen(false)}
+          onApplied={handleMirrorApplied}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** 从 ListSources 结果中取当前生效的源。 */
+function activeSource(sources: readonly MirrorSource[] | null | undefined): MirrorSource | null {
+  const list = api.asArray(sources);
+  return list.find((item) => item.active) ?? list[0] ?? null;
+}
+
+/** 镜像源摘要：设置页只读展示当前生效的 SDK / JDK 镜像源；检测与更换统一在弹窗中完成。 */
+function MirrorSummary({
+  title,
+  description,
+  source,
+}: {
+  title: string;
+  description: string;
+  source: MirrorSource | null;
+}) {
+  return (
+    <div className="mirror-summary__item">
+      <div className="mirror-summary__head">
+        <span className="mirror-summary__title">{title}</span>
+        {source?.region ? <span className="chip chip--sm">{source.region}</span> : null}
+        {source ? <span className="chip chip--sm chip--info">当前</span> : null}
+      </div>
+      <div className="mirror-summary__name">{source?.name ?? "正在读取…"}</div>
+      <div className="mirror-summary__url mono truncate" title={source?.baseURL}>
+        {source?.baseURL ?? ""}
+      </div>
+      <div className="muted" style={{ fontSize: 12 }}>
+        {description}
+        {source?.note ? ` · ${source.note}` : ""}
+      </div>
     </div>
   );
 }

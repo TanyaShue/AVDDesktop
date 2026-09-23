@@ -1,13 +1,11 @@
 // 系统镜像选择 / 下载弹窗。
 //
 // 新建设备与设置页共用同一张表：表头内置筛选，右下角根据 mode 显示「选择」或「下载」。
-// 「下载」模式额外提供镜像源切换：每个源的连接状态直接标在按钮上，切换后会按该源重新加载列表。
-import { useCallback, useEffect, useMemo, useState } from "react";
+// 镜像源的检测与更换统一在设置页的「下载镜像源」中完成，这里只显示当前生效的下载源。
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import * as api from "../bridge/api";
-import { errorText } from "../bridge/api";
-import type { JobInfo, MirrorCheck, SystemImage } from "../bridge/types";
-import { formatMs, humanSize, jobStatusText, Modal, Progress } from "./ui";
+import type { JobInfo, SystemImage } from "../bridge/types";
+import { humanSize, jobStatusText, Modal, Progress } from "./ui";
 
 interface Props {
   mode: "select" | "download";
@@ -18,14 +16,12 @@ interface Props {
   installJobs?: Record<string, string>;
   jobs?: JobInfo[];
   busyPath?: string;
-  /** 当前生效的 SDK 镜像源 ID（下载模式用来标记「当前」）。 */
-  activeSourceId?: string;
+  /** 当前生效的 SDK 镜像源名称（下载模式只读展示）。 */
+  activeSourceName?: string;
   onClose: () => void;
   onSelect?: (image: SystemImage) => void;
   onDownload?: (image: SystemImage) => void | Promise<void>;
   onReload?: () => void;
-  /** 切换镜像源成功后回调（父级据此重新加载镜像列表）。 */
-  onSourceChanged?: (sourceId: string) => void | Promise<void>;
 }
 
 export function SystemImageModal({
@@ -37,70 +33,17 @@ export function SystemImageModal({
   installJobs = {},
   jobs = [],
   busyPath = "",
-  activeSourceId = "",
+  activeSourceName = "",
   onClose,
   onSelect,
   onDownload,
   onReload,
-  onSourceChanged,
 }: Props) {
   const [query, setQuery] = useState("");
   const [apiFilter, setApiFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [abiFilter, setAbiFilter] = useState("");
   const [rootFilter, setRootFilter] = useState("");
-
-  // 下载源：进入弹窗时并发检测一次连接、延迟与资源完整性，之后可随时重新检测或切换。
-  const [sources, setSources] = useState<MirrorCheck[]>([]);
-  const [sourceId, setSourceId] = useState(activeSourceId);
-  const [checking, setChecking] = useState(false);
-  const [switching, setSwitching] = useState("");
-  const [sourceError, setSourceError] = useState("");
-
-  useEffect(() => {
-    setSourceId(activeSourceId);
-  }, [activeSourceId]);
-
-  const checkSources = useCallback(async () => {
-    setChecking(true);
-    setSourceError("");
-    try {
-      const list = api.asArray((await api.Mirror.CheckAll()) as MirrorCheck[]);
-      setSources(list);
-    } catch (err) {
-      setSourceError(errorText(err));
-    } finally {
-      setChecking(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (mode !== "download") return;
-    void checkSources();
-  }, [checkSources, mode]);
-
-  const selectSource = useCallback(
-    async (next: string) => {
-      if (!next || next === sourceId) return;
-      setSwitching(next);
-      setSourceError("");
-      try {
-        await api.Mirror.SetActiveSource(next);
-        setSourceId(next);
-        await onSourceChanged?.(next);
-      } catch (err) {
-        setSourceError(errorText(err));
-      } finally {
-        setSwitching("");
-      }
-    },
-    [onSourceChanged, sourceId],
-  );
-
-  const selectedSource = useMemo(
-    () => sources.find((item) => item.sourceId === sourceId) ?? null,
-    [sourceId, sources],
-  );
 
   const apis = useMemo(() => {
     const map = new Map<string, string>();
@@ -179,16 +122,14 @@ export function SystemImageModal({
         </div>
 
         {mode === "download" ? (
-          <SourceBar
-            sources={sources}
-            selectedId={sourceId}
-            switching={switching}
-            checking={checking}
-            error={sourceError}
-            selected={selectedSource}
-            onCheck={() => void checkSources()}
-            onSelect={(next) => void selectSource(next)}
-          />
+          <div className="image-modal__sources">
+            <div className="image-modal__sources-head">
+              <span className="image-modal__sources-title">下载源</span>
+              <span className="muted truncate">
+                当前使用「{activeSourceName || "默认镜像源"}」；镜像源的检测与更换在「设置 → 下载镜像源」中完成。
+              </span>
+            </div>
+          </div>
         ) : null}
 
         {error ? (
@@ -315,95 +256,6 @@ export function SystemImageModal({
       </div>
     </Modal>
   );
-}
-
-function SourceBar({
-  sources,
-  selectedId,
-  switching,
-  checking,
-  error,
-  selected,
-  onCheck,
-  onSelect,
-}: {
-  sources: MirrorCheck[];
-  selectedId: string;
-  switching: string;
-  checking: boolean;
-  error: string;
-  selected: MirrorCheck | null;
-  onCheck: () => void;
-  onSelect: (id: string) => void;
-}) {
-  const busy = switching !== "" || checking;
-  return (
-    <div className="image-modal__sources">
-      <div className="image-modal__sources-head">
-        <span className="image-modal__sources-title">下载源</span>
-        <span className="muted truncate">
-          {error
-            ? `检测失败：${error}`
-            : checking
-              ? "正在并发检测各镜像源的连接、延迟与资源…"
-              : "点击切换系统镜像下载源，切换后自动按该源重新加载列表。"}
-        </span>
-        <button className="btn btn--ghost btn--sm" disabled={busy} onClick={onCheck}>
-          {checking ? <span className="spinner" /> : "重新检测"}
-        </button>
-      </div>
-
-      <div className="image-modal__source-list" role="radiogroup" aria-label="下载源">
-        {sources.length === 0 ? (
-          <span className="muted">{checking ? "检测中…" : "没有可用的镜像源"}</span>
-        ) : (
-          sources.map((check) => {
-            const active = check.sourceId === selectedId;
-            return (
-              <button
-                key={check.sourceId}
-                type="button"
-                role="radio"
-                aria-checked={active}
-                className={`source-chip${active ? " source-chip--active" : ""}`}
-                disabled={switching !== ""}
-                title={`${check.sourceName}（${check.baseURL}）${check.error ? "\n" + check.error : ""}`}
-                onClick={() => onSelect(check.sourceId)}
-              >
-                {switching === check.sourceId ? (
-                  <span className="spinner" />
-                ) : (
-                  <span className={`source-dot ${sourceDotClass(check)}`} />
-                )}
-                <span className="source-chip__name">{check.sourceName}</span>
-                <span className="source-chip__meta nums">{sourceMetaText(check)}</span>
-              </button>
-            );
-          })
-        )}
-      </div>
-
-      {selected && (!selected.reachable || !selected.compatible) ? (
-        <div className="image-modal__sources-warn">
-          {selected.reachable ? "当前下载源资源不完整" : "当前下载源无法连接"}
-          {selected.error ? `：${selected.error}` : "，建议切换到其它源后再下载。"}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function sourceDotClass(check: MirrorCheck): string {
-  if (!check.reachable) return "source-dot--bad";
-  if (!check.compatible) return "source-dot--warn";
-  return "source-dot--ok";
-}
-
-function sourceMetaText(check: MirrorCheck): string {
-  if (!check.reachable) return "无法连接";
-  if (!check.compatible) return "资源不完整";
-  if (check.latencyMs > 0) return formatMs(check.latencyMs);
-  return "可用";
 }
 
 function FilterHeader({

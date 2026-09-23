@@ -32,8 +32,9 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
 
 - JDK 根目录固定为 `<Root>/jdk`（`AVDDESKTOP_HOME` 可覆盖），**只使用软件自带 JDK**。
   环境检查不会读取系统 `JAVA_HOME` / `PATH`；缺失或版本低于 17 时由 `Prepare` 自动下载。
-- 下载源与 Android SDK 镜像相互独立：默认南京大学 NJU，并内置清华 TUNA、北外 BFSU 与 GitHub 官方发布地址；
-  「下载 / 补充环境」弹窗会并发检测连接、延迟与采样速度，并推荐可用的低延迟源。
+- 下载源与 Android SDK 镜像相互独立：默认南京大学 NJU，并内置清华 TUNA、北外 BFSU 与 GitHub 官方发布地址。
+- 镜像源的检测与设置统一在设置页的「下载镜像源」一页完成：并发检测各源的连接、延迟、采样速度与资源完整性，
+  分别保存 SDK 与 JDK 镜像源；「准备 / 修复环境」弹窗只读取已保存的源，不再内嵌检测与选择。
 - 各源下载的是同一批 Eclipse Temurin 21 LTS 归档（Windows / macOS / Linux，x64 / arm64），
   始终使用程序内置 SHA-256 校验；解压到 `<Root>/jdk.staging` 后整体替换 `<Root>/jdk`，失败时保留旧 JDK。
 - macOS 的 `JAVA_HOME` 指向 `<Root>/jdk/Contents/Home`，Windows / Linux 指向 `<Root>/jdk`。
@@ -43,8 +44,9 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
 ### SDK（自举 + 组件安装）
 
 - SDK 根目录固定为 `<Root>/sdk`（`AVDDESKTOP_HOME` 可覆盖），**不使用系统 Android SDK**。
-- 镜像：设置页「下载 / 补充环境」弹窗并发检测内置镜像的连接、延迟、采样速度和资源完整性。
-  资源校验覆盖 `repository2-3.xml`、cmdline-tools、platform-tools、emulator 与 Google APIs 系统镜像索引。
+- 镜像：设置页「下载镜像源」是检测与设置的唯一入口，并发检测内置镜像的连接、延迟、采样速度和资源完整性。
+  资源校验覆盖 `repository2-3.xml`、cmdline-tools、platform-tools、emulator 与 Google APIs 系统镜像索引；
+  环境准备与系统镜像下载都只读取已保存的镜像源（系统镜像弹窗里仅只读显示当前源）。
 - 自举：读取所选镜像的 `repository2-3.xml`，按当前平台的归档 URL 与 SHA-1 下载 cmdline-tools，
   解压到 `sdk/cmdline-tools/latest`（整体上限 30 分钟）；官方源索引不可用时回退内置官方归档。
 - 组件安装/查询一律调用自带 `sdkmanager`，并通过 `SDK_TEST_BASE_URL` 将仓库根地址切换到所选镜像：
@@ -55,8 +57,8 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
   安装结果因此同时检查退出码、`source.properties`、`package.xml`、关键可执行文件与实际目录；
   只要目标组件完整落盘并通过校验，就按成功处理。
 - 已安装包列表直接扫描软件自带 SDK 目录，兼容新旧 Android CLI 表格格式，避免把中断安装残留
-  误判为可用组件。设置页「修复环境 → 一键修复」会强制重装 cmdline-tools、platform-tools 与
-  emulator，并保留 licenses、system-images 与 AVD。
+  误判为可用组件。设置页「准备 / 修复环境 → 一键修复」会强制重装 cmdline-tools、platform-tools 与
+  emulator，并保留 licenses、system-images 与 AVD（与「下载镜像源」互不影响：前者只重装工具链，后者只改下载地址）。
 - JDK 不依赖 Android SDK 镜像，使用独立的 JDK 镜像选择；下载内容仍强制通过内置 SHA-256 校验。
 - 删除本机系统镜像同样交给 `sdkmanager --uninstall`（包路径同样转成斜杠形式，超时 10min），
   并以目录是否真的消失为最终判据；仍被 AVD 引用的镜像（按 `config.ini` 的 `image.sysdir.1` 判定）会被拒绝删除。

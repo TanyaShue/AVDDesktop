@@ -15,7 +15,6 @@ import (
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/jdk"
 	"AVDDesktop/internal/job"
-	"AVDDesktop/internal/mirror"
 	"AVDDesktop/internal/platform"
 	"AVDDesktop/internal/proc"
 	"AVDDesktop/internal/sdk"
@@ -186,70 +185,22 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 // Prepare 使用已保存的镜像自动准备软件自带环境。
 //
 // 返回 jobID；进度与日志走统一任务区域。
+//
+// 本方法不会修改镜像源：镜像源由 MirrorService.SetActiveSource / SetActiveJDKSource 单独保存。
 func (s *EnvService) Prepare() (string, error) {
-	return s.run("", false)
-}
-
-// PrepareFromSource 先保存所选 Android SDK 镜像，再准备或补装环境。
-func (s *EnvService) PrepareFromSource(sourceID string) (string, error) {
-	return s.PrepareFromSources(sourceID, "")
-}
-
-// PrepareFromSources 保存所选 SDK / JDK 镜像，再准备或补装环境。
-func (s *EnvService) PrepareFromSources(sourceID, jdkSourceID string) (string, error) {
-	if err := s.saveSourceSelection(sourceID, jdkSourceID); err != nil {
-		return "", err
-	}
-	return s.run("", false)
+	return s.run(false)
 }
 
 // Repair 使用已保存的镜像强制校验并重装核心 SDK 工具链。
 func (s *EnvService) Repair() (string, error) {
-	return s.run("", true)
-}
-
-// RepairFromSource 先保存所选 Android SDK 镜像，再强制修复核心工具链。
-func (s *EnvService) RepairFromSource(sourceID string) (string, error) {
-	return s.RepairFromSources(sourceID, "")
-}
-
-// RepairFromSources 保存所选 SDK / JDK 镜像，再强制修复核心工具链。
-func (s *EnvService) RepairFromSources(sourceID, jdkSourceID string) (string, error) {
-	if err := s.saveSourceSelection(sourceID, jdkSourceID); err != nil {
-		return "", err
-	}
-	return s.run("", true)
-}
-
-// saveSourceSelection 验证并持久化弹窗中选择的下载源；空 ID 表示保留当前设置。
-func (s *EnvService) saveSourceSelection(sourceID, jdkSourceID string) error {
-	patch := map[string]any{}
-	if strings.TrimSpace(sourceID) != "" {
-		source, ok := mirror.Find(sourceID)
-		if !ok {
-			return domain.Err(domain.CodeInvalidArgument, "镜像源不存在: "+strings.TrimSpace(sourceID))
-		}
-		patch["mirrorSourceId"] = source.ID
-	}
-	if strings.TrimSpace(jdkSourceID) != "" {
-		source, ok := jdk.FindSource(jdkSourceID)
-		if !ok {
-			return domain.Err(domain.CodeInvalidArgument, "JDK 镜像源不存在: "+strings.TrimSpace(jdkSourceID))
-		}
-		patch["jdkMirrorSourceId"] = source.ID
-	}
-	if len(patch) == 0 {
-		return nil
-	}
-	_, err := s.rt.settings.Update(patch)
-	return err
+	return s.run(true)
 }
 
 // run 自动准备软件自带环境；repair=true 时会强制重装核心工具链并清理旧版缓存。
-func (s *EnvService) run(sourceID string, repair bool) (string, error) {
+func (s *EnvService) run(repair bool) (string, error) {
 	comp := s.rt.Components()
 	tools := comp.Tools
-	source, env := mirrorEnv(s.rt, sourceID)
+	source, env := mirrorEnv(s.rt)
 
 	if repair {
 		if err := guardNoRunningEmulator(comp); err != nil {

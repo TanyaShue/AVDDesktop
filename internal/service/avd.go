@@ -58,7 +58,7 @@ func (s *AvdService) ListProfiles(refresh bool) ([]domain.DeviceProfile, error) 
 // 数据全部来自官方 sdkmanager：installedOnly 为 true 时只读本地列表（不联网）。
 func (s *AvdService) ListImages(installedOnly bool) ([]domain.SystemImage, error) {
 	comp := s.rt.Components()
-	_, env := mirrorEnv(s.rt, "")
+	_, env := mirrorEnv(s.rt)
 	images, err := sdk.ListImages(s.rt.Context(), comp.Tools, env, installedOnly, func(stream, line string) {
 		s.rt.Log().Debug("sdkmanager", "%s", line)
 	})
@@ -75,7 +75,7 @@ func (s *AvdService) ListImages(installedOnly bool) ([]domain.SystemImage, error
 // 与其它写 SDK/AVD 目录的任务共用同一把互斥锁（同一时刻只允许一个写任务）。
 func (s *AvdService) Create(spec domain.AvdSpec) (string, error) {
 	comp := s.rt.Components()
-	source, sdkEnv := mirrorEnv(s.rt, "")
+	source, sdkEnv := mirrorEnv(s.rt)
 	spec.Name = strings.TrimSpace(spec.Name)
 	if v := comp.Store.ValidateName(spec.Name); !v.Valid {
 		return "", domain.Err(domain.CodeAvdNameInvalid, v.Reason)
@@ -167,7 +167,7 @@ func (s *AvdService) InstallImage(pkgPath string) (string, error) {
 		return "", err
 	}
 	comp := s.rt.Components()
-	source, sdkEnv := mirrorEnv(s.rt, "")
+	source, sdkEnv := mirrorEnv(s.rt)
 	unlock, ok := s.rt.locks.TryLock("sdk:" + comp.Tools.SdkRoot)
 	if !ok {
 		return "", domain.Err(domain.CodeJobBusy, "已有 SDK 安装任务正在进行")

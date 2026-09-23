@@ -18,8 +18,8 @@ export interface EnvCheck {
   loading: boolean;
   /** 重新检查环境（实跑工具链）。 */
   reload: () => Promise<void>;
-  /** 自动准备软件自带环境；传入 sourceId 时先切换到该 SDK 镜像。 */
-  prepare: (sourceId?: string) => Promise<void>;
+  /** 自动准备软件自带环境（使用已保存的镜像源）。 */
+  prepare: () => Promise<void>;
 }
 
 export function useEnvCheck(
@@ -54,13 +54,10 @@ export function useEnvCheck(
     }
   }, [onToast]);
 
-  const prepare = useCallback(async (sourceId?: string) => {
+  const prepare = useCallback(async () => {
     try {
-      if (sourceId) {
-        await api.Env.PrepareFromSource(sourceId);
-      } else {
-        await api.Env.Prepare();
-      }
+      // 镜像源由设置页的「下载镜像源」负责保存，这里直接使用当前生效的源。
+      await api.Env.Prepare();
     } catch (err) {
       onToast("danger", "准备环境失败", errorText(err));
     }
