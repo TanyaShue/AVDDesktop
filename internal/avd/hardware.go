@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"AVDDesktop/internal/domain"
@@ -25,18 +26,14 @@ type hardwareField struct {
 	unit  string
 	min   int
 	max   int
-	// suffix 是写入 config.ini 时的单位后缀（如 data 分区的 "M"）；空表示纯数字。
-	suffix string
 }
 
+// 只覆盖最常用的三项（内存 / CPU 核心 / 分辨率）：其余硬件参数完全沿用设备档案，
+// 避免在创建向导里堆叠大量低频选项。
 var hardwareFields = []hardwareField{
 	{
 		value: func(h domain.AvdHardware) int { return h.RAMMB },
 		key:   "hw.ramSize", label: "内存", unit: "MB", min: 512, max: 16384,
-	},
-	{
-		value: func(h domain.AvdHardware) int { return h.HeapMB },
-		key:   "vm.heapSize", label: "VM 堆", unit: "MB", min: 16, max: 2048,
 	},
 	{
 		value: func(h domain.AvdHardware) int { return h.CPUCores },
@@ -49,18 +46,6 @@ var hardwareFields = []hardwareField{
 	{
 		value: func(h domain.AvdHardware) int { return h.LCDHeight },
 		key:   "hw.lcd.height", label: "屏幕高度", unit: "px", min: 240, max: 7680,
-	},
-	{
-		value: func(h domain.AvdHardware) int { return h.LCDDensity },
-		key:   "hw.lcd.density", label: "屏幕密度", unit: "dpi", min: 72, max: 960,
-	},
-	{
-		value: func(h domain.AvdHardware) int { return h.DataPartitionMB },
-		key:   "disk.dataPartition.size", label: "数据分区", unit: "MB", min: 512, max: 65536, suffix: "M",
-	},
-	{
-		value: func(h domain.AvdHardware) int { return h.SDCardMB },
-		key:   "sdcard.size", label: "SD 卡", unit: "MB", min: 64, max: 65536, suffix: "M",
 	},
 }
 
@@ -101,34 +86,15 @@ func DescribeHardware(hw *domain.AvdHardware) string {
 	if hw == nil {
 		return ""
 	}
-	text := func(label string, value int, unit string) string {
-		return fmt.Sprintf("%s %d %s", label, value, unit)
-	}
 	var parts []string
 	if hw.RAMMB > 0 {
-		parts = append(parts, text("内存", hw.RAMMB, "MB"))
-	}
-	if hw.HeapMB > 0 {
-		parts = append(parts, text("VM 堆", hw.HeapMB, "MB"))
+		parts = append(parts, "内存 "+formatRAM(hw.RAMMB))
 	}
 	if hw.CPUCores > 0 {
-		parts = append(parts, text("CPU 核心", hw.CPUCores, "核"))
+		parts = append(parts, fmt.Sprintf("CPU 核心 %d 核", hw.CPUCores))
 	}
-	switch {
-	case hw.LCDWidth > 0 && hw.LCDHeight > 0:
-		res := fmt.Sprintf("分辨率 %d×%d", hw.LCDWidth, hw.LCDHeight)
-		if hw.LCDDensity > 0 {
-			res += fmt.Sprintf(" @ %d dpi", hw.LCDDensity)
-		}
-		parts = append(parts, res)
-	case hw.LCDDensity > 0:
-		parts = append(parts, text("屏幕密度", hw.LCDDensity, "dpi"))
-	}
-	if hw.DataPartitionMB > 0 {
-		parts = append(parts, "数据分区 "+formatMB(hw.DataPartitionMB))
-	}
-	if hw.SDCardMB > 0 {
-		parts = append(parts, "SD 卡 "+formatMB(hw.SDCardMB))
+	if hw.LCDWidth > 0 && hw.LCDHeight > 0 {
+		parts = append(parts, fmt.Sprintf("分辨率 %d×%d", hw.LCDWidth, hw.LCDHeight))
 	}
 	return strings.Join(parts, "、")
 }
@@ -177,11 +143,7 @@ func hardwareChanges(hw *domain.AvdHardware) []iniChange {
 		if v == 0 {
 			continue
 		}
-		out = append(out, iniChange{key: f.key, value: fmt.Sprintf("%d%s", v, f.suffix)})
-	}
-	if hw.SDCardMB > 0 {
-		// 只写 sdcard.size 而不打开开关时容量不会生效。
-		out = append(out, iniChange{key: "hw.sdCard", value: "yes"})
+		out = append(out, iniChange{key: f.key, value: strconv.Itoa(v)})
 	}
 	return out
 }
@@ -304,10 +266,10 @@ func writeFileAtomic(path string, data []byte) error {
 	return os.Rename(tmpName, path)
 }
 
-// formatMB 把 MB 数值格式化成 config.ini 里常见的大小写法（≥1024 MB 用 GB）。
-func formatMB(mb int) string {
-	if mb >= 1024 && mb%1024 == 0 {
-		return fmt.Sprintf("%dG", mb/1024)
+// formatRAM 把 MB 数值格式化成界面上更易读的内存写法（整 GB / 半 GB 用 GB）。
+func formatRAM(mb int) string {
+	if mb >= 1024 && mb%512 == 0 {
+		return strings.TrimSuffix(fmt.Sprintf("%.1f", float64(mb)/1024), ".0") + " GB"
 	}
-	return fmt.Sprintf("%dM", mb)
+	return fmt.Sprintf("%d MB", mb)
 }

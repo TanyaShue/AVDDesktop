@@ -237,11 +237,10 @@ func TestE2E_AvdCreate(t *testing.T) {
 		SystemImagePath: image.Path,
 		ProfileID:       profileID,
 		Hardware: &domain.AvdHardware{
-			RAMMB:      2048,
-			CPUCores:   4,
-			LCDWidth:   720,
-			LCDHeight:  1280,
-			LCDDensity: 320,
+			RAMMB:     2048,
+			CPUCores:  4,
+			LCDWidth:  720,
+			LCDHeight: 1280,
 		},
 	})
 	if err != nil {

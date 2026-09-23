@@ -100,13 +100,9 @@ export namespace domain {
 	}
 	export class AvdHardware {
 	    ramMb?: number;
-	    heapMb?: number;
 	    cpuCores?: number;
 	    lcdWidth?: number;
 	    lcdHeight?: number;
-	    lcdDensity?: number;
-	    dataPartitionMb?: number;
-	    sdcardMb?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new AvdHardware(source);
@@ -115,13 +111,9 @@ export namespace domain {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ramMb = source["ramMb"];
-	        this.heapMb = source["heapMb"];
 	        this.cpuCores = source["cpuCores"];
 	        this.lcdWidth = source["lcdWidth"];
 	        this.lcdHeight = source["lcdHeight"];
-	        this.lcdDensity = source["lcdDensity"];
-	        this.dataPartitionMb = source["dataPartitionMb"];
-	        this.sdcardMb = source["sdcardMb"];
 	    }
 	}
 	export class AvdSpec {

@@ -860,84 +860,73 @@ body.modal-open .pagecontent {
   color: var(--danger);
 }
 
-/* ---------------------------------------------------------------- 自定义硬件（创建设备） */
+/* ---------------------------------------------------------------- 硬件参数（创建设备） */
 
-.advanced {
+/* 只有三项（内存 / CPU 核心 / 分辨率），紧凑排成一行，单位直接写进选项文案 */
+.hw {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--bg-subtle);
   padding: var(--sp-3);
 }
 
-.advanced__summary {
+.hw__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+
+.hw__item {
   display: flex;
-  align-items: baseline;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.hw__label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* 自定义分辨率：宽度 × 高度 px */
+.hw__custom {
+  display: flex;
+  align-items: center;
   gap: var(--sp-2);
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  list-style: none;
-}
-
-/* 去掉原生三角，统一用右侧的矢头表示展开状态 */
-.advanced__summary::-webkit-details-marker {
-  display: none;
-}
-
-.advanced__summary::after {
-  content: "▾";
-  margin-left: auto;
-  color: var(--text-tertiary);
-  font-weight: 400;
-  transition: transform var(--dur) var(--ease);
-}
-
-.advanced[open] .advanced__summary::after {
-  transform: rotate(180deg);
-}
-
-.advanced__meta {
-  color: var(--text-tertiary);
-  font-weight: 400;
-}
-
-.advanced__body {
   margin-top: var(--sp-3);
-  padding-top: var(--sp-3);
-  border-top: 1px dashed var(--border);
 }
 
-.advanced__foot {
+.hw__custom .input {
+  width: 96px;
+  flex: 0 0 auto;
+}
+
+.hw__times,
+.hw__unit {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.hw__foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
-  margin-top: var(--sp-1);
+  margin-top: var(--sp-3);
 }
 
-.advanced__error {
+.hw__error {
   margin-top: var(--sp-2);
   font-size: 12px;
   color: var(--danger);
 }
 
-/* 数字输入：宽度随位数固定，不占满整行 */
-.input--num {
-  width: 120px;
-  flex: 0 0 auto;
-}
-
-/* 分辨率输入：更窄一些，宽度、乘号、单位能并排放在一行 */
-.input--px {
-  width: 96px;
-  flex: 0 0 auto;
-}
-
-.field__unit {
-  flex: 0 0 auto;
-  font-size: 12px;
-  color: var(--text-tertiary);
+/* 窄窗口下三列降为单列，避免下拉框被挤到不可读 */
+@media (max-width: 640px) {
+  .hw__grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ---------------------------------------------------------------- 进度 */

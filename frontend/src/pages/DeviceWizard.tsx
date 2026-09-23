@@ -1,7 +1,7 @@
-// 创建设备：设备名称 / System Image / 设备档案，外加可选的自定义硬件参数。
+// 创建设备：设备名称 / System Image / 设备档案，外加可选的三项硬件参数（内存 / CPU 核心 / 分辨率）。
 //
 // 镜像不存在时由后端在同一任务里通过官方 sdkmanager 自动安装。
-// 硬件参数默认完全沿用设备档案；用户填写的项会在 avdmanager 创建完成后写进设备 config.ini
+// 硬件参数默认完全沿用设备档案；用户选择的项会在 avdmanager 创建完成后写进设备 config.ini
 // （后端校验与写入，见 internal/avd/hardware.go）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../bridge/api";
@@ -24,58 +24,35 @@ interface Props {
 const DEFAULT_NAME = "MyDevice";
 const DEFAULT_PROFILE = "medium_phone";
 
-/** 可自定义的数值型硬件参数：表单键名与后端 domain.AvdHardware 的字段一一对应。 */
-type HardwareNumberKey =
-  | "ramMb"
-  | "heapMb"
-  | "cpuCores"
-  | "lcdDensity"
-  | "dataPartitionMb"
-  | "sdcardMb";
+/** 提交给后端的覆盖项：只有用户选择的项才会出现（未出现的字段沿用设备档案默认值）。 */
+type HardwareDraft = Pick<AvdHardware, "ramMb" | "cpuCores" | "lcdWidth" | "lcdHeight">;
 
-/** 提交给后端的覆盖项：只有用户填写的项才会出现（未出现的字段沿用设备档案默认值）。 */
-type HardwareDraft = Partial<Record<HardwareNumberKey | "lcdWidth" | "lcdHeight", number>>;
-
-/** 表单状态：数字统一用字符串保存，空串表示沿用设备档案默认值。 */
-type HardwareForm = Record<HardwareNumberKey, string> & {
+/** 表单状态：空串表示沿用设备档案默认值。 */
+interface HardwareForm {
+  /** 内存（GB），取值来自 RAM_PRESETS_GB。 */
+  ramGb: string;
+  /** CPU 核心数，取值来自 CPU_PRESETS。 */
+  cpuCores: string;
   /** "" 表示跟随设备档案；"custom" 表示使用下面的宽高输入；其它为 "宽x高" 预设。 */
   resolution: string;
   lcdWidth: string;
   lcdHeight: string;
-};
-
-interface HardwareInputSpec {
-  key: HardwareNumberKey;
-  label: string;
-  unit: string;
-  min: number;
-  max: number;
-  step: number;
-  /** 常见取值，仅作为输入建议（datalist），不限制自定义。 */
-  presets: number[];
 }
 
-// 区间与 internal/avd/hardware.go 的 hardwareFields 保持一致；后端仍会再次校验。
-const HARDWARE_INPUTS: HardwareInputSpec[] = [
-  { key: "ramMb", label: "内存", unit: "MB", min: 512, max: 16384, step: 256, presets: [1024, 2048, 3072, 4096, 6144, 8192] },
-  { key: "heapMb", label: "VM 堆", unit: "MB", min: 16, max: 2048, step: 32, presets: [128, 256, 512, 1024] },
-  { key: "cpuCores", label: "CPU 核心", unit: "核", min: 1, max: 16, step: 1, presets: [2, 4, 6, 8] },
-  { key: "lcdDensity", label: "屏幕密度", unit: "dpi", min: 72, max: 960, step: 10, presets: [240, 320, 420, 480, 560] },
-  { key: "dataPartitionMb", label: "数据分区", unit: "MB", min: 512, max: 65536, step: 512, presets: [2048, 4096, 6144, 8192, 16384] },
-  { key: "sdcardMb", label: "SD 卡", unit: "MB", min: 64, max: 65536, step: 256, presets: [512, 1024, 4096, 8192] },
-];
-
+// 选项与 internal/avd/hardware.go 的 hardwareFields 区间保持一致；后端仍会再次校验。
+const RAM_PRESETS_GB = [1, 1.5, 2, 3, 4, 6, 8, 12, 16];
+const CPU_PRESETS = [2, 4, 6, 8];
 const RESOLUTION_PRESETS = ["720x1280", "1080x1920", "1080x2400", "1440x2560", "1440x3120"];
+const RAM_MIN_MB = 512;
+const RAM_MAX_MB = 16384;
+const CPU_MIN = 1;
+const CPU_MAX = 16;
 const PIXEL_MIN = 240;
 const PIXEL_MAX = 7680;
 
 const EMPTY_HARDWARE_FORM: HardwareForm = {
-  ramMb: "",
-  heapMb: "",
+  ramGb: "",
   cpuCores: "",
-  lcdDensity: "",
-  dataPartitionMb: "",
-  sdcardMb: "",
   resolution: "",
   lcdWidth: "",
   lcdHeight: "",
@@ -87,6 +64,17 @@ function toPositiveInt(value: string): number {
   return Number.isInteger(n) && n > 0 ? n : 0;
 }
 
+/** 表单选择的内存（GB）换算成 MB；未选择返回 0。 */
+function ramMbOf(form: HardwareForm): number {
+  const gb = Number(form.ramGb.trim());
+  return Number.isFinite(gb) && gb > 0 ? Math.round(gb * 1024) : 0;
+}
+
+/** 表单选择的 CPU 核心数；未选择返回 0。 */
+function cpuCoresOf(form: HardwareForm): number {
+  return toPositiveInt(form.cpuCores);
+}
+
 /** 解析表单当前选择的分辨率；未选择或填写不完整时返回 0。 */
 function resolutionOf(form: HardwareForm): { width: number; height: number } {
   if (form.resolution === "custom") {
@@ -96,23 +84,25 @@ function resolutionOf(form: HardwareForm): { width: number; height: number } {
   return { width: toPositiveInt(width), height: toPositiveInt(height) };
 }
 
-/** 已填写的覆盖项数量（用于摘要文案与「恢复默认」按钮的显隐）。 */
+/** 已选择的覆盖项数量（用于提示文案与「恢复默认」按钮的显隐）。 */
 function hardwareCount(form: HardwareForm): number {
-  const numbers = HARDWARE_INPUTS.filter((spec) => toPositiveInt(form[spec.key]) > 0).length;
   const { width, height } = resolutionOf(form);
-  return numbers + (width > 0 && height > 0 ? 1 : 0);
+  return (
+    (ramMbOf(form) > 0 ? 1 : 0) +
+    (cpuCoresOf(form) > 0 ? 1 : 0) +
+    (width > 0 && height > 0 ? 1 : 0)
+  );
 }
 
 /** 本地校验：返回错误文案，空串表示通过。 */
 function validateHardwareForm(form: HardwareForm): string {
-  for (const spec of HARDWARE_INPUTS) {
-    const raw = form[spec.key].trim();
-    if (!raw) continue;
-    const n = Number(raw);
-    if (!Number.isInteger(n)) return `${spec.label}必须是整数（单位 ${spec.unit}）`;
-    if (n < spec.min || n > spec.max) {
-      return `${spec.label}应在 ${spec.min}–${spec.max} ${spec.unit} 之间，或留空沿用设备档案默认值`;
-    }
+  const ramMb = ramMbOf(form);
+  if (ramMb > 0 && (ramMb < RAM_MIN_MB || ramMb > RAM_MAX_MB)) {
+    return `内存应在 ${RAM_MIN_MB / 1024}–${RAM_MAX_MB / 1024} GB 之间，或留空沿用设备档案默认值`;
+  }
+  const cores = cpuCoresOf(form);
+  if (cores > 0 && (cores < CPU_MIN || cores > CPU_MAX)) {
+    return `CPU 核心应在 ${CPU_MIN}–${CPU_MAX} 核之间，或留空沿用设备档案默认值`;
   }
   if (form.resolution === "custom") {
     const { width, height } = resolutionOf(form);
@@ -123,13 +113,13 @@ function validateHardwareForm(form: HardwareForm): string {
   return "";
 }
 
-/** 组装后端需要的覆盖项；什么都没填时返回 undefined（完全沿用设备档案）。 */
+/** 组装后端需要的覆盖项；什么都没选时返回 undefined（完全沿用设备档案）。 */
 function buildHardware(form: HardwareForm): HardwareDraft | undefined {
   const draft: HardwareDraft = {};
-  for (const spec of HARDWARE_INPUTS) {
-    const n = toPositiveInt(form[spec.key]);
-    if (n > 0) draft[spec.key] = n;
-  }
+  const ramMb = ramMbOf(form);
+  if (ramMb > 0) draft.ramMb = ramMb;
+  const cores = cpuCoresOf(form);
+  if (cores > 0) draft.cpuCores = cores;
   const { width, height } = resolutionOf(form);
   if (width > 0 && height > 0) {
     draft.lcdWidth = width;
@@ -419,104 +409,106 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
                 </option>
               ))}
             </select>
-            <div className="field__hint">决定屏幕、内存等硬件默认值，来自官方 avdmanager</div>
+            <div className="field__hint">决定内存、CPU 核心与分辨率等默认值，来自官方 avdmanager</div>
           </div>
         </div>
 
         <div className="field">
           <div className="field__label">硬件参数</div>
           <div className="field__control">
-            <details className="advanced">
-              <summary className="advanced__summary">
-                <span className="advanced__title">
-                  {hardwareFilled > 0 ? `已自定义 ${hardwareFilled} 项参数` : "自定义硬件参数（可选）"}
-                </span>
-                <span className="advanced__meta">
-                  {hardwareFilled > 0 ? "创建时写入设备配置" : "留空沿用设备档案"}
-                </span>
-              </summary>
-              <div className="advanced__body">
-                {HARDWARE_INPUTS.map((spec) => (
-                  <div className="field" key={spec.key}>
-                    <div className="field__label">{spec.label}</div>
-                    <div className="field__control row">
-                      <input
-                        className="input input--num"
-                        type="number"
-                        inputMode="numeric"
-                        list={`hw-preset-${spec.key}`}
-                        min={spec.min}
-                        max={spec.max}
-                        step={spec.step}
-                        placeholder="跟随档案"
-                        value={hardwareForm[spec.key]}
-                        onChange={(e) => setHardwareField(spec.key, e.target.value)}
-                      />
-                      <span className="field__unit">{spec.unit}</span>
-                      <datalist id={`hw-preset-${spec.key}`}>
-                        {spec.presets.map((v) => (
-                          <option key={v} value={v} />
-                        ))}
-                      </datalist>
-                    </div>
-                  </div>
-                ))}
+            <div className="hw">
+              <div className="hw__grid">
+                <label className="hw__item">
+                  <span className="hw__label">内存</span>
+                  <select
+                    className="select"
+                    value={hardwareForm.ramGb}
+                    onChange={(e) => setHardwareField("ramGb", e.target.value)}
+                  >
+                    <option value="">跟随档案</option>
+                    {RAM_PRESETS_GB.map((gb) => (
+                      <option key={gb} value={String(gb)}>
+                        {gb} GB
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-                <div className="field">
-                  <div className="field__label">分辨率</div>
-                  <div className="field__control">
-                    <select
-                      className="select"
-                      value={hardwareForm.resolution}
-                      onChange={(e) => setHardwareField("resolution", e.target.value)}
-                    >
-                      <option value="">跟随设备档案</option>
-                      {RESOLUTION_PRESETS.map((preset) => (
-                        <option key={preset} value={preset}>
-                          {preset.split("x").join(" × ")}
-                        </option>
-                      ))}
-                      <option value="custom">自定义…</option>
-                    </select>
-                    {hardwareForm.resolution === "custom" ? (
-                      <div className="row row--wrap" style={{ marginTop: 8 }}>
-                        <input
-                          className="input input--px"
-                          type="number"
-                          min={PIXEL_MIN}
-                          max={PIXEL_MAX}
-                          placeholder="宽 (px)"
-                          value={hardwareForm.lcdWidth}
-                          onChange={(e) => setHardwareField("lcdWidth", e.target.value)}
-                        />
-                        <span className="field__unit">×</span>
-                        <input
-                          className="input input--px"
-                          type="number"
-                          min={PIXEL_MIN}
-                          max={PIXEL_MAX}
-                          placeholder="高 (px)"
-                          value={hardwareForm.lcdHeight}
-                          onChange={(e) => setHardwareField("lcdHeight", e.target.value)}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
+                <label className="hw__item">
+                  <span className="hw__label">CPU 核心</span>
+                  <select
+                    className="select"
+                    value={hardwareForm.cpuCores}
+                    onChange={(e) => setHardwareField("cpuCores", e.target.value)}
+                  >
+                    <option value="">跟随档案</option>
+                    {CPU_PRESETS.map((n) => (
+                      <option key={n} value={String(n)}>
+                        {n} 核
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-                <div className="advanced__foot">
-                  <span className="field__hint">
-                    填写的项在创建后写入设备 config.ini；分辨率会同步调整屏幕像素，避免被档案皮肤尺寸覆盖。
-                  </span>
-                  {hardwareFilled > 0 ? (
-                    <button className="btn btn--ghost" onClick={() => setHardwareForm(EMPTY_HARDWARE_FORM)}>
-                      恢复默认
-                    </button>
-                  ) : null}
-                </div>
+                <label className="hw__item">
+                  <span className="hw__label">分辨率</span>
+                  <select
+                    className="select"
+                    value={hardwareForm.resolution}
+                    onChange={(e) => setHardwareField("resolution", e.target.value)}
+                  >
+                    <option value="">跟随档案</option>
+                    {RESOLUTION_PRESETS.map((preset) => (
+                      <option key={preset} value={preset}>
+                        {preset.split("x").join(" × ")}
+                      </option>
+                    ))}
+                    <option value="custom">自定义…</option>
+                  </select>
+                </label>
               </div>
-            </details>
-            {hardwareError ? <div className="advanced__error">{hardwareError}</div> : null}
+
+              {hardwareForm.resolution === "custom" ? (
+                <div className="hw__custom">
+                  <input
+                    className="input"
+                    type="number"
+                    inputMode="numeric"
+                    min={PIXEL_MIN}
+                    max={PIXEL_MAX}
+                    placeholder="宽"
+                    value={hardwareForm.lcdWidth}
+                    onChange={(e) => setHardwareField("lcdWidth", e.target.value)}
+                  />
+                  <span className="hw__times">×</span>
+                  <input
+                    className="input"
+                    type="number"
+                    inputMode="numeric"
+                    min={PIXEL_MIN}
+                    max={PIXEL_MAX}
+                    placeholder="高"
+                    value={hardwareForm.lcdHeight}
+                    onChange={(e) => setHardwareField("lcdHeight", e.target.value)}
+                  />
+                  <span className="hw__unit">px</span>
+                </div>
+              ) : null}
+
+              <div className="hw__foot">
+                <span className="field__hint">
+                  {hardwareFilled > 0
+                    ? `已自定义 ${hardwareFilled} 项，创建后写入设备配置`
+                    : "留空即沿用设备档案默认值"}
+                </span>
+                {hardwareFilled > 0 ? (
+                  <button className="btn btn--ghost" onClick={() => setHardwareForm(EMPTY_HARDWARE_FORM)}>
+                    恢复默认
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            {hardwareError ? <div className="hw__error">{hardwareError}</div> : null}
           </div>
         </div>
       </Modal>

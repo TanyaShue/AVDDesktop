@@ -416,9 +416,15 @@ function MenuItem({ label, onClick, danger }: { label: string; onClick: () => vo
 function hardwareLabel(device: AvdSummary): string {
   const parts: string[] = [];
   if (device.cpuCores) parts.push(`${device.cpuCores} 核`);
-  if (device.ramMb) parts.push(`${device.ramMb} MB`);
+  if (device.ramMb) parts.push(formatRam(device.ramMb));
   if (device.lcdWidth && device.lcdHeight) parts.push(`${device.lcdWidth}×${device.lcdHeight}`);
   return parts.join(" · ");
+}
+
+/** 内存按 MB 存储，卡片上优先用 GB 显示（1024 MB = 1 GB，半 GB 保留一位小数）。 */
+function formatRam(mb: number): string {
+  if (mb >= 1024 && mb % 512 === 0) return `${(mb / 1024).toFixed(1).replace(/\.0$/, "")} GB`;
+  return `${mb} MB`;
 }
 
 /** 实例进程是否仍活着：stopped 表示已退出；error 状态只有在进程退出（有退出码）后才算结束。 */

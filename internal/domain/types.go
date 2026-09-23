@@ -245,24 +245,16 @@ type AvdSummary struct {
 
 // AvdHardware 是创建 AVD 时可覆盖的设备档案硬件参数。
 //
-// 零值表示「沿用设备档案的默认值」：只有显式给出的字段才会写进 config.ini，
-// 其余参数仍由 avdmanager 按所选设备档案生成。
+// 只保留最常用的三项：内存、CPU 核心与屏幕分辨率。零值表示「沿用设备档案的默认值」：
+// 只有显式给出的字段才会写进 config.ini，其余参数仍由 avdmanager 按所选设备档案生成。
 type AvdHardware struct {
 	// RAMMB 是设备内存（MB），对应 config.ini 的 hw.ramSize。
 	RAMMB int `json:"ramMb,omitempty"`
-	// HeapMB 是 ART/Dalvik 堆上限（MB），对应 vm.heapSize。
-	HeapMB int `json:"heapMb,omitempty"`
 	// CPUCores 是虚拟 CPU 核心数，对应 hw.cpu.ncore。
 	CPUCores int `json:"cpuCores,omitempty"`
-	// LCDWidth / LCDHeight / LCDDensity 是屏幕分辨率（px）与密度（dpi），
-	// 对应 hw.lcd.width / hw.lcd.height / hw.lcd.density。
-	LCDWidth   int `json:"lcdWidth,omitempty"`
-	LCDHeight  int `json:"lcdHeight,omitempty"`
-	LCDDensity int `json:"lcdDensity,omitempty"`
-	// DataPartitionMB 是 /data 分区大小（MB），对应 disk.dataPartition.size。
-	DataPartitionMB int `json:"dataPartitionMb,omitempty"`
-	// SDCardMB 是 SD 卡容量（MB），对应 sdcard.size；给出时同时把 hw.sdCard 置为 yes。
-	SDCardMB int `json:"sdcardMb,omitempty"`
+	// LCDWidth / LCDHeight 是屏幕分辨率（px），对应 hw.lcd.width / hw.lcd.height。
+	LCDWidth  int `json:"lcdWidth,omitempty"`
+	LCDHeight int `json:"lcdHeight,omitempty"`
 }
 
 // AvdSpec 是创建 AVD 的输入（名称、系统镜像、可选设备档案与硬件覆盖项）。

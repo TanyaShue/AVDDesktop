@@ -35,14 +35,10 @@ vm.heapSize=256
 
 func fullHardware() *domain.AvdHardware {
 	return &domain.AvdHardware{
-		RAMMB:           4096,
-		HeapMB:          512,
-		CPUCores:        6,
-		LCDWidth:        720,
-		LCDHeight:       1280,
-		LCDDensity:      320,
-		DataPartitionMB: 4096,
-		SDCardMB:        8192,
+		RAMMB:     4096,
+		CPUCores:  6,
+		LCDWidth:  720,
+		LCDHeight: 1280,
 	}
 }
 
@@ -64,14 +60,10 @@ func TestValidateHardware(t *testing.T) {
 	}{
 		{"内存过小", domain.AvdHardware{RAMMB: 128}, "内存"},
 		{"内存过大", domain.AvdHardware{RAMMB: 99999}, "内存"},
-		{"堆过大", domain.AvdHardware{HeapMB: 8192}, "VM 堆"},
 		{"核心数为 0 以外的负数", domain.AvdHardware{CPUCores: -1}, "CPU 核心"},
 		{"核心数过多", domain.AvdHardware{CPUCores: 64}, "CPU 核心"},
 		{"宽度过小", domain.AvdHardware{LCDWidth: 100, LCDHeight: 1280}, "屏幕宽度"},
 		{"高度过大", domain.AvdHardware{LCDWidth: 720, LCDHeight: 99999}, "屏幕高度"},
-		{"密度过小", domain.AvdHardware{LCDDensity: 20}, "屏幕密度"},
-		{"数据分区过小", domain.AvdHardware{DataPartitionMB: 100}, "数据分区"},
-		{"SD 卡过大", domain.AvdHardware{SDCardMB: 999999}, "SD 卡"},
 		{"只有宽度", domain.AvdHardware{LCDWidth: 720}, "同时给出宽度和高度"},
 		{"只有高度", domain.AvdHardware{LCDHeight: 1280}, "同时给出宽度和高度"},
 	}
@@ -95,16 +87,19 @@ func TestDescribeHardware(t *testing.T) {
 		t.Fatalf("nil 应返回空串，实际 %q", got)
 	}
 	got := DescribeHardware(fullHardware())
-	for _, want := range []string{"内存 4096 MB", "VM 堆 512 MB", "CPU 核心 6 核",
-		"分辨率 720×1280 @ 320 dpi", "数据分区 4G", "SD 卡 8G"} {
+	for _, want := range []string{"内存 4 GB", "CPU 核心 6 核", "分辨率 720×1280"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("摘要 %q 应包含 %q", got, want)
 		}
 	}
-	// 只有密度时不应出现"分辨率"
-	only := DescribeHardware(&domain.AvdHardware{LCDDensity: 240})
-	if strings.Contains(only, "分辨率") || !strings.Contains(only, "屏幕密度 240 dpi") {
-		t.Errorf("只有密度时的摘要错误: %q", only)
+	// 非整 GB / 半 GB 的取值仍按 MB 显示，不做四舍五入
+	if mb := DescribeHardware(&domain.AvdHardware{RAMMB: 2000}); !strings.Contains(mb, "2000 MB") {
+		t.Errorf("非整 GB 取值应按 MB 显示: %q", mb)
+	}
+	// 只有核心数时不应凭空出现内存或分辨率
+	only := DescribeHardware(&domain.AvdHardware{CPUCores: 4})
+	if only != "CPU 核心 4 核" {
+		t.Errorf("只有核心数时的摘要错误: %q", only)
 	}
 }
 
@@ -120,23 +115,21 @@ func TestApplyHardwareUpdatesConfig(t *testing.T) {
 		t.Fatalf("ReadConfig 失败: %v", err)
 	}
 	for k, want := range map[string]string{
-		"hw.ramSize":              "4096",
-		"vm.heapSize":             "512",
-		"hw.cpu.ncore":            "6",
-		"hw.lcd.width":            "720",
-		"hw.lcd.height":           "1280",
-		"hw.lcd.density":          "320",
-		"disk.dataPartition.size": "4096M",
-		"sdcard.size":             "8192M",
-		"hw.sdCard":               "yes",
+		"hw.ramSize":    "4096",
+		"hw.cpu.ncore":  "6",
+		"hw.lcd.width":  "720",
+		"hw.lcd.height": "1280",
 		// 分辨率变了，皮肤名要跟上；_no_skin 保持不变（hw.lcd.* 才会生效）
 		"skin.name": "720x1280",
 		"skin.path": "_no_skin",
-		// 未涉及的键原样保留
-		"target":          "android-34",
-		"tag.id":          "google_apis",
-		"abi.type":        "x86_64",
-		"showDeviceFrame": "yes",
+		// 未涉及的键原样保留（含档案自带的低频硬件键）
+		"target":                  "android-34",
+		"tag.id":                  "google_apis",
+		"abi.type":                "x86_64",
+		"showDeviceFrame":         "yes",
+		"vm.heapSize":             "256",
+		"hw.lcd.density":          "420",
+		"disk.dataPartition.size": "6G",
 	} {
 		if config[k] != want {
 			t.Errorf("config[%q] = %q，期望 %q", k, config[k], want)
@@ -152,12 +145,12 @@ func TestApplyHardwareUpdatesConfig(t *testing.T) {
 	if !strings.HasPrefix(text, "# 由 avdmanager 生成的配置\n") {
 		t.Errorf("注释应保留在文件开头，实际:\n%s", text)
 	}
-	if strings.Index(text, "hw.ramSize=4096") < strings.Index(text, "disk.dataPartition.size=4096M") {
+	if strings.Index(text, "hw.ramSize=4096") < strings.Index(text, "disk.dataPartition.size=6G") {
 		t.Errorf("原地更新不应改变键的顺序:\n%s", text)
 	}
-	// 写回后必须以单个换行结尾；新增的键追加在末尾（已有键顺序不变）
-	if !strings.HasSuffix(text, "sdcard.size=8192M\nhw.sdCard=yes\n") {
-		t.Errorf("新增键应追加在末尾且文件以换行结尾，实际:\n%s", text)
+	// 写回后必须以单个换行结尾；本次没有新增键，原有键顺序不变
+	if !strings.HasSuffix(text, "vm.heapSize=256\n") {
+		t.Errorf("写回后应以原有末尾键结尾，实际:\n%s", text)
 	}
 	if strings.Contains(text, "\r") || strings.HasSuffix(text, "\n\n") {
 		t.Errorf("文件换行格式不正确: %q", text)
