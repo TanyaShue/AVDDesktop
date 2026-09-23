@@ -539,22 +539,41 @@ func (s *EnvService) probeJava(ctx context.Context, javaPath string, env []strin
 	if strings.TrimSpace(javaPath) == "" {
 		return "", false
 	}
-	version := parseJavaVersion(sdk.ToolVersion(ctx, javaPath, []string{"-version"}, env, javaTimeout))
+	version := parseJavaVersion(sdk.ToolOutput(ctx, javaPath, []string{"-version"}, env, javaTimeout))
 	if version == "" {
 		return "", false
 	}
 	return version, javaMajor(version) >= 17
 }
 
-// parseJavaVersion 从 `java -version` 输出中取版本号（形如 17.0.6 或 1.8.0_392）。
+// parseJavaVersion 从 `java -version` 的完整输出中取版本号（形如 17.0.6 或 1.8.0_392）。
+//
+// 只在包含 version "…" 的行上取号：设置了 JAVA_TOOL_OPTIONS / _JAVA_OPTIONS 时，
+// JVM 会先输出 "Picked up JAVA_TOOL_OPTIONS: …"，因此不能只看首行；
+// 而"取第一对引号"也会被选项里的引号误导。
 func parseJavaVersion(out string) string {
-	text := out
-	if i := strings.Index(text, "\""); i >= 0 {
-		if j := strings.Index(text[i+1:], "\""); j >= 0 {
-			text = text[i+1 : i+1+j]
+	for _, line := range platform.SplitLines(out) {
+		i := strings.Index(line, `version "`)
+		if i < 0 {
+			continue
+		}
+		rest := line[i+len(`version "`):]
+		if j := strings.Index(rest, `"`); j >= 0 {
+			rest = rest[:j]
+		}
+		if v := normalizeJavaVersion(rest); v != "" {
+			return v
 		}
 	}
+	return ""
+}
+
+// normalizeJavaVersion 去掉引号内的修饰（1.8.0_392 → 8.0，21.0.12.1+1 → 21.0.12.1）。
+func normalizeJavaVersion(text string) string {
 	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
 	if strings.HasPrefix(text, "1.") {
 		text = strings.TrimPrefix(text, "1.")
 	}

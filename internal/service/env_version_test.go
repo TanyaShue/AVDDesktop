@@ -47,7 +47,16 @@ func TestParseJavaVersionAndMajor(t *testing.T) {
 		{name: "Temurin 21", out: "openjdk version \"21.0.12.1\" 2026-08-21\nOpenJDK Runtime Environment Temurin-21.0.12.1+1 (build 21.0.12.1+1-LTS)\n", version: "21.0.12.1", major: 21, ok: true},
 		{name: "JDK 17", out: "openjdk version \"17.0.6\" 2023-01-17\n", version: "17.0.6", major: 17, ok: true},
 		{name: "旧版 1.8", out: "java version \"1.8.0_392\"\n", version: "8.0", major: 8, ok: false},
-		{name: "无法解析", out: "not a java version\n", version: "not a java version", major: 0, ok: false},
+		{name: "无法解析", out: "not a java version\n", version: "", major: 0, ok: false},
+		{
+			// 设置了 JAVA_TOOL_OPTIONS 时 JVM 先打印提示行（在 stderr），
+			// 版本行不再是首行；选项里带引号时也不能按"第一对引号"取号。
+			name: "JAVA_TOOL_OPTIONS 提示行在前",
+			out: "Picked up JAVA_TOOL_OPTIONS: -Dfile.encoding=\"UTF-8\" -Xmx2g\n" +
+				"openjdk version \"21.0.2\" 2024-01-16\n" +
+				"OpenJDK Runtime Environment Temurin-21.0.2+13 (build 21.0.2+13-LTS)\n",
+			version: "21.0.2", major: 21, ok: true,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
