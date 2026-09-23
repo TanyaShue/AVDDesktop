@@ -82,7 +82,13 @@ func userDataDir(name string) string {
 			return filepath.Join(home, ".local", "share", name)
 		}
 	}
-	return filepath.Join(".", name)
+	// 标准位置都不可用（精简环境 / 服务式启动）时退回当前工作目录的绝对路径：
+	// 相对路径会让数据根随启动方式漂移（双击与从终端启动得到不同目录，表现为"设置丢失"，
+	// 而且各自的 config 目录不同会让单实例锁失效）。
+	if wd, err := os.Getwd(); err == nil {
+		return filepath.Join(wd, name)
+	}
+	return filepath.Join(os.TempDir(), name)
 }
 
 // JdkRoot 返回软件自带 JDK 的根目录（macOS 归档保留 Contents 目录结构）。

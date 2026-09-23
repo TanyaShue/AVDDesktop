@@ -28,15 +28,26 @@ export function useEnvCheck(
   const [report, setReport] = useState<EnvReport | null>(null);
   const [loading, setLoading] = useState(true);
   const busy = useRef(false);
+  const pending = useRef(false);
 
   const reload = useCallback(async () => {
-    if (busy.current) return;
+    if (busy.current) {
+      // 检查进行中：记一次待办，飞行结束后补跑。
+      // 直接丢弃会让 env:changed 触发的重查静默消失，界面停在过期报告上。
+      pending.current = true;
+      return;
+    }
     busy.current = true;
     setLoading(true);
     try {
-      setReport(api.normalizeEnvReport((await api.Env.Check()) as EnvReport));
-    } catch (err) {
-      onToast("danger", "环境检查失败", errorText(err));
+      do {
+        pending.current = false;
+        try {
+          setReport(api.normalizeEnvReport((await api.Env.Check()) as EnvReport));
+        } catch (err) {
+          onToast("danger", "环境检查失败", errorText(err));
+        }
+      } while (pending.current);
     } finally {
       busy.current = false;
       setLoading(false);

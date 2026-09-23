@@ -275,19 +275,35 @@ func (l *Logger) Files() []string {
 	return out
 }
 
-// Close 关闭文件句柄。
+// Close 关闭文件句柄并停止落盘。
+//
+// 关闭后必须保持"已关闭"状态：shutdown 之后仍在收尾的协程（被取消后才返回的任务、
+// 启动自检）还会打日志，若允许重新打开文件，句柄会泄漏到进程结束，日志里也会出现
+// 排在"应用退出"之后的行。
 func (l *Logger) Close() error {
 	if l == nil {
 		return nil
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.disabled = true
 	if l.file != nil {
 		err := l.file.Close()
 		l.file = nil
 		return err
 	}
 	return nil
+}
+
+// SetKeepDays 动态调整日志保留天数并立即清理（设置页修改时调用）。
+func (l *Logger) SetKeepDays(days int) {
+	if l == nil || days <= 0 {
+		return
+	}
+	l.mu.Lock()
+	l.keepDays = days
+	l.mu.Unlock()
+	l.cleanup()
 }
 
 func (l *Logger) log(level Level, module, format string, args ...any) {

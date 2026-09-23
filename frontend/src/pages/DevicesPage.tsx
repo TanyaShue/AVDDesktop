@@ -21,7 +21,17 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
   const [view, setView] = useState<"grid" | "list">("grid");
   const [sortBy, setSortBy] = useState<"name" | "api">("name");
   const [showWizard, setShowWizard] = useState(false);
-  const [busyName, setBusyName] = useState<string | null>(null);
+  const [busyNames, setBusyNames] = useState<ReadonlySet<string>>(() => new Set());
+
+  /** 标记 / 解除某台设备的操作中状态（按设备名分别管理，避免并发操作互相清除）。 */
+  const setBusy = useCallback((name: string, busy: boolean) => {
+    setBusyNames((prev) => {
+      const next = new Set(prev);
+      if (busy) next.add(name);
+      else next.delete(name);
+      return next;
+    });
+  }, []);
 
   const loadSeq = useRef(0);
 
@@ -79,7 +89,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
   }, [devices, query, sortBy]);
 
   const startDevice = async (device: AvdSummary, opts?: { coldBoot?: boolean; noWindow?: boolean }) => {
-    setBusyName(device.name);
+    setBusy(device.name, true);
     try {
       await api.Emulator.Start({
         avdName: device.name,
@@ -91,12 +101,12 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
     } catch (err) {
       onToast("danger", "启动失败", errorText(err));
     } finally {
-      setBusyName(null);
+      setBusy(device.name, false);
     }
   };
 
   const stopDevice = async (device: AvdSummary) => {
-    setBusyName(device.name);
+    setBusy(device.name, true);
     try {
       await api.Emulator.StopByAvd(device.name, false);
       onToast("success", "已停止 " + device.name);
@@ -104,7 +114,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
     } catch (err) {
       onToast("danger", "停止失败", errorText(err));
     } finally {
-      setBusyName(null);
+      setBusy(device.name, false);
     }
   };
 
@@ -251,7 +261,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                         <button
                           className="btn btn--circle btn--circle-stop"
                           title="停止"
-                          disabled={busyName === device.name}
+                          disabled={busyNames.has(device.name)}
                           onClick={() => void stopDevice(device)}
                         >
                           ■
@@ -260,10 +270,10 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                         <button
                           className="btn btn--circle"
                           title="启动"
-                          disabled={busyName === device.name}
+                          disabled={busyNames.has(device.name)}
                           onClick={() => void startDevice(device)}
                         >
-                          {busyName === device.name ? <span className="spinner" /> : "▶"}
+                          {busyNames.has(device.name) ? <span className="spinner" /> : "▶"}
                         </button>
                       )}
                       <details style={{ position: "relative" }}>

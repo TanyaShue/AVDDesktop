@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -63,7 +64,44 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 	}
 
 	// 只检测软件自带 JDK：即使系统 JAVA_HOME / PATH 中有 java，也不采用。
-	javaVersion, javaOK := s.probeJava(ctx, report.JavaPath, env)
+	//
+	// 各探测互不依赖，并发执行：串行时最坏情况（工具链损坏，每个命令都打满自己的超时）
+	// 会阻塞绑定调用约 5 分钟，而故障环境恰恰是用户最常点"环境检查"的场景。
+	hasAdb := tools.HasAdb() && sdk.VerifyPackage(tools, "platform-tools") == nil
+	hasEmulator := tools.HasEmulator() && sdk.VerifyPackage(tools, "emulator") == nil
+	cmdlineOK := tools.HasSdkmanager() && sdk.VerifyPackage(tools, "cmdline-tools;latest") == nil
+
+	var (
+		javaVersion, adbVersion, emulatorVersion string
+		javaOK                                   bool
+		accel                                    domain.AccelInfo
+		probes                                   sync.WaitGroup
+	)
+	probes.Add(4)
+	go func() {
+		defer probes.Done()
+		javaVersion, javaOK = s.probeJava(ctx, report.JavaPath, env)
+	}()
+	go func() {
+		defer probes.Done()
+		if hasAdb {
+			adbVersion = parseToolVersionLine(sdk.ToolVersion(ctx, tools.Adb, []string{"version"}, env, adbProbe))
+		}
+	}()
+	go func() {
+		defer probes.Done()
+		if hasEmulator {
+			emulatorVersion = parseEmulatorVersion(sdk.ToolOutput(ctx, tools.Emulator, []string{"-version"}, env, emulatorProbe))
+		}
+	}()
+	go func() {
+		defer probes.Done()
+		if tools.HasEmulator() {
+			accel = s.checkAcceleration(ctx, tools, env)
+		}
+	}()
+	probes.Wait()
+
 	report.Components = append(report.Components, toolStatus(domain.ToolJDK, "JDK（软件自带）", javaOK, javaVersion, report.JdkRoot, &domain.ToolFix{
 		Kind:  domain.FixPrepare,
 		Label: "自动下载 JDK",
@@ -71,7 +109,7 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 
 	// sdkmanager / avdmanager 由 JDK 驱动：缺 JDK 时它们即使存在也无法运行。
 	// 同时检查包元数据，避免把以前版本留下的空目录/半成品当成可用环境。
-	cmdlineOK := tools.HasSdkmanager() && sdk.VerifyPackage(tools, "cmdline-tools;latest") == nil
+	// 这两项依赖 JDK 探测结果，因此在并发探测结束后串行执行。
 	sdkmanagerVersion := ""
 	if javaOK && cmdlineOK {
 		sdkmanagerVersion = parseSdkmanagerVersion(sdk.ToolOutput(ctx, tools.Sdkmanager, []string{"--version"}, env, sdkmanagerProbe))
@@ -87,22 +125,14 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 		Label: "准备 / 修复 SDK",
 	}))
 
-	adbVersion := ""
-	adbOK := tools.HasAdb() && sdk.VerifyPackage(tools, "platform-tools") == nil
-	if adbOK {
-		adbVersion = parseToolVersionLine(sdk.ToolVersion(ctx, tools.Adb, []string{"version"}, env, adbProbe))
-	}
+	adbOK := hasAdb && adbVersion != ""
 	report.Components = append(report.Components, toolStatus(domain.ToolAdb, "adb (platform-tools)", adbOK, adbVersion, tools.Adb, &domain.ToolFix{
 		Kind:    domain.FixInstall,
 		Label:   "修复 platform-tools",
 		Payload: "platform-tools",
 	}))
 
-	emulatorVersion := ""
-	emulatorOK := tools.HasEmulator() && sdk.VerifyPackage(tools, "emulator") == nil
-	if emulatorOK {
-		emulatorVersion = parseEmulatorVersion(sdk.ToolOutput(ctx, tools.Emulator, []string{"-version"}, env, emulatorProbe))
-	}
+	emulatorOK := hasEmulator && emulatorVersion != ""
 	report.Components = append(report.Components, toolStatus(domain.ToolEmulator, "emulator", emulatorOK, emulatorVersion, tools.Emulator, &domain.ToolFix{
 		Kind:    domain.FixInstall,
 		Label:   "修复 emulator",
@@ -129,9 +159,8 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 		}
 	}
 
-	// 硬件加速（仅在模拟器存在时检测，命令本身较慢）
+	// 硬件加速（并发探测阶段已完成，仅在模拟器存在时才有结果）
 	if tools.HasEmulator() {
-		accel := s.checkAcceleration(ctx, tools, env)
 		report.Accel = &accel
 		report.Components = append(report.Components, domain.ToolStatus{
 			ID:      domain.ToolAcceleration,
@@ -366,7 +395,9 @@ func (s *EnvService) CopyToClipboard(text string) error {
 	if !s.rt.ContextReady() {
 		return domain.Err(domain.CodeUnknown, "应用尚未就绪")
 	}
-	wailsruntime.ClipboardSetText(s.rt.Context(), text)
+	if err := wailsruntime.ClipboardSetText(s.rt.Context(), text); err != nil {
+		return domain.Wrap(domain.CodeProcessFailed, "写入剪贴板失败", err)
+	}
 	return nil
 }
 

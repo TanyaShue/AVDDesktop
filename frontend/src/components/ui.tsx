@@ -3,6 +3,9 @@ import { useEffect } from "react";
 import type { ReactNode } from "react";
 import type { JobInfo, Toast } from "../bridge/types";
 
+/** 当前挂载的弹窗数量（见 Modal 的滚动锁）。 */
+let modalOpenCount = 0;
+
 export function Modal({
   title,
   size = "md",
@@ -23,9 +26,14 @@ export function Modal({
   footer?: ReactNode;
 }) {
   // 弹窗打开期间锁住底层页面滚动：否则弹窗背后会多出一条滚动条。
+  // 用引用计数：弹窗可以嵌套（向导里再开镜像弹窗），内层关闭时不能解锁外层仍在用的滚动锁。
   useEffect(() => {
+    modalOpenCount += 1;
     document.body.classList.add("modal-open");
-    return () => document.body.classList.remove("modal-open");
+    return () => {
+      modalOpenCount = Math.max(modalOpenCount - 1, 0);
+      if (modalOpenCount === 0) document.body.classList.remove("modal-open");
+    };
   }, []);
 
   return (

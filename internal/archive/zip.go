@@ -52,7 +52,7 @@ func ExtractZip(ctx context.Context, zipPath, destDir string) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return domain.Wrap(domain.CodeArchiveFailed, "创建目录失败: "+filepath.Dir(target), err)
 		}
-		if err := extractZipFile(f, target); err != nil {
+		if err := extractZipFile(ctx, f, target); err != nil {
 			return err
 		}
 	}
@@ -110,7 +110,7 @@ func stripPrefix(name, prefix string) string {
 	return strings.TrimPrefix(normalized, prefix)
 }
 
-func extractZipFile(f *zip.File, target string) error {
+func extractZipFile(ctx context.Context, f *zip.File, target string) error {
 	rc, err := f.Open()
 	if err != nil {
 		return domain.Wrap(domain.CodeArchiveFailed, "无法读取压缩包条目: "+f.Name, err)
@@ -126,11 +126,38 @@ func extractZipFile(f *zip.File, target string) error {
 	if err != nil {
 		return domain.Wrap(domain.CodeArchiveFailed, "无法写入: "+target, err)
 	}
-	if _, err := io.Copy(out, rc); err != nil {
+	if _, err := copyWithContext(ctx, out, rc); err != nil {
 		_ = out.Close()
-		return domain.Wrap(domain.CodeArchiveFailed, "解压写入失败", err)
+		return err
 	}
 	return out.Close()
+}
+
+// copyWithContext 拷贝数据并在过程中响应取消。
+//
+// 条目级别的取消检查不够：单个条目可能有数百 MB（如 JDK 的 lib/modules），
+// 必须能在写入途中立刻中断，否则"取消解压"要等整个文件写完才生效。
+func copyWithContext(ctx context.Context, dst io.Writer, src io.Reader) (int64, error) {
+	buf := make([]byte, 256*1024)
+	var written int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return written, domain.Err(domain.CodeJobCanceled, "解压已取消")
+		}
+		n, readErr := src.Read(buf)
+		if n > 0 {
+			if _, writeErr := dst.Write(buf[:n]); writeErr != nil {
+				return written, domain.Wrap(domain.CodeArchiveFailed, "解压写入失败", writeErr)
+			}
+			written += int64(n)
+		}
+		if readErr == io.EOF {
+			return written, nil
+		}
+		if readErr != nil {
+			return written, domain.Wrap(domain.CodeArchiveFailed, "解压写入失败", readErr)
+		}
+	}
 }
 
 // safeJoin 校验归档条目路径不会逃出 destDir。

@@ -72,7 +72,7 @@ func ExtractTarGz(ctx context.Context, archivePath, destDir string) error {
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return domain.Wrap(domain.CodeArchiveFailed, "创建目录失败: "+filepath.Dir(target), err)
 			}
-			if err := writeTarFile(target, tr, mode); err != nil {
+			if err := writeTarFile(ctx, target, tr, mode); err != nil {
 				return err
 			}
 		case tar.TypeSymlink:
@@ -138,7 +138,7 @@ func tarRootPrefix(ctx context.Context, archivePath string) (string, error) {
 	return singleRootPrefix(names), nil
 }
 
-func writeTarFile(target string, r io.Reader, mode os.FileMode) error {
+func writeTarFile(ctx context.Context, target string, r io.Reader, mode os.FileMode) error {
 	if mode == 0 {
 		mode = 0o644
 	}
@@ -146,9 +146,9 @@ func writeTarFile(target string, r io.Reader, mode os.FileMode) error {
 	if err != nil {
 		return domain.Wrap(domain.CodeArchiveFailed, "无法写入: "+target, err)
 	}
-	if _, err := io.Copy(out, r); err != nil {
+	if _, err := copyWithContext(ctx, out, r); err != nil {
 		_ = out.Close()
-		return domain.Wrap(domain.CodeArchiveFailed, "解压写入失败", err)
+		return err
 	}
 	return out.Close()
 }

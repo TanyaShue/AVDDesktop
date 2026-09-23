@@ -146,8 +146,10 @@ func Run(ctx context.Context, name string, args []string, opts Options) (Result,
 		})
 	}()
 
-	waitErr := cmd.Wait()
+	// 必须先等两个读取协程排空管道，再调用 cmd.Wait：Wait 会关闭父端的管道描述符
+	// （标准库 StdoutPipe 的明确约定），先 Wait 会让输出尾部静默丢失。
 	readWait.Wait()
+	waitErr := cmd.Wait()
 
 	mu.Lock()
 	res.Stdout = outBuf.String()
@@ -204,6 +206,12 @@ func scanStream(r io.Reader, emit func(line string)) {
 		if line := scan.Text(); strings.TrimSpace(line) != "" {
 			emit(line)
 		}
+	}
+	// 单行超过 maxLineBytes 时 bufio 返回 ErrTooLong 并停止读取：这里必须把原因
+	// 交给调用方（作为一行输出），否则该流会静默停止消费管道，子进程写满管道后
+	// 永久阻塞，而错误现场没有任何痕迹。
+	if err := scan.Err(); err != nil {
+		emit(fmt.Sprintf("[proc] 输出读取中断：%v", err))
 	}
 }
 

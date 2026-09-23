@@ -1,5 +1,5 @@
 // 设置页：环境检查（唯一入口）+ 基础偏好。
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import * as api from "../bridge/api";
 import { errorText } from "../bridge/api";
 import type { AppSettings, JobInfo, ResolvedPaths, SystemImage } from "../bridge/types";
@@ -20,6 +20,27 @@ interface Props {
   jobs: JobInfo[];
 }
 
+/** 镜像安装 / 删除任务的标题前缀（与后端 job.Spec.Title 一致）。 */
+const INSTALL_TITLE_PREFIX = "安装系统镜像 ";
+const DELETE_TITLE_PREFIX = "删除系统镜像 ";
+
+/**
+ * 已处理过的任务 id。
+ *
+ * 放在模块作用域：设置页切走会卸载，组件内的 ref 会重建，导致同一个任务被重复处理
+ * （重复弹 toast、重复移除列表项）。
+ */
+const handledInstallJobs = new Set<string>();
+const handledDeleteJobs = new Set<string>();
+
+/** 该镜像是否已有未结束的安装任务（本地跟踪表在切页后会丢失，用任务标题兜底）。 */
+function hasPendingImageJob(jobs: JobInfo[], path: string, prefix: string): boolean {
+  return jobs.some(
+    (job) =>
+      (job.status === "running" || job.status === "queued") && job.title === prefix + path,
+  );
+}
+
 export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [paths, setPaths] = useState<ResolvedPaths | null>(null);
@@ -35,8 +56,6 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
   const [deleteJobs, setDeleteJobs] = useState<Record<string, string>>({});
   const [startingPath, setStartingPath] = useState("");
   const [deletingPath, setDeletingPath] = useState("");
-  const handledJobsRef = useRef(new Set<string>());
-  const handledDeleteJobsRef = useRef(new Set<string>());
 
   const load = useCallback(async () => {
     try {
@@ -96,10 +115,10 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
   useEffect(() => {
     const succeeded = new Set<string>();
     for (const [path, jobId] of Object.entries(installJobs)) {
-      if (handledJobsRef.current.has(jobId)) continue;
+      if (handledInstallJobs.has(jobId)) continue;
       const job = jobs.find((item) => item.id === jobId);
       if (!job || job.status === "queued" || job.status === "running") continue;
-      handledJobsRef.current.add(jobId);
+      handledInstallJobs.add(jobId);
       if (job.status === "succeeded") succeeded.add(path);
     }
     if (succeeded.size === 0) return;
@@ -117,13 +136,17 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
   }, [allImages, installJobs, jobs, loadInstalledImages]);
 
   // 镜像删除任务完成后把条目移出本地列表，并同步弹窗中的安装状态。
+  //
+  // 跟踪关系以任务标题为准（而不是本地 deleteJobs 表）：设置页切走会卸载，
+  // 本地表随之丢失——那样删除按钮会提前恢复可点、列表也不会更新。
   useEffect(() => {
     const removed = new Set<string>();
-    for (const [path, jobId] of Object.entries(deleteJobs)) {
-      if (handledDeleteJobsRef.current.has(jobId)) continue;
-      const job = jobs.find((item) => item.id === jobId);
-      if (!job || job.status === "queued" || job.status === "running") continue;
-      handledDeleteJobsRef.current.add(jobId);
+    for (const job of jobs) {
+      if (job.status === "running" || job.status === "queued") continue;
+      if (!job.title.startsWith(DELETE_TITLE_PREFIX)) continue;
+      if (handledDeleteJobs.has(job.id)) continue;
+      handledDeleteJobs.add(job.id);
+      const path = job.title.slice(DELETE_TITLE_PREFIX.length);
       setDeleteJobs((prev) => {
         if (!(path in prev)) return prev;
         const next = { ...prev };
@@ -447,11 +470,17 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
                         <td className="image-delete-cell">
                           <button
                             className="btn btn--danger-ghost btn--sm"
-                            disabled={deletingPath === img.path || Boolean(deleteJobs[img.path])}
+                            disabled={
+                              deletingPath === img.path ||
+                              Boolean(deleteJobs[img.path]) ||
+                              hasPendingImageJob(jobs, img.path, DELETE_TITLE_PREFIX)
+                            }
                             title="删除本机已安装的镜像"
                             onClick={() => void deleteImage(img)}
                           >
-                            {deletingPath === img.path || deleteJobs[img.path] ? (
+                            {deletingPath === img.path ||
+                            deleteJobs[img.path] ||
+                            hasPendingImageJob(jobs, img.path, DELETE_TITLE_PREFIX) ? (
                               <span className="spinner" />
                             ) : (
                               "删除"

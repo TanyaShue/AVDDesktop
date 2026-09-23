@@ -14,6 +14,9 @@ func applySysProcAttr(cmd *exec.Cmd) {
 }
 
 // KillTree 终止进程组。
+//
+// 与 Windows 实现同理：终止动作不继承调用方已取消的 ctx，否则兜底的 kill 命令
+// 根本不会执行（先尝试的 SIGKILL 失败时尤为明显）。
 func KillTree(ctx context.Context, pid int) error {
 	if pid <= 0 {
 		return nil
@@ -21,7 +24,7 @@ func KillTree(ctx context.Context, pid int) error {
 	if err := syscall.Kill(-pid, syscall.SIGKILL); err == nil {
 		return nil
 	}
-	killCtx, cancel := contextWithShortTimeout(ctx)
+	killCtx, cancel := contextWithShortTimeout(context.Background())
 	defer cancel()
 	return exec.CommandContext(killCtx, "kill", "-9", itoa(pid)).Run()
 }
