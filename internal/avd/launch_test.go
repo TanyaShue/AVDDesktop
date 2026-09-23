@@ -24,10 +24,12 @@ import (
 type fakeADB struct {
 	devices []domain.AdbDevice
 	err     error
+	// waitErr 由 WaitForDevice / WaitForBoot 返回：用于覆盖"开机等待失败"分支。
+	waitErr error
 }
 
-func (f *fakeADB) WaitForDevice(context.Context, string, time.Duration) error { return nil }
-func (f *fakeADB) WaitForBoot(context.Context, string, time.Duration) error   { return nil }
+func (f *fakeADB) WaitForDevice(context.Context, string, time.Duration) error { return f.waitErr }
+func (f *fakeADB) WaitForBoot(context.Context, string, time.Duration) error   { return f.waitErr }
 func (f *fakeADB) Devices(context.Context) ([]domain.AdbDevice, error)        { return f.devices, f.err }
 func (f *fakeADB) EmuKill(context.Context, string) error                      { return nil }
 
@@ -427,6 +429,45 @@ func TestStartRollsBackReservationOnFailure(t *testing.T) {
 	}
 	if got := l.List(); len(got) != 0 {
 		t.Fatalf("失败的启动不得留下实例记录：%+v", got)
+	}
+}
+
+// TestMonitorMarksErrorWhenBootWaitFails 覆盖「开机等待失败」分支：
+// 进程仍在运行、但等待设备上线/开机完成失败或超时时，实例必须进入 error 并保留原因，
+// 而不是停在 booting 或误报成功。
+func TestMonitorMarksErrorWhenBootWaitFails(t *testing.T) {
+	port, _ := freePortRange(t, 1)
+	client := &fakeADB{waitErr: domain.ErrDetail(domain.CodeProcessFailed,
+		"等待设备连接超时", "serial="+adb.SerialForPort(port))}
+	l := NewLauncher(platform.Tools{}, nil, nil, client, nil, logging.Nop())
+	inst := testInstance("Dev1", port)
+	registerInstance(l, inst)
+
+	done := make(chan struct{})
+	go func() { l.monitor(context.Background(), inst); close(done) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		snap, ok := l.Get(inst.info.ID)
+		if ok && snap.State == domain.AvdError {
+			if !strings.Contains(snap.LastError, "超时") {
+				close(inst.exit)
+				t.Fatalf("error 状态未保留失败原因: %q", snap.LastError)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			close(inst.exit)
+			t.Fatalf("开机等待失败后状态 = %s，期望 %s", snap.State, domain.AvdError)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	close(inst.exit)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("monitor 未在进程退出后结束")
 	}
 }
 

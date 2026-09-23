@@ -18,16 +18,22 @@ param()
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
+$previousE2EHome = $env:AVDDESKTOP_E2E_HOME
 try {
     if (-not $env:AVDDESKTOP_E2E_HOME) {
-        $env:AVDDESKTOP_E2E_HOME = Join-Path $env:LOCALAPPDATA "AVDDesktop\e2e"
+        # 跨平台取用户数据目录：pwsh 在 macOS/Linux 上同样可用。
+        $localAppData = [System.Environment]::GetFolderPath("LocalApplicationData")
+        if (-not $localAppData) { $localAppData = [System.IO.Path]::GetTempPath() }
+        $env:AVDDESKTOP_E2E_HOME = [System.IO.Path]::Combine($localAppData, "AVDDesktop", "e2e")
     }
 
     Write-Host "=== AVDDesktop E2E ===" -ForegroundColor Cyan
     Write-Host ("  软件根目录: {0}" -f $env:AVDDESKTOP_E2E_HOME)
     Write-Host ""
 
-    & go test -tags e2e -count=1 -timeout 60m ./internal/e2e/ -v
+    # 全局超时必须大于各步骤预算之和（45m×3 + 60m×2 = 255m），
+    # 否则单步预算还没到期，测试二进制就先被全局超时杀死。
+    & go test -tags e2e -count=1 -timeout 300m ./internal/e2e/ -v
     $code = $LASTEXITCODE
 
     if ($code -eq 0) {
@@ -39,4 +45,6 @@ try {
 }
 finally {
     Pop-Location
+    # 还原调用方会话的环境变量：脚本内设置不应污染当前终端。
+    $env:AVDDESKTOP_E2E_HOME = $previousE2EHome
 }

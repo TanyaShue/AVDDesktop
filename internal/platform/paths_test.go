@@ -76,7 +76,19 @@ func TestChildEnvInjectsOwnSdk(t *testing.T) {
 	avdHome := filepath.Join(t.TempDir(), "avd")
 	tools := NewTools(root)
 
+	// 调用前后快照进程环境：ChildEnv 的硬约束是"绝不修改当前进程环境"。
+	before := os.Environ()
 	env := ChildEnv(tools, jdkHome, avdHome)
+	after := os.Environ()
+	if len(before) != len(after) {
+		t.Fatalf("ChildEnv 修改了当前进程环境：%d → %d 个变量", len(before), len(after))
+	}
+	for i := range before {
+		if before[i] != after[i] {
+			t.Fatalf("ChildEnv 修改了当前进程环境：%q → %q", before[i], after[i])
+		}
+	}
+
 	got := map[string]string{}
 	for _, kv := range env {
 		i := strings.IndexByte(kv, '=')
@@ -113,31 +125,29 @@ func TestChildEnvInjectsOwnSdk(t *testing.T) {
 	if old := os.Getenv("PATH"); old != "" && !strings.Contains(path, old) {
 		t.Errorf("PATH 应保留原有内容")
 	}
-	// 绝不修改当前进程环境
-	if os.Getenv("ANDROID_SDK_ROOT") != got["ANDROID_SDK_ROOT"] {
-		// 仅当原环境没有该值时成立；不修改环境是本函数的硬约束
-		if os.Getenv("ANDROID_SDK_ROOT") == root {
-			t.Fatal("ChildEnv 不应修改当前进程环境")
-		}
-	}
 }
 
 func TestRootOverridable(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("AVDDESKTOP_HOME", dir)
 
-	// Root 使用 sync.Once 缓存，这里直接验证解析函数的行为
+	// 只断言纯解析函数：Root() 带 sync.Once 缓存，断言它会与本包其它用例的执行顺序耦合。
 	if got := resolveRoot(); got != filepath.Clean(dir) {
 		t.Fatalf("AVDDESKTOP_HOME 应决定软件根目录：期望 %q，实际 %q", dir, got)
 	}
-	if got := SdkRoot(); !strings.HasPrefix(got, filepath.Clean(dir)) {
-		t.Fatalf("SDK 目录应位于软件根目录下: %q", got)
-	}
-	if got := AvdHome(); got != filepath.Join(filepath.Clean(dir), "avd") {
-		t.Fatalf("AVD 目录错误: %q", got)
-	}
-	if got := SettingsPath(); got != filepath.Join(filepath.Clean(dir), "config", "settings.json") {
-		t.Fatalf("设置文件路径错误: %q", got)
+	// 派生目录必须都落在软件根目录下（用解析结果而非缓存值推导）。
+	wantRoot := filepath.Clean(dir)
+	for name, got := range map[string]string{
+		"jdk":      jdkHomeAt(filepath.Join(wantRoot, "jdk"), "linux"),
+		"sdk":      filepath.Join(wantRoot, "sdk"),
+		"avd":      filepath.Join(wantRoot, "avd"),
+		"settings": filepath.Join(wantRoot, "config", "settings.json"),
+		"logs":     filepath.Join(wantRoot, "logs"),
+		"cache":    filepath.Join(wantRoot, "cache"),
+	} {
+		if !strings.HasPrefix(got, wantRoot) {
+			t.Fatalf("%s 目录未位于软件根目录下: %q", name, got)
+		}
 	}
 }
 

@@ -4,7 +4,10 @@
 //
 // 运行方式（默认不参与 `go test ./...`）：
 //
-//	go test -tags e2e -timeout 60m ./internal/e2e/ -run TestE2E_EnvPrepare -v
+//	go test -tags e2e -timeout 300m ./internal/e2e/ -run TestE2E_EnvPrepare -v
+//
+// 全局 -timeout 必须大于各步骤预算之和（45m×3 + 60m×2 = 255m）：否则某一步接近
+// 自身预算时，测试二进制会先被全局超时以 panic 杀死，看不到"任务超时（阶段 …）"这类干净失败。
 //
 // 首次运行会真实下载软件自带 JDK（约 200 MB）、官方命令行工具（约 150 MB）与 platform-tools / emulator，
 // 缓存在 AVDDESKTOP_E2E_HOME 指定的软件根目录里（未指定时使用临时目录）。
@@ -263,7 +266,7 @@ func TestE2E_AvdCreate(t *testing.T) {
 		t.Errorf("新建设备不应是损坏状态：%s", created.Broken)
 	}
 
-	official := avdmanagerListAvd(t, tools)
+	official := avdmanagerListAvd(t, rt, tools)
 	if !strings.Contains(official, name) {
 		t.Fatalf("官方 avdmanager list avd 未列出 %s：\n%s", name, official)
 	}
@@ -286,7 +289,7 @@ func TestE2E_AvdCreate(t *testing.T) {
 			t.Fatalf("设备 %s 删除后仍然存在", name)
 		}
 	}
-	if official := avdmanagerListAvd(t, tools); strings.Contains(official, name) {
+	if official := avdmanagerListAvd(t, rt, tools); strings.Contains(official, name) {
 		t.Errorf("官方 avdmanager 仍能看到已删除的设备 %s", name)
 	}
 	t.Logf("删除完成，设备已从软件列表与官方 avdmanager 中消失")
@@ -508,9 +511,10 @@ func apiNumber(api string) int {
 }
 
 // avdmanagerListAvd 通过软件自带的 avdmanager 列出设备（官方工具确认）。
-func avdmanagerListAvd(t *testing.T, tools platform.Tools) string {
+//
+// 复用调用方已组装的运行时：newRuntime 会启动任务管理器的推送协程，每次新建都会泄漏一个。
+func avdmanagerListAvd(t *testing.T, rt *service.Runtime, tools platform.Tools) string {
 	t.Helper()
-	rt := newRuntime(t)
 	res, err := proc.Run(rt.Context(), tools.Avdmanager, []string{"list", "avd"}, proc.Options{
 		Env:     rt.Components().Env,
 		Timeout: 90 * time.Second,

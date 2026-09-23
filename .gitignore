@@ -1,3 +1,12 @@
 build/bin
 frontend/dist
 frontend/node_modules
+
+# 软件数据目录：可执行文件放在仓库根直接运行时（go build 的默认输出），
+# Root 会选中仓库根并生成这些目录，可能达数百 MB。
+/jdk/
+/sdk/
+/avd/
+/config/
+/logs/
+/cache/

@@ -51,6 +51,10 @@
 
 ## 2. 准备删除的模块
 
+> 下表是重构开始时的计划。执行过程中有两项被推翻（见表格中的「已撤销」标注）：
+> 镜像能力按后续要求重新加入，因此 `internal/mirror` 保留、`internal/archive` 也保留了通用下载；
+> 测试范围同样按实际需要扩展。其余各项均已按计划删除。
+
 | 模块 | 行数 | 原因 |
 |---|---|---|
 | `internal/sdk/repo` | 755 | XML 仓库索引解析器（任务书明确禁止） |
@@ -58,17 +62,16 @@
 | `internal/sdk/install` | 554 | 自研安装器；改由 `sdkmanager` 安装 |
 | `internal/sdk/query` | 341 | 本地包扫描；改由 `sdkmanager --list` 提供 |
 | `internal/sdk/detect` | 1336 | 环境探测/归因；合并为「一套环境检查」 |
-| `internal/mirror` | 739 | 镜像源表 + 测速引擎 |
+| ~~`internal/mirror`~~ | 739 | **已撤销**：镜像选择/检测按后续要求重新加入（仅切换 `SDK_TEST_BASE_URL`，安装仍由官方 `sdkmanager` 负责） |
 | `internal/download` | 583 | 分片并发下载框架；只需单连接下载 1 个 zip |
-| `internal/archive` | 401 | 仅保留「安全解压 zip」约 90 行 |
+| ~~`internal/archive`~~ | 401 | **已调整**：保留安全解压 zip/tar.gz 与单连接下载（`download.go`），不再保留分片下载框架 |
 | `internal/avd/backend` | 342 | 删除「直写 config.ini」后端，只用 `avdmanager` |
 | `internal/avd/store/schema.go` `export.go` | 588 | 硬件参数 schema 与导入导出，超出核心流程 |
-| `internal/service/mirror.go` `metadata.go` | 365 | 依赖上面删除的包 |
-| `internal/service/misc.go` 的诊断/自检部分 | ~150 | 与统一环境检查重复 |
+| ~~`internal/service/mirror.go`~~ | 365 | **已撤销**：镜像服务按新方案重写后保留；`metadata.go` 与 `misc.go` 的诊断/自检部分已删除 |
 | `internal/platform` 的路径发现部分 | ~280 | `ResolveSdkRoot`/`DiscoverSdkRoots`/`DefaultSdkRoot` |
 | `internal/platform/open*.go` `proxy*.go` `virtualization*.go` | ~390 | 非核心流程（打开目录/终端代理/Windows 开关归因） |
 | 前端 `HomePage` `SdkPage` `SpeedTestModal` `LogPanel` `LogcatModal` | 约 1.9k | 首页/SDK 页按任务书删除；日志面板合并到底部 |
-| 测试 | — | 仅保留：AVD 创建、Emulator 启动、工具链路径；其余删除 |
+| ~~测试~~ | — | **已调整**：按实际需要扩展（proc / logging / job / sdk / mirror / jdk / archive / platform / adb / service 均有单测），不再局限于三类 |
 
 ## 3. 准备保留的模块（重写幅度不同）
 
@@ -101,20 +104,23 @@
 └─ cache/                      下载临时文件
 ```
 
-代码结构（目标 ~6k 行，删除约 2/3）：
+代码结构（目标 ~6k 行，删除约 2/3；下面是重构后的实际结构）：
 
 ```
 main.go / app.go                        装配与生命周期
-internal/platform/  approot.go paths.go fs.go disk_*.go singleinstance_*.go
+internal/platform/  approot.go paths.go fs.go advice.go disk_*.go singleinstance_*.go lockfile_*.go
 internal/proc/      proc.go sysproc_*.go
 internal/logging/   logger.go
-internal/job/       manager.go
+internal/job/       manager.go speed.go
 internal/config/    settings.go
-internal/domain/    types.go errors.go
-internal/sdk/       sdk.go（工具链/自举/列表/安装）download.go zip.go
-internal/avd/       avd.go（AVD 读写 + avdmanager 创建）launch.go（emulator 启动）
+internal/domain/    types.go lists.go errors.go
+internal/archive/   download.go zip.go tar.go（下载与安全解压）
+internal/jdk/       jdk.go sources.go checker.go（自带 JDK 镜像与安装）
+internal/mirror/    sources.go checker.go（SDK 镜像表与检测）
+internal/sdk/       sdk.go verify.go images.go repository.go progress.go local.go（工具链/自举/列表/安装）
+internal/avd/       avd.go profiles.go create.go launch.go（AVD 读写 + avdmanager 创建 + emulator 启动）
 internal/adb/       adb.go
-internal/service/   runtime.go env.go avd.go emulator.go settings.go jobs.go log.go
+internal/service/   runtime.go env.go accel.go avd.go emulator.go misc.go mirror.go jobprogress.go
 internal/e2e/       e2e_test.go（3 个用例）
 frontend/src/       pages/{DevicesPage,DeviceWizard,SettingsPage} + components/{Chrome,TaskDrawer,...}
 ```

@@ -1,6 +1,14 @@
 package adb
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"AVDDesktop/internal/domain"
+)
 
 // TestParseDevices 解析真实的 `adb devices -l` 输出样本。
 func TestParseDevices(t *testing.T) {
@@ -37,5 +45,47 @@ func TestParseDevices(t *testing.T) {
 func TestParseDevicesEmpty(t *testing.T) {
 	if devices := ParseDevices("List of devices attached\n\n"); len(devices) != 0 {
 		t.Fatalf("空输出应解析出 0 个设备：%+v", devices)
+	}
+}
+
+// TestWaitForDeviceBounds 验证等待设备的边界行为：
+// 已取消的 ctx 立刻返回 JOB_CANCELED；预算已耗尽（超时已过期）时不空等，直接报 PROCESS_FAILED。
+func TestWaitForDeviceBounds(t *testing.T) {
+	c := New(filepath.Join(t.TempDir(), "missing-adb"), nil, nil)
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	assertAppErrorCode(t, c.WaitForDevice(canceled, "emulator-5554", time.Minute), domain.CodeJobCanceled)
+
+	start := time.Now()
+	assertAppErrorCode(t, c.WaitForDevice(context.Background(), "emulator-5554", -time.Second), domain.CodeProcessFailed)
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("等待超时后未及时返回：耗时 %s", elapsed)
+	}
+}
+
+// TestWaitForBootBounds 同上，覆盖等待开机完成的取消与超时路径。
+func TestWaitForBootBounds(t *testing.T) {
+	c := New(filepath.Join(t.TempDir(), "missing-adb"), nil, nil)
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	assertAppErrorCode(t, c.WaitForBoot(canceled, "emulator-5554", time.Minute), domain.CodeJobCanceled)
+
+	start := time.Now()
+	assertAppErrorCode(t, c.WaitForBoot(context.Background(), "emulator-5554", -time.Second), domain.CodeProcessFailed)
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("等待超时后未及时返回：耗时 %s", elapsed)
+	}
+}
+
+func assertAppErrorCode(t *testing.T, err error, want string) {
+	t.Helper()
+	var appErr *domain.AppError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("错误 = %v，期望错误码 %s", err, want)
+	}
+	if appErr.Code != want {
+		t.Fatalf("错误码 = %s，期望 %s（%v）", appErr.Code, want, err)
 	}
 }

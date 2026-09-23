@@ -93,6 +93,109 @@ func TestJobLogSeqMatchesPushedLines(t *testing.T) {
 	}
 }
 
+// TestJobCancelTransitions 验证取消路径的状态转换：context.Canceled → canceled，
+// 且取消后任务上下文确实被取消（runner 必须能通过 ctx.Done 感知）。
+func TestJobCancelTransitions(t *testing.T) {
+	m := NewManager(nil, nil)
+	defer m.Stop()
+
+	started := make(chan struct{})
+	j := m.Start(context.Background(), Spec{Kind: domain.JobInstall, Title: "安装组件"},
+		func(ctx context.Context, j *Job) error {
+			close(started)
+			<-ctx.Done()
+			return ctx.Err()
+		})
+	<-started
+
+	if err := m.Cancel(j.ID()); err != nil {
+		t.Fatalf("Cancel 返回错误：%v", err)
+	}
+	waitJobEnded(t, j)
+	if got := j.Info().Status; got != domain.JobCanceled {
+		t.Fatalf("取消后状态 = %s，期望 %s", got, domain.JobCanceled)
+	}
+	// 已结束的任务再取消是幂等的，不应报错也不应改变状态
+	if err := m.Cancel(j.ID()); err != nil {
+		t.Fatalf("重复取消应无副作用，实际报错：%v", err)
+	}
+	if got := j.Info().Status; got != domain.JobCanceled {
+		t.Fatalf("重复取消后状态 = %s，期望 %s", got, domain.JobCanceled)
+	}
+}
+
+// TestJobFailureCarriesAppError 验证 runner 报错时任务记为失败并保留可展示的错误。
+func TestJobFailureCarriesAppError(t *testing.T) {
+	m := NewManager(nil, nil)
+	defer m.Stop()
+
+	j := m.Start(context.Background(), Spec{Kind: domain.JobInstall, Title: "安装组件"},
+		func(context.Context, *Job) error {
+			return domain.ErrDetail(domain.CodeProcessFailed, "sdkmanager 失败", "exit code 1")
+		})
+	waitJobEnded(t, j)
+
+	info := j.Info()
+	if info.Status != domain.JobFailed {
+		t.Fatalf("状态 = %s，期望 %s", info.Status, domain.JobFailed)
+	}
+	if info.Error == nil || info.Error.Code != domain.CodeProcessFailed {
+		t.Fatalf("失败任务必须携带原始错误码，实际 %+v", info.Error)
+	}
+}
+
+// TestJobCancelAllStopsRunningJobs 验证「停止全部」会取消所有未结束任务。
+func TestJobCancelAllStopsRunningJobs(t *testing.T) {
+	m := NewManager(nil, nil)
+	defer m.Stop()
+
+	const count = 3
+	started := make(chan struct{}, count)
+	jobs := make([]*Job, 0, count)
+	for range count {
+		jobs = append(jobs, m.Start(context.Background(), Spec{Kind: domain.JobInstall, Title: "安装组件"},
+			func(ctx context.Context, _ *Job) error {
+				started <- struct{}{}
+				<-ctx.Done()
+				return ctx.Err()
+			}))
+	}
+	for range count {
+		<-started
+	}
+
+	m.CancelAll()
+	for _, j := range jobs {
+		waitJobEnded(t, j)
+		if got := j.Info().Status; got != domain.JobCanceled {
+			t.Fatalf("任务 %s 状态 = %s，期望 %s", j.ID(), got, domain.JobCanceled)
+		}
+	}
+}
+
+// TestJobContextReleasedAfterEnd 验证任务结束后其 context 被取消。
+//
+// 任务 ctx 派生自应用级 ctx（进程级长寿）；不调用 cancel 时，每个已结束任务都会
+// 永久挂在父 ctx 的 children 链上，随任务数无界累积。
+func TestJobContextReleasedAfterEnd(t *testing.T) {
+	m := NewManager(nil, nil)
+	defer m.Stop()
+
+	var jobCtx context.Context
+	j := m.Start(context.Background(), Spec{Kind: domain.JobInstall, Title: "安装组件"},
+		func(ctx context.Context, _ *Job) error {
+			jobCtx = ctx
+			return nil
+		})
+	waitJobEnded(t, j) // 通过任务锁建立 happens-before，之后读取 jobCtx 是安全的
+
+	select {
+	case <-jobCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("任务结束后其 context 仍未取消：会永久挂在父 ctx 上累积泄漏")
+	}
+}
+
 func waitJobEnded(t *testing.T, j *Job) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
