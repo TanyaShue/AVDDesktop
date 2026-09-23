@@ -26,6 +26,7 @@ func (s *SettingsService) Update(patch map[string]any) (domain.AppSettings, erro
 	}
 	// 日志级别与保留天数需要立即生效
 	s.rt.Log().SetLevel(next.LogLevel)
+	s.rt.Log().SetKeepDays(next.KeepLogDays)
 	return next, nil
 }
 
@@ -36,6 +37,7 @@ func (s *SettingsService) Reset() (domain.AppSettings, error) {
 		return next, err
 	}
 	s.rt.Log().SetLevel(next.LogLevel)
+	s.rt.Log().SetKeepDays(next.KeepLogDays)
 	return next, nil
 }
 

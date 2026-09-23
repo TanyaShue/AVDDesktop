@@ -229,6 +229,10 @@ func (m *Manager) Start(parent context.Context, spec Spec, runner Runner) *Job {
 	m.emit(EventCreated, j.Info())
 
 	go func() {
+		// 任务结束后释放 context：cancel 不调用时，这个子 ctx 会一直挂在父 ctx
+		// （Wails 应用级 ctx，进程级长寿）的 children 链上，随任务数无界累积。
+		defer cancel()
+
 		j.mu.Lock()
 		j.info.Status = domain.JobRunning
 		j.dirty = true

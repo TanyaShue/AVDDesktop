@@ -112,6 +112,14 @@ func TestParseAccelCheck(t *testing.T) {
 			if got.Kind != tc.kind {
 				t.Errorf("Kind = %q，期望 %q", got.Kind, tc.kind)
 			}
+			// 提示必须与平台相关且只在不可用时给出：可用时给提示会让界面误导用户。
+			hints := accelHints(tc.goos, got.Message, got.Available)
+			if tc.available && len(hints) != 0 {
+				t.Errorf("加速可用时不应给出提示：%q", hints)
+			}
+			if !tc.available && len(hints) == 0 {
+				t.Errorf("加速不可用时必须给出可操作提示（goos=%s）", tc.goos)
+			}
 		})
 	}
 }

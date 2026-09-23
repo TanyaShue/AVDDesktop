@@ -132,12 +132,6 @@ func (s *AvdService) Delete(name string) (string, error) {
 	if !comp.Store.Exists(name) {
 		return "", domain.Err(domain.CodeAvdNotFound, "设备不存在: "+name)
 	}
-	if inst, ok := comp.Launcher.ByAvd(name); ok {
-		if err := comp.Launcher.Stop(s.rt.Context(), inst.ID, false); err != nil {
-			return "", err
-		}
-	}
-
 	unlock, ok := s.rt.locks.TryLock("sdk:" + comp.Tools.SdkRoot)
 	if !ok {
 		return "", domain.Err(domain.CodeJobBusy, "已有 SDK 安装或设备写任务正在进行").
@@ -148,6 +142,14 @@ func (s *AvdService) Delete(name string) (string, error) {
 		Title: "删除设备 " + name,
 	}, func(ctx context.Context, j *job.Job) error {
 		defer unlock()
+		// 停实例放在任务体内：取锁失败时不留副作用（不会出现"删除没发生、模拟器却被停掉"），
+		// 停止过程也可被取消，并在底部任务区域显示进度。
+		if inst, running := comp.Launcher.ByAvd(name); running {
+			j.SetPhase("停止运行中的实例")
+			if err := comp.Launcher.Stop(ctx, inst.ID, false); err != nil {
+				return err
+			}
+		}
 		j.SetPhase("正在删除文件")
 		if err := comp.Store.Delete(name); err != nil {
 			return err
@@ -204,7 +206,13 @@ func (s *AvdService) DeleteImage(pkgPath string) (string, error) {
 			"本机没有安装该系统镜像", pkgPath+"："+err.Error()).
 			WithHint("列表里只有已安装的镜像才能删除，请先重新加载列表")
 	}
-	if users := devicesUsingImage(comp.Store, pkgPath); len(users) > 0 {
+	users, err := devicesUsingImage(comp.Store, pkgPath)
+	if err != nil {
+		// 读不到设备列表时拒绝删除：宁可删不掉，也不能误删仍被引用的镜像。
+		return "", domain.Wrap(domain.CodePathNotFound,
+			"无法读取设备列表，为避免误删正在使用的镜像已取消操作", err)
+	}
+	if len(users) > 0 {
 		return "", domain.ErrDetail(domain.CodeFileInUse,
 			"仍有设备在使用该系统镜像", strings.Join(users, "、")).
 			WithHint("请先删除这些设备，或把它们改用其它系统镜像")
@@ -238,20 +246,23 @@ func (s *AvdService) DeleteImage(pkgPath string) (string, error) {
 //
 // 判据优先用 config.ini 的 image.sysdir.1（模拟器启动时实际读取的目录），
 // 配置缺失时退化为 API / tag / ABI 三元组匹配。
-func devicesUsingImage(store *avd.Store, pkgPath string) []string {
+//
+// 读取设备列表失败时返回错误而不是空列表：调用方据此中止删除，
+// 避免把"读不到"当成"没有设备引用"而误删仍在使用的镜像。
+func devicesUsingImage(store *avd.Store, pkgPath string) ([]string, error) {
 	api, tag, abi, err := sdk.SplitImage(pkgPath)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	rel, err := sdk.ImageDir(pkgPath)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	want := strings.Trim(strings.ToLower(filepath.ToSlash(rel)), "/")
 
 	summaries, err := store.List()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var names []string
 	for _, sum := range summaries {
@@ -268,5 +279,5 @@ func devicesUsingImage(store *avd.Store, pkgPath string) []string {
 			names = append(names, sum.Name)
 		}
 	}
-	return names
+	return names, nil
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -63,6 +64,9 @@ type Launcher struct {
 	instances map[string]*instance
 	ports     map[int]bool // 已占用的 console 端口
 	seq       int64
+
+	// procStart 拉起模拟器进程；默认 cmd.Start，测试可替换为不产生真实进程的实现。
+	procStart func(*exec.Cmd) error
 }
 
 type instance struct {
@@ -84,6 +88,7 @@ type instance struct {
 func NewLauncher(tools platform.Tools, env []string, store *Store, adbClient adbClient, sink func(string, any), log logging.Interface) *Launcher {
 	return &Launcher{tools: tools, env: env, store: store, adb: adbClient, sink: sink, log: logging.Or(log),
 		instances: map[string]*instance{}, ports: map[int]bool{},
+		procStart:    func(cmd *exec.Cmd) error { return cmd.Start() },
 		runningProbe: runningProbeInterval, deviceLostFor: deviceLostGrace}
 }
 
@@ -103,6 +108,11 @@ func BuildArgs(avdName string, opts domain.LaunchOptions, port int) []string {
 func (l *Launcher) AllocatePort() (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.allocatePortLocked()
+}
+
+// allocatePortLocked 与 AllocatePort 相同，但要求调用方已持有 l.mu。
+func (l *Launcher) allocatePortLocked() (int, error) {
 	first, last := l.first, l.last
 	if first <= 0 {
 		first, last = defaultFirstPort, defaultLastPort
@@ -131,6 +141,10 @@ func isPortFree(port int) bool {
 }
 
 // Start 启动一个 AVD 实例：立即返回，启动状态由后台协程推进。
+//
+// "该 AVD 是否已在运行"的检查与实例登记必须在同一临界区内完成：先占位再启动进程，
+// 否则进程创建（可达数百毫秒）期间第二个并发 Start 会通过检查，对同一个 AVD
+// 拉起两个 emulator 实例并发读写同一份磁盘镜像。
 func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.LaunchOptions) (*domain.EmulatorInstance, error) {
 	if !platform.FileExists(l.tools.Emulator) {
 		return nil, domain.Err(domain.CodeToolMissing, "未安装模拟器（emulator）").
@@ -140,26 +154,37 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 		return nil, domain.Err(domain.CodeAvdNotFound, "设备不存在: "+avdName)
 	}
 	l.mu.Lock()
-	for _, inst := range l.instances {
-		if inst.info.AvdName == avdName && !processExited(inst.exit) {
+	for _, live := range l.instances {
+		if live.info.AvdName == avdName && !processExited(live.exit) {
 			l.mu.Unlock()
-			return nil, domain.ErrDetail(domain.CodeFileInUse, "该设备已经有一个实例在运行", inst.info.Serial).
+			return nil, domain.ErrDetail(domain.CodeFileInUse, "该设备已经有一个实例在运行", live.info.Serial).
 				WithHint("同一个 AVD 不能同时启动两次；请先停止正在运行的实例")
 		}
 	}
-	l.mu.Unlock()
-	port, err := l.AllocatePort()
+	port, err := l.allocatePortLocked()
 	if err != nil {
+		l.mu.Unlock()
 		return nil, err
 	}
+	l.seq++
+	inst := &instance{exit: make(chan struct{}), info: domain.EmulatorInstance{
+		ID: fmt.Sprintf("emu-%d-%d", port, l.seq), AvdName: avdName, Serial: adb.SerialForPort(port),
+		Port: port, State: domain.AvdStarting, StartedAt: platform.NowMs(),
+	}}
+	l.instances[inst.info.ID] = inst
+	l.mu.Unlock()
+
 	args := BuildArgs(avdName, opts, port)
 	cmd := exec.Command(l.tools.Emulator, args...)
 	cmd.Dir, cmd.Env = l.tools.EmulatorDir, l.env
 	proc.Prepare(cmd)
 	pr, pw := io.Pipe()
 	cmd.Stdout, cmd.Stderr = pw, pw
-	if err := cmd.Start(); err != nil {
-		l.releasePort(port)
+	if err := l.procStart(cmd); err != nil {
+		l.mu.Lock()
+		delete(l.instances, inst.info.ID)
+		delete(l.ports, port)
+		l.mu.Unlock()
 		_ = pw.Close()
 		_ = pr.Close()
 		return nil, domain.Wrap(domain.CodeProcessFailed, "无法启动模拟器", err).
@@ -167,13 +192,11 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 	}
 
 	l.mu.Lock()
-	l.seq++
-	seq := l.seq
-	inst := &instance{cmd: cmd, exit: make(chan struct{}), info: domain.EmulatorInstance{
-		ID: fmt.Sprintf("emu-%d-%d", port, seq), AvdName: avdName, Serial: adb.SerialForPort(port),
-		Port: port, PID: cmd.Process.Pid, State: domain.AvdStarting, StartedAt: platform.NowMs(), Args: args,
-	}}
-	l.instances[inst.info.ID] = inst
+	inst.cmd = cmd
+	if cmd.Process != nil {
+		inst.info.PID = cmd.Process.Pid
+	}
+	inst.info.Args = args
 	// 快照必须在锁内复制：monitor 随后会并发写 inst.info.State。
 	snapshot := inst.info
 	l.mu.Unlock()
@@ -360,8 +383,12 @@ func (l *Launcher) capture(inst *instance, r io.Reader) {
 func (l *Launcher) Stop(ctx context.Context, instanceID string, force bool) error {
 	l.mu.Lock()
 	inst := l.instances[instanceID]
+	var procRef *os.Process
 	if inst != nil {
 		inst.stopRequested = true // 用户主动停止：之后的非 0 退出不记为 error
+		if inst.cmd != nil {
+			procRef = inst.cmd.Process
+		}
 	}
 	l.mu.Unlock()
 	switch {
@@ -378,10 +405,10 @@ func (l *Launcher) Stop(ctx context.Context, instanceID string, force bool) erro
 		}
 		l.log.Warn("emulator", "%s 未在 %s 内优雅退出，改为终止进程树", inst.info.Serial, stopGraceTimeout)
 	}
-	if inst.cmd != nil && inst.cmd.Process != nil {
+	if procRef != nil {
 		// 终止进程树。模拟器可能已部分退出，taskkill 的报错不作为失败依据，
 		// 以实例是否真正结束（进程退出 + 输出管道关闭）为准。
-		if err := proc.KillTree(ctx, inst.cmd.Process.Pid); err != nil {
+		if err := proc.KillTree(ctx, procRef.Pid); err != nil {
 			l.log.Warn("emulator", "终止 %s 的进程树返回错误（继续等待退出）：%v", inst.info.Serial, err)
 		}
 	}

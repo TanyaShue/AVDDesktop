@@ -85,7 +85,8 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
   `ANDROID_AVD_HOME`，并把自带 JDK 与工具链目录前置到 `PATH`，绝不修改当前进程环境。
 - 进程启动隐藏控制台窗口（Windows）并放入独立进程组，终止时结束整棵进程树。
 - 根目录解析顺序：`AVDDESKTOP_HOME` → 可执行文件目录（可写且非临时目录/非 `.app` 包内）→ 用户数据目录。
-- 单实例：Windows 用命名互斥体；其它平台用 `<Root>/config/app.lock` + PID。
+- 单实例：Windows 用命名互斥体；其它平台对 `<Root>/config/app.lock` 加 flock 排他锁
+  （进程退出或崩溃时由内核自动释放，不依赖 PID 存活探测）。
 
 ## 超时策略
 

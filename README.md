@@ -58,7 +58,7 @@ go test ./...
 
 # 端到端测试（真实网络 + 真实 JDK/SDK/AVD 目录，耗时较长）
 $env:AVDDESKTOP_E2E_HOME = "E:\avddesktop-e2e"
-go test -tags e2e -count=1 -timeout 60m ./internal/e2e/ -v
+go test -tags e2e -count=1 -timeout 300m ./internal/e2e/ -v
 ```
 
 ## 常见问题

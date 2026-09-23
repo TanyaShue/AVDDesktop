@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -62,7 +64,44 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 	}
 
 	// 只检测软件自带 JDK：即使系统 JAVA_HOME / PATH 中有 java，也不采用。
-	javaVersion, javaOK := s.probeJava(ctx, report.JavaPath, env)
+	//
+	// 各探测互不依赖，并发执行：串行时最坏情况（工具链损坏，每个命令都打满自己的超时）
+	// 会阻塞绑定调用约 5 分钟，而故障环境恰恰是用户最常点"环境检查"的场景。
+	hasAdb := tools.HasAdb() && sdk.VerifyPackage(tools, "platform-tools") == nil
+	hasEmulator := tools.HasEmulator() && sdk.VerifyPackage(tools, "emulator") == nil
+	cmdlineOK := tools.HasSdkmanager() && sdk.VerifyPackage(tools, "cmdline-tools;latest") == nil
+
+	var (
+		javaVersion, adbVersion, emulatorVersion string
+		javaOK                                   bool
+		accel                                    domain.AccelInfo
+		probes                                   sync.WaitGroup
+	)
+	probes.Add(4)
+	go func() {
+		defer probes.Done()
+		javaVersion, javaOK = s.probeJava(ctx, report.JavaPath, env)
+	}()
+	go func() {
+		defer probes.Done()
+		if hasAdb {
+			adbVersion = parseToolVersionLine(sdk.ToolVersion(ctx, tools.Adb, []string{"version"}, env, adbProbe))
+		}
+	}()
+	go func() {
+		defer probes.Done()
+		if hasEmulator {
+			emulatorVersion = parseEmulatorVersion(sdk.ToolOutput(ctx, tools.Emulator, []string{"-version"}, env, emulatorProbe))
+		}
+	}()
+	go func() {
+		defer probes.Done()
+		if tools.HasEmulator() {
+			accel = s.checkAcceleration(ctx, tools, env)
+		}
+	}()
+	probes.Wait()
+
 	report.Components = append(report.Components, toolStatus(domain.ToolJDK, "JDK（软件自带）", javaOK, javaVersion, report.JdkRoot, &domain.ToolFix{
 		Kind:  domain.FixPrepare,
 		Label: "自动下载 JDK",
@@ -70,7 +109,7 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 
 	// sdkmanager / avdmanager 由 JDK 驱动：缺 JDK 时它们即使存在也无法运行。
 	// 同时检查包元数据，避免把以前版本留下的空目录/半成品当成可用环境。
-	cmdlineOK := tools.HasSdkmanager() && sdk.VerifyPackage(tools, "cmdline-tools;latest") == nil
+	// 这两项依赖 JDK 探测结果，因此在并发探测结束后串行执行。
 	sdkmanagerVersion := ""
 	if javaOK && cmdlineOK {
 		sdkmanagerVersion = parseSdkmanagerVersion(sdk.ToolOutput(ctx, tools.Sdkmanager, []string{"--version"}, env, sdkmanagerProbe))
@@ -86,22 +125,16 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 		Label: "准备 / 修复 SDK",
 	}))
 
-	adbVersion := ""
-	adbOK := tools.HasAdb() && sdk.VerifyPackage(tools, "platform-tools") == nil
-	if adbOK {
-		adbVersion = parseToolVersionLine(sdk.ToolVersion(ctx, tools.Adb, []string{"version"}, env, adbProbe))
-	}
+	// 可用性沿用原判据（存在 + 包元数据完整）：版本只作展示，
+	// 解析失败不代表组件不可用，不能因此把用户引向"重装修复"。
+	adbOK := hasAdb
 	report.Components = append(report.Components, toolStatus(domain.ToolAdb, "adb (platform-tools)", adbOK, adbVersion, tools.Adb, &domain.ToolFix{
 		Kind:    domain.FixInstall,
 		Label:   "修复 platform-tools",
 		Payload: "platform-tools",
 	}))
 
-	emulatorVersion := ""
-	emulatorOK := tools.HasEmulator() && sdk.VerifyPackage(tools, "emulator") == nil
-	if emulatorOK {
-		emulatorVersion = parseEmulatorVersion(sdk.ToolOutput(ctx, tools.Emulator, []string{"-version"}, env, emulatorProbe))
-	}
+	emulatorOK := hasEmulator
 	report.Components = append(report.Components, toolStatus(domain.ToolEmulator, "emulator", emulatorOK, emulatorVersion, tools.Emulator, &domain.ToolFix{
 		Kind:    domain.FixInstall,
 		Label:   "修复 emulator",
@@ -128,9 +161,8 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 		}
 	}
 
-	// 硬件加速（仅在模拟器存在时检测，命令本身较慢）
+	// 硬件加速（并发探测阶段已完成，仅在模拟器存在时才有结果）
 	if tools.HasEmulator() {
-		accel := s.checkAcceleration(ctx, tools, env)
 		report.Accel = &accel
 		report.Components = append(report.Components, domain.ToolStatus{
 			ID:      domain.ToolAcceleration,
@@ -220,10 +252,8 @@ func (s *EnvService) run(sourceID string, repair bool) (string, error) {
 	source, env := mirrorEnv(s.rt, sourceID)
 
 	if repair {
-		if name, ok := activeEmulatorName(comp); ok {
-			return "", domain.Err(domain.CodeJobBusy,
-				"模拟器 "+name+" 正在运行，不能修复 SDK 工具链").
-				WithHint("请先停止所有模拟器，再执行环境修复")
+		if err := guardNoRunningEmulator(comp); err != nil {
+			return "", err
 		}
 	}
 
@@ -320,6 +350,14 @@ func (s *EnvService) run(sourceID string, repair bool) (string, error) {
 			missing = append(missing, "emulator")
 		}
 		if len(missing) > 0 {
+			// 复查：自举/许可阶段可能耗时数分钟，用户可能在此期间启动了模拟器。
+			// 否则 stagePackages 会重命名正在被 emulator.exe 使用的目录（Windows 上
+			// 失败并留下 .repair-old 残留，Unix 上直接让运行中的实例崩溃）。
+			if slices.Contains(missing, "emulator") {
+				if err := guardNoRunningEmulator(comp); err != nil {
+					return err
+				}
+			}
 			j.SetPhase("安装 " + strings.Join(missing, "、"))
 			j.Logf("info", "sdk", "执行：%s", sdk.InstallCommand(tools, missing))
 			stopProgress := watchInstallProgress(ctx, j, tools.SdkRoot, missing, source.BaseURL)
@@ -359,7 +397,9 @@ func (s *EnvService) CopyToClipboard(text string) error {
 	if !s.rt.ContextReady() {
 		return domain.Err(domain.CodeUnknown, "应用尚未就绪")
 	}
-	wailsruntime.ClipboardSetText(s.rt.Context(), text)
+	if err := wailsruntime.ClipboardSetText(s.rt.Context(), text); err != nil {
+		return domain.Wrap(domain.CodeProcessFailed, "写入剪贴板失败", err)
+	}
 	return nil
 }
 
@@ -393,14 +433,32 @@ func (s *EnvService) avdNames(comp *components) []string {
 	return out
 }
 
+// activeEmulatorName 返回仍占用 emulator 可执行文件的实例（AVD 名）。
+//
+// error 态同样算「占用」：等待开机超时会把实例置为 error，但进程可能仍然存活，
+// 此时替换 <sdk>/emulator 目录同样会让实例崩溃。
 func activeEmulatorName(comp *components) (string, bool) {
 	for _, instance := range comp.Launcher.List() {
 		switch instance.State {
-		case domain.AvdStarting, domain.AvdBooting, domain.AvdRunning, domain.AvdStopping:
+		case domain.AvdStarting, domain.AvdBooting, domain.AvdRunning, domain.AvdStopping, domain.AvdError:
 			return instance.AvdName, true
 		}
 	}
 	return "", false
+}
+
+// guardNoRunningEmulator 确认没有实例占用 emulator 可执行文件。
+//
+// 绑定调用与任务体在执行「替换 emulator 目录」之前都必须调用它：只在前端入口检查
+// 存在 TOCTOU 窗口（用户在下载/自举的数分钟里启动模拟器）。
+func guardNoRunningEmulator(comp *components) error {
+	name, busy := activeEmulatorName(comp)
+	if !busy {
+		return nil
+	}
+	return domain.ErrDetail(domain.CodeJobBusy,
+		"模拟器 "+name+" 正在运行，不能替换 SDK 工具链", name).
+		WithHint("请先停止所有模拟器，再执行环境准备/修复")
 }
 
 // buildIssues 汇总可操作的环境问题。
@@ -514,22 +572,41 @@ func (s *EnvService) probeJava(ctx context.Context, javaPath string, env []strin
 	if strings.TrimSpace(javaPath) == "" {
 		return "", false
 	}
-	version := parseJavaVersion(sdk.ToolVersion(ctx, javaPath, []string{"-version"}, env, javaTimeout))
+	version := parseJavaVersion(sdk.ToolOutput(ctx, javaPath, []string{"-version"}, env, javaTimeout))
 	if version == "" {
 		return "", false
 	}
 	return version, javaMajor(version) >= 17
 }
 
-// parseJavaVersion 从 `java -version` 输出中取版本号（形如 17.0.6 或 1.8.0_392）。
+// parseJavaVersion 从 `java -version` 的完整输出中取版本号（形如 17.0.6 或 1.8.0_392）。
+//
+// 只在包含 version "…" 的行上取号：设置了 JAVA_TOOL_OPTIONS / _JAVA_OPTIONS 时，
+// JVM 会先输出 "Picked up JAVA_TOOL_OPTIONS: …"，因此不能只看首行；
+// 而"取第一对引号"也会被选项里的引号误导。
 func parseJavaVersion(out string) string {
-	text := out
-	if i := strings.Index(text, "\""); i >= 0 {
-		if j := strings.Index(text[i+1:], "\""); j >= 0 {
-			text = text[i+1 : i+1+j]
+	for _, line := range platform.SplitLines(out) {
+		i := strings.Index(line, `version "`)
+		if i < 0 {
+			continue
+		}
+		rest := line[i+len(`version "`):]
+		if j := strings.Index(rest, `"`); j >= 0 {
+			rest = rest[:j]
+		}
+		if v := normalizeJavaVersion(rest); v != "" {
+			return v
 		}
 	}
+	return ""
+}
+
+// normalizeJavaVersion 去掉引号内的修饰（1.8.0_392 → 8.0，21.0.12.1+1 → 21.0.12.1）。
+func normalizeJavaVersion(text string) string {
 	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
 	if strings.HasPrefix(text, "1.") {
 		text = strings.TrimPrefix(text, "1.")
 	}

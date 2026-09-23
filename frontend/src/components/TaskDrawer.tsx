@@ -28,11 +28,15 @@ export function TaskDrawer({
   const primary = active[0] ?? null;
   const latest = lines.length > 0 ? lines[lines.length - 1] : null;
 
+  // 跟随最后一行而不是行数：控制台裁剪到 CONSOLE_MAX_LINES 后长度恒定，
+  // 用 lines.length 作依赖会让自动滚动在打满上限后彻底失效。
+  const lastKey = lines.length > 0 ? lines[lines.length - 1].key : "";
+
   useEffect(() => {
     if (expanded && consoleRef.current) {
       consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
     }
-  }, [lines.length, expanded]);
+  }, [lastKey, expanded]);
 
   return (
     <div className="drawer">

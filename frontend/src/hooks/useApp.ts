@@ -52,6 +52,39 @@ export function useWailsEvent<T>(name: string, handler: (payload: T) => void): v
   }, [name]);
 }
 
+/** 前端任务记录上限：与后端 Prune(maxFinishedJobs) 的保留量一致，避免长会话无限增长。 */
+const JOBS_MAX = 20;
+
+/** 按 id 覆盖/插入一条任务（保持"最新在前"的顺序）。 */
+function upsertJob(list: JobInfo[], info: JobInfo): JobInfo[] {
+  const idx = list.findIndex((j) => j.id === info.id);
+  if (idx === -1) return [info, ...list];
+  const next = [...list];
+  next[idx] = info;
+  return next;
+}
+
+/** 裁剪任务记录：优先保留进行中的任务，其余按开始时间从新到旧保留 JOBS_MAX 条。 */
+function trimJobs(list: JobInfo[]): JobInfo[] {
+  if (list.length <= JOBS_MAX) return list;
+  // 先排序再裁剪：不依赖调用方传入的顺序，避免"留下最旧的 20 条"这种隐性错误。
+  const ordered = [...list].sort((a, b) => b.startedAt - a.startedAt);
+  const running = ordered.filter((j) => j.status === "running" || j.status === "queued");
+  const finished = ordered.filter((j) => j.status !== "running" && j.status !== "queued");
+  const keep = Math.max(JOBS_MAX - running.length, 0);
+  return [...running, ...finished.slice(0, keep)].sort((a, b) => b.startedAt - a.startedAt);
+}
+
+/**
+ * 把后端快照合并进本地列表：快照里没有的条目（订阅事件期间新创建的任务）必须保留，
+ * 否则回填会抹掉刚 upsert 的任务，界面上的任务数会短暂丢失。
+ */
+function mergeJobs(prev: JobInfo[], snapshot: JobInfo[]): JobInfo[] {
+  const byId = new Map(snapshot.map((j) => [j.id, j]));
+  const extras = prev.filter((j) => !byId.has(j.id));
+  return trimJobs([...extras, ...snapshot].sort((a, b) => b.startedAt - a.startedAt));
+}
+
 /** 任务列表 + 统一控制台（应用日志 + 任务日志按时间合并）。 */
 export function useJobs() {
   const [jobs, setJobs] = useState<JobInfo[]>([]);
@@ -88,13 +121,7 @@ export function useJobs() {
   }, []);
 
   const upsert = useCallback((info: JobInfo) => {
-    setJobs((prev) => {
-      const idx = prev.findIndex((j) => j.id === info.id);
-      if (idx === -1) return [info, ...prev];
-      const next = [...prev];
-      next[idx] = info;
-      return next;
-    });
+    setJobs((prev) => trimJobs(upsertJob(prev, info)));
   }, []);
 
   useEffect(() => {
@@ -102,7 +129,7 @@ export function useJobs() {
     void (async () => {
       try {
         const list = ((await Jobs.List()) as JobInfo[]) ?? [];
-        setJobs(list);
+        setJobs((prev) => mergeJobs(prev, list));
         const appLines = ((await Logs.Tail(CONSOLE_TAIL)) as LogLine[]) ?? [];
         const finished = list
           .filter((j) => j.status !== "running" && j.status !== "queued")

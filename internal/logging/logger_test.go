@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -179,9 +180,20 @@ func TestNopLoggerIsSafe(t *testing.T) {
 }
 
 func TestEntryJSONShape(t *testing.T) {
-	// 前端统一日志面板依赖这些字段名
-	e := Entry{At: 1, Level: "INFO", Module: "detect", Message: "x"}
-	if e.At != 1 || e.Module != "detect" {
-		t.Fatal("Entry 字段被改动，请同步更新 frontend/src/hooks/useApp.ts 与 TaskDrawer")
+	// 前端统一日志面板按这些键名消费日志，必须断言真实序列化结果，
+	// 而不是"给字段赋值再断言等于该值"（那种断言运行期不可能失败）。
+	e := Entry{At: 1, Level: "INFO", Module: "detect", Message: "x", Seq: 7}
+	raw, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"at", "level", "module", "message", "seq"} {
+		if _, ok := decoded[key]; !ok {
+			t.Fatalf("日志条目缺少 JSON 字段 %q（前端 useApp.ts / TaskDrawer 依赖它）：%s", key, raw)
+		}
 	}
 }

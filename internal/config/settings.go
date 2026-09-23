@@ -3,9 +3,11 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/platform"
@@ -57,10 +59,22 @@ func (m *Manager) Load() error {
 	}
 	settings := Defaults()
 	if err := json.Unmarshal(raw, &settings); err != nil {
-		_ = os.Rename(m.path, m.path+".corrupt")
+		backup := m.path + ".corrupt"
+		if renameErr := os.Rename(m.path, backup); renameErr != nil {
+			// 备份失败（Windows 上目标已存在、文件被占用等）时绝不能直接覆盖原文件：
+			// 换一个不冲突的名字重试，仍失败就报错，把损坏现场留给用户排查。
+			backup = fmt.Sprintf("%s.corrupt-%d", m.path, time.Now().Unix())
+			if retryErr := os.Rename(m.path, backup); retryErr != nil {
+				return domain.Wrap(domain.CodePermissionDenied,
+					"设置文件无法解析且无法备份（未覆盖原文件）", renameErr)
+			}
+		}
 		m.settings = Defaults()
 		return m.saveLocked()
 	}
+	// normalize 会把非法的取值（例如手工改出来的 theme: "blue"）回退为默认值。
+	// 必须在这里就修正：否则非法值会一直留在内存里，之后每次 Update 都在 validate
+	// 处失败，设置页任何字段都保存不了。
 	m.settings = normalize(settings)
 	return nil
 }
@@ -99,13 +113,17 @@ func (m *Manager) Update(patch map[string]any) (domain.AppSettings, error) {
 	if err := json.Unmarshal(merged, &next); err != nil {
 		return m.settings, domain.Wrap(domain.CodeInvalidArgument, "设置值类型不匹配", err)
 	}
-	next = normalize(next)
+	next = fillDefaults(next)
 	if err := validate(next); err != nil {
 		return m.settings, err
 	}
+	// 先写盘再提交内存：写盘失败时内存与磁盘必须保持一致，
+	// 否则界面按返回值显示"已更新"，重启后却静默回滚。
+	saved := m.settings
 	m.settings = next
 	if err := m.saveLocked(); err != nil {
-		return m.settings, err
+		m.settings = saved
+		return saved, err
 	}
 	return m.settings, nil
 }
@@ -114,9 +132,11 @@ func (m *Manager) Update(patch map[string]any) (domain.AppSettings, error) {
 func (m *Manager) Reset() (domain.AppSettings, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	saved := m.settings
 	m.settings = Defaults()
 	if err := m.saveLocked(); err != nil {
-		return m.settings, err
+		m.settings = saved
+		return saved, err
 	}
 	return m.settings, nil
 }
@@ -125,8 +145,9 @@ func (m *Manager) saveLocked() error {
 	return platform.WriteJSON(m.path, m.settings)
 }
 
-// normalize 补齐缺失或非法的字段值。
-func normalize(s domain.AppSettings) domain.AppSettings {
+// fillDefaults 补齐缺失或空字段（不做取值合法性判断：Update 需要在补齐后
+// 用 validate 拒绝非法补丁，而不是静默修正）。
+func fillDefaults(s domain.AppSettings) domain.AppSettings {
 	def := Defaults()
 	if s.Version == 0 {
 		s.Version = def.Version
@@ -142,6 +163,30 @@ func normalize(s domain.AppSettings) domain.AppSettings {
 	}
 	if strings.TrimSpace(s.JDKMirrorSourceID) == "" {
 		s.JDKMirrorSourceID = def.JDKMirrorSourceID
+	}
+	return s
+}
+
+// normalize 在 fillDefaults 之上把非法取值回退为默认值。
+//
+// 不变式：normalize 的返回值一定通过 validate。Load 依赖这一点修复手工编辑
+// 出来的非法值（例如 theme: "blue"），否则非法值会一直留在内存里，之后每次
+// Update 都在 validate 处失败，设置页任何字段都保存不了。
+func normalize(s domain.AppSettings) domain.AppSettings {
+	def := Defaults()
+	s = fillDefaults(s)
+	switch s.Theme {
+	case "light", "dark", "system":
+	default:
+		s.Theme = def.Theme
+	}
+	switch strings.ToLower(strings.TrimSpace(s.LogLevel)) {
+	case "debug", "info", "warn", "error":
+	default:
+		s.LogLevel = def.LogLevel
+	}
+	if s.KeepLogDays < 1 || s.KeepLogDays > 90 {
+		s.KeepLogDays = def.KeepLogDays
 	}
 	return s
 }

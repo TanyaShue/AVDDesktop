@@ -1,5 +1,5 @@
 // 设备页：卡片列表 + 启动/停止 + 多开（对齐参考截图的工具栏与卡片布局）。
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../bridge/api";
 import { EVENTS, errorText } from "../bridge/api";
 import type { AvdState, AvdSummary, EmulatorInstance } from "../bridge/types";
@@ -21,14 +21,32 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
   const [view, setView] = useState<"grid" | "list">("grid");
   const [sortBy, setSortBy] = useState<"name" | "api">("name");
   const [showWizard, setShowWizard] = useState(false);
-  const [busyName, setBusyName] = useState<string | null>(null);
+  const [busyNames, setBusyNames] = useState<ReadonlySet<string>>(() => new Set());
+
+  /** 标记 / 解除某台设备的操作中状态（按设备名分别管理，避免并发操作互相清除）。 */
+  const setBusy = useCallback((name: string, busy: boolean) => {
+    setBusyNames((prev) => {
+      const next = new Set(prev);
+      if (busy) next.add(name);
+      else next.delete(name);
+      return next;
+    });
+  }, []);
+
+  const loadSeq = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     try {
       const list = api.asArray((await api.Avd.List()) as AvdSummary[]);
+      const running = api.asArray((await api.Emulator.ListRunning()) as EmulatorInstance[]);
+      // 只应用最新一次加载的结果：emulator:state 在启动过程中会密集触发 load，
+      // 乱序返回的旧快照会把新状态覆盖回去（界面显示"已停止"但进程还在跑）。
+      if (seq !== loadSeq.current) return;
       setDevices(list);
-      setInstances(api.asArray((await api.Emulator.ListRunning()) as EmulatorInstance[]));
+      setInstances(running);
     } catch (err) {
+      if (seq !== loadSeq.current) return;
       onToast("danger", "无法读取设备列表", errorText(err));
     }
   }, [onToast]);
@@ -71,7 +89,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
   }, [devices, query, sortBy]);
 
   const startDevice = async (device: AvdSummary, opts?: { coldBoot?: boolean; noWindow?: boolean }) => {
-    setBusyName(device.name);
+    setBusy(device.name, true);
     try {
       await api.Emulator.Start({
         avdName: device.name,
@@ -83,12 +101,12 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
     } catch (err) {
       onToast("danger", "启动失败", errorText(err));
     } finally {
-      setBusyName(null);
+      setBusy(device.name, false);
     }
   };
 
   const stopDevice = async (device: AvdSummary) => {
-    setBusyName(device.name);
+    setBusy(device.name, true);
     try {
       await api.Emulator.StopByAvd(device.name, false);
       onToast("success", "已停止 " + device.name);
@@ -96,7 +114,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
     } catch (err) {
       onToast("danger", "停止失败", errorText(err));
     } finally {
-      setBusyName(null);
+      setBusy(device.name, false);
     }
   };
 
@@ -243,7 +261,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                         <button
                           className="btn btn--circle btn--circle-stop"
                           title="停止"
-                          disabled={busyName === device.name}
+                          disabled={busyNames.has(device.name)}
                           onClick={() => void stopDevice(device)}
                         >
                           ■
@@ -252,10 +270,10 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                         <button
                           className="btn btn--circle"
                           title="启动"
-                          disabled={busyName === device.name}
+                          disabled={busyNames.has(device.name)}
                           onClick={() => void startDevice(device)}
                         >
-                          {busyName === device.name ? <span className="spinner" /> : "▶"}
+                          {busyNames.has(device.name) ? <span className="spinner" /> : "▶"}
                         </button>
                       )}
                       <details style={{ position: "relative" }}>
