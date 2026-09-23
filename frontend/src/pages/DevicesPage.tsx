@@ -1,5 +1,5 @@
 // 设备页：卡片列表 + 启动/停止 + 多开（对齐参考截图的工具栏与卡片布局）。
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../bridge/api";
 import { EVENTS, errorText } from "../bridge/api";
 import type { AvdState, AvdSummary, EmulatorInstance } from "../bridge/types";
@@ -23,12 +23,20 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
   const [showWizard, setShowWizard] = useState(false);
   const [busyName, setBusyName] = useState<string | null>(null);
 
+  const loadSeq = useRef(0);
+
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     try {
       const list = api.asArray((await api.Avd.List()) as AvdSummary[]);
+      const running = api.asArray((await api.Emulator.ListRunning()) as EmulatorInstance[]);
+      // 只应用最新一次加载的结果：emulator:state 在启动过程中会密集触发 load，
+      // 乱序返回的旧快照会把新状态覆盖回去（界面显示"已停止"但进程还在跑）。
+      if (seq !== loadSeq.current) return;
       setDevices(list);
-      setInstances(api.asArray((await api.Emulator.ListRunning()) as EmulatorInstance[]));
+      setInstances(running);
     } catch (err) {
+      if (seq !== loadSeq.current) return;
       onToast("danger", "无法读取设备列表", errorText(err));
     }
   }, [onToast]);

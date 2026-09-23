@@ -5,47 +5,26 @@ package platform
 import (
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
-	"syscall"
 )
 
-// AcquireSingleInstance 通过锁文件 + PID 实现单实例（类 Unix）。
+// AcquireSingleInstance 通过锁文件实现单实例（类 Unix）。
+//
+// 具体加锁方式由平台实现决定（见 lockfile_flock.go / lockfile_pid.go）：
+// 优先使用内核 flock——进程崩溃时由内核自动释放，既不依赖 PID 存活探测，
+// 也不受 PID 复用影响。
 func AcquireSingleInstance(name string) (release func(), alreadyRunning bool, err error) {
 	lockPath := filepath.Join(Root(), "config", "app.lock")
 	if err := EnsureDir(filepath.Dir(lockPath)); err != nil {
 		return func() {}, false, err
 	}
-
-	if data, readErr := os.ReadFile(lockPath); readErr == nil {
-		if pid, convErr := strconv.Atoi(strings.TrimSpace(string(data))); convErr == nil && pid > 0 {
-			if processAlive(pid) {
-				return func() {}, true, nil
-			}
-		}
-		// 陈旧锁：进程已不存在，继续接管
-	}
-
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	release, held, err := acquireLockFile(lockPath)
 	if err != nil {
 		return func() {}, false, err
 	}
-	if _, err := f.WriteString(strconv.Itoa(os.Getpid())); err != nil {
-		_ = f.Close()
-		return func() {}, false, err
+	if !held {
+		return func() {}, true, nil
 	}
-	_ = f.Close()
-
-	return func() { _ = os.Remove(lockPath) }, false, nil
-}
-
-func processAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	// 信号 0 只做存在性检查
-	return proc.Signal(syscall.Signal(0)) == nil
+	return release, false, nil
 }
 
 // FocusExistingInstance 在类 Unix 平台不做操作。

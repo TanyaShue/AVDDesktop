@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -362,6 +363,70 @@ func TestStartRejectsDuplicateAvd(t *testing.T) {
 	var appErr *domain.AppError
 	if !errors.As(err, &appErr) || appErr.Code != domain.CodeFileInUse {
 		t.Fatalf("同一 AVD 重复启动错误 = %v，期望错误码 %s", err, domain.CodeFileInUse)
+	}
+}
+
+// TestStartReservesAvdDuringProcessCreation 回归测试：进程创建期间同一 AVD 的第二次启动
+// 必须被拒绝（检查与登记在同一临界区），且启动失败后占位要回滚。
+func TestStartReservesAvdDuringProcessCreation(t *testing.T) {
+	emulator := filepath.Join(t.TempDir(), "emulator")
+	if err := os.WriteFile(emulator, nil, 0o644); err != nil {
+		t.Fatalf("创建测试用 emulator 占位文件失败：%v", err)
+	}
+	l := newTestLauncher()
+	l.tools.Emulator = emulator
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	started := 0
+	l.procStart = func(*exec.Cmd) error {
+		started++
+		if started == 1 {
+			close(entered)
+			<-release // 停在"进程创建"阶段，模拟耗时的 CreateProcess
+		}
+		return errors.New("stub: 进程创建失败")
+	}
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := l.Start(context.Background(), "Dev1", domain.LaunchOptions{})
+		first <- err
+	}()
+	<-entered
+
+	_, err := l.Start(context.Background(), "Dev1", domain.LaunchOptions{})
+	var appErr *domain.AppError
+	if !errors.As(err, &appErr) || appErr.Code != domain.CodeFileInUse {
+		t.Fatalf("进程创建期间同一 AVD 的第二次启动 = %v，期望错误码 %s", err, domain.CodeFileInUse)
+	}
+	close(release)
+	if err := <-first; err == nil {
+		t.Fatal("进程创建失败时 Start 应返回错误")
+	}
+}
+
+// TestStartRollsBackReservationOnFailure 验证进程创建失败后不会留下"幽灵占用"。
+func TestStartRollsBackReservationOnFailure(t *testing.T) {
+	emulator := filepath.Join(t.TempDir(), "emulator")
+	if err := os.WriteFile(emulator, nil, 0o644); err != nil {
+		t.Fatalf("创建测试用 emulator 占位文件失败：%v", err)
+	}
+	l := newTestLauncher()
+	l.tools.Emulator = emulator
+	l.procStart = func(*exec.Cmd) error { return errors.New("stub: 进程创建失败") }
+
+	if _, err := l.Start(context.Background(), "Dev1", domain.LaunchOptions{}); err == nil {
+		t.Fatal("进程创建失败时 Start 应返回错误")
+	}
+	// 再启动一次：必须重新走到进程创建，而不是被上一次失败留下的占位判为 FILE_IN_USE。
+	_, err := l.Start(context.Background(), "Dev1", domain.LaunchOptions{})
+	var appErr *domain.AppError
+	if !errors.As(err, &appErr) || appErr.Code != domain.CodeProcessFailed {
+		t.Fatalf("失败启动后再次启动 = %v，期望错误码 %s（占位未回滚）", err, domain.CodeProcessFailed)
+	}
+	if got := l.List(); len(got) != 0 {
+		t.Fatalf("失败的启动不得留下实例记录：%+v", got)
 	}
 }
 
