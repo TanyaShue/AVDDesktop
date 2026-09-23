@@ -1,5 +1,6 @@
 // 设备页：卡片列表 + 启动/停止 + 多开（对齐参考截图的工具栏与卡片布局）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import * as api from "../bridge/api";
 import { EVENTS, errorText } from "../bridge/api";
 import type { AvdState, AvdSummary, EmulatorInstance } from "../bridge/types";
@@ -22,6 +23,10 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
   const [sortBy, setSortBy] = useState<"name" | "api">("name");
   const [showWizard, setShowWizard] = useState(false);
   const [busyNames, setBusyNames] = useState<ReadonlySet<string>>(() => new Set());
+  /** 当前展开「更多操作」的设备名：同一时间只允许一个菜单展开。 */
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+
+  const closeMenu = useCallback(() => setOpenMenu(null), []);
 
   /** 标记 / 解除某台设备的操作中状态（按设备名分别管理，避免并发操作互相清除）。 */
   const setBusy = useCallback((name: string, busy: boolean) => {
@@ -276,45 +281,31 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                           {busyNames.has(device.name) ? <span className="spinner" /> : "▶"}
                         </button>
                       )}
-                      <details style={{ position: "relative" }}>
-                        <summary
-                          className="btn btn--round-soft"
-                          style={{ listStyle: "none", display: "grid", placeItems: "center" }}
-                          title="更多操作"
-                        >
-                          ⋯
-                        </summary>
-                        <div
-                          className="card"
-                          style={{
-                            position: "absolute",
-                            right: 0,
-                            top: 44,
-                            zIndex: 20,
-                            padding: 6,
-                            minWidth: 180,
-                            boxShadow: "var(--shadow-pop)",
-                          }}
-                        >
-                          <MenuItem
-                            label="冷启动（不使用快照）"
-                            onClick={() => void startDevice(device, { coldBoot: true })}
-                          />
-                          <MenuItem
-                            label="无窗口启动"
-                            onClick={() => void startDevice(device, { noWindow: true })}
-                          />
-                          <MenuItem
-                            label="复制启动命令"
-                            onClick={() =>
-                              void api.Env.CopyToClipboard(
-                                `emulator -avd ${device.name} -port ${inst?.port ?? 5554}`,
-                              )
-                            }
-                          />
-                          <MenuItem label="删除设备" danger onClick={() => void deleteDevice(device)} />
-                        </div>
-                      </details>
+                      <MoreMenu
+                        open={openMenu === device.name}
+                        onToggle={() =>
+                          setOpenMenu((prev) => (prev === device.name ? null : device.name))
+                        }
+                        onClose={closeMenu}
+                      >
+                        <MenuItem
+                          label="冷启动（不使用快照）"
+                          onClick={() => void startDevice(device, { coldBoot: true })}
+                        />
+                        <MenuItem
+                          label="无窗口启动"
+                          onClick={() => void startDevice(device, { noWindow: true })}
+                        />
+                        <MenuItem
+                          label="复制启动命令"
+                          onClick={() =>
+                            void api.Env.CopyToClipboard(
+                              `emulator -avd ${device.name} -port ${inst?.port ?? 5554}`,
+                            )
+                          }
+                        />
+                        <MenuItem label="删除设备" danger onClick={() => void deleteDevice(device)} />
+                      </MoreMenu>
                     </div>
                   </div>
                 </div>
@@ -330,6 +321,78 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
           onCreated={() => void load()}
           onToast={onToast}
         />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * 「更多操作」下拉菜单：受控展开，点击菜单以外的任意位置（页面空白、其它卡片、工具栏、
+ * 其它设备的更多按钮）或按 Esc 都会收起。原生 <details> 不会监听外部点击，因此这里改为受控实现。
+ */
+function MoreMenu({
+  open,
+  onToggle,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (e: PointerEvent) => {
+      const root = rootRef.current;
+      // 触发按钮也在 rootRef 内：点它交给 onClick 做开/关切换，这里不参与。
+      if (!root || (e.target instanceof Node && root.contains(e.target))) return;
+      onClose();
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    // 捕获阶段监听：即使目标元素 stopPropagation 也能先一步收起菜单。
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open, onClose]);
+
+  return (
+    <div ref={rootRef} style={{ position: "relative" }}>
+      <button
+        className="btn btn--round-soft"
+        style={{ display: "grid", placeItems: "center" }}
+        title="更多操作"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        ⋯
+      </button>
+      {open ? (
+        <div
+          className="card"
+          role="menu"
+          // 选中任意条目后冒泡到这里收起菜单。
+          onClick={onClose}
+          style={{
+            position: "absolute",
+            right: 0,
+            top: 44,
+            zIndex: 20,
+            padding: 6,
+            minWidth: 180,
+            boxShadow: "var(--shadow-pop)",
+          }}
+        >
+          {children}
+        </div>
       ) : null}
     </div>
   );
