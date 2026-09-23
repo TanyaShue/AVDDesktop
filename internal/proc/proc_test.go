@@ -54,6 +54,22 @@ func procTestHelper(t *testing.T) {
 			_ = f.Close()
 			time.Sleep(100 * time.Millisecond)
 		}
+	case "orphan-pipe":
+		// 模拟「直接子进程退出、孙进程仍持有输出管道」：工具（如 .bat 包装器或
+		// emulator 的辅助进程）派生后台进程后立即返回，后台进程继承 stdout。
+		child := exec.Command(os.Args[0], "-test.run=TestRunReturnsWhenGrandchildHoldsPipe")
+		child.Env = append(os.Environ(), "PROC_TEST_HELPER=hold-pipe")
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		if err := child.Start(); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0) // 父进程立刻退出，不等孙进程
+	case "hold-pipe":
+		// 记录 PID 供测试收尾清理（否则这个进程会持有测试二进制直到超时）。
+		if pidFile := os.Getenv("PROC_TEST_TREE_PIDFILE"); pidFile != "" {
+			_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o644)
+		}
+		time.Sleep(120 * time.Second)
 	}
 	os.Exit(0)
 }
@@ -222,6 +238,52 @@ func fileSize(t *testing.T, path string) int64 {
 		return -1
 	}
 	return info.Size()
+}
+
+// TestRunReturnsWhenGrandchildHoldsPipe 回归测试：直接子进程退出后，
+// 若孙进程仍持有输出管道，Run 必须在有限时间内返回。
+//
+// 只"先排空管道再 Wait"会在这里永久阻塞：管道由孙进程持有，父进程已经退出，
+// 终止进程树的兜底动作找不到目标，读取端永远等不到 EOF。
+func TestRunReturnsWhenGrandchildHoldsPipe(t *testing.T) {
+	helperMode(t, "orphan-pipe")
+
+	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
+	t.Cleanup(func() {
+		// 孙进程稍后才写入 PID：轮询等待，确保一定被清理。
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			data, err := os.ReadFile(pidFile)
+			if err != nil {
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
+			pid, convErr := strconv.Atoi(strings.TrimSpace(string(data)))
+			if convErr == nil {
+				_ = KillTree(context.Background(), pid) // 清理持有管道的孙进程
+			}
+			return
+		}
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := Run(context.Background(), os.Args[0],
+			[]string{"-test.run=TestRunReturnsWhenGrandchildHoldsPipe"}, Options{
+				Env: append(os.Environ(),
+					"PROC_TEST_HELPER=orphan-pipe",
+					"PROC_TEST_TREE_PIDFILE="+pidFile,
+				),
+				Timeout: 3 * time.Second,
+			})
+		done <- err
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("孙进程持有输出管道时 Run 未在 20 秒内返回（读取端永久阻塞）")
+	}
 }
 
 // helperMode 让本次测试进程在进入被测逻辑前挂起为“父进程模式”。

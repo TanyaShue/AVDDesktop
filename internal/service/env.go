@@ -125,14 +125,16 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 		Label: "准备 / 修复 SDK",
 	}))
 
-	adbOK := hasAdb && adbVersion != ""
+	// 可用性沿用原判据（存在 + 包元数据完整）：版本只作展示，
+	// 解析失败不代表组件不可用，不能因此把用户引向"重装修复"。
+	adbOK := hasAdb
 	report.Components = append(report.Components, toolStatus(domain.ToolAdb, "adb (platform-tools)", adbOK, adbVersion, tools.Adb, &domain.ToolFix{
 		Kind:    domain.FixInstall,
 		Label:   "修复 platform-tools",
 		Payload: "platform-tools",
 	}))
 
-	emulatorOK := hasEmulator && emulatorVersion != ""
+	emulatorOK := hasEmulator
 	report.Components = append(report.Components, toolStatus(domain.ToolEmulator, "emulator", emulatorOK, emulatorVersion, tools.Emulator, &domain.ToolFix{
 		Kind:    domain.FixInstall,
 		Label:   "修复 emulator",
