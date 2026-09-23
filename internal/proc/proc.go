@@ -79,6 +79,12 @@ func Run(ctx context.Context, name string, args []string, opts Options) (Result,
 		cmd.Env = opts.Env
 	}
 	applySysProcAttr(cmd)
+	// 超时/取消必须结束整棵进程树：Windows 上 sdkmanager.bat 经 cmd.exe 派生 java.exe，
+	// 只终止直接子进程会把 java 变成孤儿——它继续写 SDK 目录，与用户重试的下一次安装
+	// 并发冲突。这里刻意不使用 runCtx：runCtx 已取消时，基于它的终止动作会立刻失败。
+	cmd.Cancel = func() error { return KillTree(context.Background(), cmd.Process.Pid) }
+	// 终止后仍被孤儿子进程握着的管道，在等待上限后强制关闭，避免 Wait 永久阻塞。
+	cmd.WaitDelay = treeKillWaitDelay
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -150,6 +156,12 @@ func Run(ctx context.Context, name string, args []string, opts Options) (Result,
 	res.Duration = time.Since(start)
 	res.ExitCode = 0
 
+	// ErrWaitDelay 表示进程本身已正常退出，只是有孙进程仍持有输出管道：
+	// 按成功处理，绝不能因为清理动作把正常结果误报成失败。
+	if errors.Is(waitErr, exec.ErrWaitDelay) {
+		waitErr = nil
+	}
+
 	if waitErr != nil {
 		var exitErr *exec.ExitError
 		if errors.As(waitErr, &exitErr) {
@@ -175,6 +187,9 @@ func Run(ctx context.Context, name string, args []string, opts Options) (Result,
 
 // maxLineBytes 是单行输出的上限（超出后该流停止读取，避免异常程序打爆内存）。
 const maxLineBytes = 4 * 1024 * 1024
+
+// treeKillWaitDelay 是终止进程树后等待输出管道关闭的上限。
+const treeKillWaitDelay = 15 * time.Second
 
 // scanStream 按行读取子进程输出并逐行回调。
 //

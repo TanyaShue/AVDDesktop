@@ -38,7 +38,10 @@ func TestDevicesUsingImage(t *testing.T) {
 
 	store := avd.New(home, filepath.Join(t.TempDir(), "sdk"))
 
-	got := devicesUsingImage(store, "system-images;android-36;google_apis;x86_64")
+	got, err := devicesUsingImage(store, "system-images;android-36;google_apis;x86_64")
+	if err != nil {
+		t.Fatalf("devicesUsingImage 返回错误: %v", err)
+	}
 	want := map[string]bool{"Pixel36": true, "NoSysdir": true}
 	if len(got) != len(want) {
 		t.Fatalf("使用该镜像的设备 = %#v，期望 %d 个", got, len(want))
@@ -49,10 +52,26 @@ func TestDevicesUsingImage(t *testing.T) {
 		}
 	}
 
-	if other := devicesUsingImage(store, "system-images;android-35;google_apis_playstore;x86_64"); len(other) != 0 {
+	other, err := devicesUsingImage(store, "system-images;android-35;google_apis_playstore;x86_64")
+	if err != nil {
+		t.Fatalf("devicesUsingImage 返回错误: %v", err)
+	}
+	if len(other) != 0 {
 		t.Fatalf("未安装的其它镜像不应命中任何设备: %#v", other)
 	}
-	if bad := devicesUsingImage(store, "platform-tools"); len(bad) != 0 {
-		t.Fatalf("非系统镜像路径不应命中任何设备: %#v", bad)
+	if _, err := devicesUsingImage(store, "platform-tools"); err == nil {
+		t.Fatal("非系统镜像路径应当报错，而不是当作没有设备引用")
+	}
+}
+
+// TestDevicesUsingImageListError 覆盖「读不到设备列表」：必须返回错误，
+// 让删除流程中止，而不是把读取失败当成「没有设备引用」继续删除。
+func TestDevicesUsingImageListError(t *testing.T) {
+	// 含 NUL 的路径在 Windows 与 Unix 上都必然以非 ENOENT 的错误失败，
+	// 对应现实中的「AVD 目录无法读取（权限 / 损坏）」场景。
+	store := avd.New(filepath.Join(t.TempDir(), "bad\x00dir"), filepath.Join(t.TempDir(), "sdk"))
+
+	if _, err := devicesUsingImage(store, "system-images;android-36;google_apis;x86_64"); err == nil {
+		t.Fatal("设备列表不可读时必须返回错误，否则会误删仍被引用的镜像")
 	}
 }

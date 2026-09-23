@@ -2,10 +2,17 @@ package proc
 
 import (
 	"context"
+	"errors"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"AVDDesktop/internal/domain"
 )
 
 // procTestHelper 是子进程入口：以当前测试二进制自身作为被测外部程序，
@@ -23,6 +30,30 @@ func procTestHelper(t *testing.T) {
 		_, _ = os.Stdout.WriteString("第二行\n")
 	case "crlf":
 		_, _ = os.Stdout.WriteString("a\r\n\r\nb\n")
+	case "tree-parent":
+		// 模拟 sdkmanager.bat 经 cmd.exe 派生 java.exe：父进程拉起孙进程后自己保持存活，
+		// 孙进程继承 stdout 管道并持续写心跳文件（用于判断它是否真的被终止）。
+		child := exec.Command(os.Args[0], "-test.run=TestRunKillsProcessTreeOnCancel")
+		child.Env = append(os.Environ(), "PROC_TEST_HELPER=tree-child")
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		if err := child.Start(); err != nil {
+			os.Exit(1)
+		}
+		time.Sleep(120 * time.Second)
+	case "tree-child":
+		beat := os.Getenv("PROC_TEST_TREE_BEAT")
+		if pidFile := os.Getenv("PROC_TEST_TREE_PIDFILE"); pidFile != "" {
+			_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o644)
+		}
+		for {
+			f, err := os.OpenFile(beat, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+			if err != nil {
+				os.Exit(1)
+			}
+			_, _ = f.WriteString("x")
+			_ = f.Close()
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
 	os.Exit(0)
 }
@@ -117,6 +148,80 @@ func TestRunTreatsCRLFAsOneSeparator(t *testing.T) {
 	if res.Stdout != "a\nb\n" {
 		t.Errorf("Result.Stdout = %q，期望 %q", res.Stdout, "a\nb\n")
 	}
+}
+
+// TestRunKillsProcessTreeOnCancel 验证取消/超时会结束整棵进程树。
+//
+// 只终止直接子进程会留下孤儿孙进程（Windows 上 sdkmanager.bat → cmd.exe → java.exe），
+// 它继续持有 stdout 管道并写 SDK 目录，与用户重试的下一次安装并发冲突。
+func TestRunKillsProcessTreeOnCancel(t *testing.T) {
+	helperMode(t, "tree-parent")
+
+	dir := t.TempDir()
+	beat := filepath.Join(dir, "heartbeat.txt")
+	pidFile := filepath.Join(dir, "grandchild.pid")
+	t.Cleanup(func() {
+		if data, err := os.ReadFile(pidFile); err == nil {
+			if pid, convErr := strconv.Atoi(strings.TrimSpace(string(data))); convErr == nil {
+				_ = KillTree(context.Background(), pid) // 失败时清理，避免留下测试孤儿
+			}
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := Run(ctx, os.Args[0], []string{"-test.run=TestRunKillsProcessTreeOnCancel"}, Options{
+			Env: append(os.Environ(),
+				"PROC_TEST_HELPER=tree-parent",
+				"PROC_TEST_TREE_BEAT="+beat,
+				"PROC_TEST_TREE_PIDFILE="+pidFile,
+			),
+			Timeout: 2 * time.Minute,
+		})
+		done <- err
+	}()
+
+	waitForFile(t, beat, 30*time.Second) // 孙进程已开始写心跳
+	cancel()
+
+	select {
+	case err := <-done:
+		var appErr *domain.AppError
+		if !errors.As(err, &appErr) || appErr.Code != domain.CodeJobCanceled {
+			t.Fatalf("Run 返回错误 = %v，期望 %s", err, domain.CodeJobCanceled)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("Run 在取消后 30 秒仍未返回（进程树终止可能挂死）")
+	}
+
+	size := fileSize(t, beat)
+	time.Sleep(700 * time.Millisecond)
+	if got := fileSize(t, beat); got != size {
+		t.Fatalf("取消后孙进程仍在写心跳（%d → %d 字节）：进程树未被终止", size, got)
+	}
+}
+
+func waitForFile(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if info, err := os.Stat(path); err == nil && info.Size() > 0 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("等待文件 %s 出现超时", path)
+}
+
+func fileSize(t *testing.T, path string) int64 {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		return -1
+	}
+	return info.Size()
 }
 
 // helperMode 让本次测试进程在进入被测逻辑前挂起为“父进程模式”。

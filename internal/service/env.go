@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -220,10 +221,8 @@ func (s *EnvService) run(sourceID string, repair bool) (string, error) {
 	source, env := mirrorEnv(s.rt, sourceID)
 
 	if repair {
-		if name, ok := activeEmulatorName(comp); ok {
-			return "", domain.Err(domain.CodeJobBusy,
-				"模拟器 "+name+" 正在运行，不能修复 SDK 工具链").
-				WithHint("请先停止所有模拟器，再执行环境修复")
+		if err := guardNoRunningEmulator(comp); err != nil {
+			return "", err
 		}
 	}
 
@@ -320,6 +319,14 @@ func (s *EnvService) run(sourceID string, repair bool) (string, error) {
 			missing = append(missing, "emulator")
 		}
 		if len(missing) > 0 {
+			// 复查：自举/许可阶段可能耗时数分钟，用户可能在此期间启动了模拟器。
+			// 否则 stagePackages 会重命名正在被 emulator.exe 使用的目录（Windows 上
+			// 失败并留下 .repair-old 残留，Unix 上直接让运行中的实例崩溃）。
+			if slices.Contains(missing, "emulator") {
+				if err := guardNoRunningEmulator(comp); err != nil {
+					return err
+				}
+			}
 			j.SetPhase("安装 " + strings.Join(missing, "、"))
 			j.Logf("info", "sdk", "执行：%s", sdk.InstallCommand(tools, missing))
 			stopProgress := watchInstallProgress(ctx, j, tools.SdkRoot, missing, source.BaseURL)
@@ -393,14 +400,32 @@ func (s *EnvService) avdNames(comp *components) []string {
 	return out
 }
 
+// activeEmulatorName 返回仍占用 emulator 可执行文件的实例（AVD 名）。
+//
+// error 态同样算「占用」：等待开机超时会把实例置为 error，但进程可能仍然存活，
+// 此时替换 <sdk>/emulator 目录同样会让实例崩溃。
 func activeEmulatorName(comp *components) (string, bool) {
 	for _, instance := range comp.Launcher.List() {
 		switch instance.State {
-		case domain.AvdStarting, domain.AvdBooting, domain.AvdRunning, domain.AvdStopping:
+		case domain.AvdStarting, domain.AvdBooting, domain.AvdRunning, domain.AvdStopping, domain.AvdError:
 			return instance.AvdName, true
 		}
 	}
 	return "", false
+}
+
+// guardNoRunningEmulator 确认没有实例占用 emulator 可执行文件。
+//
+// 绑定调用与任务体在执行「替换 emulator 目录」之前都必须调用它：只在前端入口检查
+// 存在 TOCTOU 窗口（用户在下载/自举的数分钟里启动模拟器）。
+func guardNoRunningEmulator(comp *components) error {
+	name, busy := activeEmulatorName(comp)
+	if !busy {
+		return nil
+	}
+	return domain.ErrDetail(domain.CodeJobBusy,
+		"模拟器 "+name+" 正在运行，不能替换 SDK 工具链", name).
+		WithHint("请先停止所有模拟器，再执行环境准备/修复")
 }
 
 // buildIssues 汇总可操作的环境问题。
