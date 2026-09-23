@@ -83,6 +83,10 @@ func (s *AvdService) Create(spec domain.AvdSpec) (string, error) {
 	if _, _, _, err := sdk.SplitImage(spec.SystemImagePath); err != nil {
 		return "", err
 	}
+	// 硬件覆盖项在创建前校验：参数不合法时不要启任务、更不要留下半成品设备。
+	if err := avd.ValidateHardware(spec.Hardware); err != nil {
+		return "", err
+	}
 
 	unlock, ok := s.rt.locks.TryLock("sdk:" + comp.Tools.SdkRoot)
 	if !ok {
@@ -111,6 +115,9 @@ func (s *AvdService) Create(spec domain.AvdSpec) (string, error) {
 		}
 
 		j.SetPhase("avdmanager 创建中")
+		if desc := avd.DescribeHardware(spec.Hardware); desc != "" {
+			j.Logf("info", "hardware", "自定义硬件参数：%s（其余参数按设备档案生成）", desc)
+		}
 		summary, err := comp.Store.Create(ctx, comp.Tools, comp.Env, spec, jobLine(j, "avdmanager"))
 		if err != nil {
 			return err

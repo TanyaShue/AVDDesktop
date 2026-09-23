@@ -235,13 +235,42 @@ type AvdSummary struct {
 	Serial          string   `json:"serial,omitempty"`
 	Port            int      `json:"port,omitempty"`
 	Broken          string   `json:"broken,omitempty"` // 非空表示该 AVD 配置有问题
+
+	// 以下字段来自 config.ini，用于在设备卡片上直接显示当前生效的硬件参数。
+	RAMMB     int `json:"ramMb,omitempty"`
+	CPUCores  int `json:"cpuCores,omitempty"`
+	LCDWidth  int `json:"lcdWidth,omitempty"`
+	LCDHeight int `json:"lcdHeight,omitempty"`
 }
 
-// AvdSpec 是创建 AVD 的输入（只需要名称、系统镜像与可选的设备档案）。
+// AvdHardware 是创建 AVD 时可覆盖的设备档案硬件参数。
+//
+// 零值表示「沿用设备档案的默认值」：只有显式给出的字段才会写进 config.ini，
+// 其余参数仍由 avdmanager 按所选设备档案生成。
+type AvdHardware struct {
+	// RAMMB 是设备内存（MB），对应 config.ini 的 hw.ramSize。
+	RAMMB int `json:"ramMb,omitempty"`
+	// HeapMB 是 ART/Dalvik 堆上限（MB），对应 vm.heapSize。
+	HeapMB int `json:"heapMb,omitempty"`
+	// CPUCores 是虚拟 CPU 核心数，对应 hw.cpu.ncore。
+	CPUCores int `json:"cpuCores,omitempty"`
+	// LCDWidth / LCDHeight / LCDDensity 是屏幕分辨率（px）与密度（dpi），
+	// 对应 hw.lcd.width / hw.lcd.height / hw.lcd.density。
+	LCDWidth   int `json:"lcdWidth,omitempty"`
+	LCDHeight  int `json:"lcdHeight,omitempty"`
+	LCDDensity int `json:"lcdDensity,omitempty"`
+	// DataPartitionMB 是 /data 分区大小（MB），对应 disk.dataPartition.size。
+	DataPartitionMB int `json:"dataPartitionMb,omitempty"`
+	// SDCardMB 是 SD 卡容量（MB），对应 sdcard.size；给出时同时把 hw.sdCard 置为 yes。
+	SDCardMB int `json:"sdcardMb,omitempty"`
+}
+
+// AvdSpec 是创建 AVD 的输入（名称、系统镜像、可选设备档案与硬件覆盖项）。
 type AvdSpec struct {
-	Name            string `json:"name"`
-	SystemImagePath string `json:"systemImagePath"`
-	ProfileID       string `json:"profileId,omitempty"`
+	Name            string       `json:"name"`
+	SystemImagePath string       `json:"systemImagePath"`
+	ProfileID       string       `json:"profileId,omitempty"`
+	Hardware        *AvdHardware `json:"hardware,omitempty"`
 }
 
 // NameValidation 是 AVD 名称校验结果。

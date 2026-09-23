@@ -14,6 +14,7 @@ export type MirrorResource = domain.MirrorResource;
 export type MirrorCheck = domain.MirrorCheck;
 export type DeviceProfile = domain.DeviceProfile;
 export type AvdSpec = domain.AvdSpec;
+export type AvdHardware = domain.AvdHardware;
 export type AvdSummary = domain.AvdSummary;
 export type EmulatorInstance = domain.EmulatorInstance;
 

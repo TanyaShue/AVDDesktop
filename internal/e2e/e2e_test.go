@@ -228,13 +228,21 @@ func TestE2E_AvdCreate(t *testing.T) {
 	}
 	t.Logf("avdmanager 提供 %d 个设备档案（首选 %s）", len(profiles), profileID)
 
-	// 4. 创建 AVD（镜像缺失时由 sdkmanager 自动安装）
+	// 4. 创建 AVD（镜像缺失时由 sdkmanager 自动安装；
+	//    同时给出一组硬件覆盖项，验证创建后的 config.ini 定点修正）
 	name := "E2E_Avd_" + time.Now().Format("20060102_150405")
 	started := time.Now()
 	jobID, err := avdSvc.Create(domain.AvdSpec{
 		Name:            name,
 		SystemImagePath: image.Path,
 		ProfileID:       profileID,
+		Hardware: &domain.AvdHardware{
+			RAMMB:      2048,
+			CPUCores:   4,
+			LCDWidth:   720,
+			LCDHeight:  1280,
+			LCDDensity: 320,
+		},
 	})
 	if err != nil {
 		t.Fatalf("启动创建任务失败: %v", err)
@@ -264,6 +272,13 @@ func TestE2E_AvdCreate(t *testing.T) {
 	}
 	if created.Broken != "" {
 		t.Errorf("新建设备不应是损坏状态：%s", created.Broken)
+	}
+	// 自定义硬件参数必须已经落到 config.ini（摘要字段直接来自 config.ini）
+	if created.RAMMB != 2048 || created.CPUCores != 4 || created.LCDWidth != 720 || created.LCDHeight != 1280 {
+		t.Errorf("自定义硬件参数未生效：%+v", created)
+	} else {
+		t.Logf("自定义硬件参数已生效：内存 %d MB / %d 核 / %dx%d",
+			created.RAMMB, created.CPUCores, created.LCDWidth, created.LCDHeight)
 	}
 
 	official := avdmanagerListAvd(t, rt, tools)

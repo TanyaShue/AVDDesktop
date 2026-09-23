@@ -70,7 +70,24 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
 - AVD 根目录为 `<Root>/avd`（注入子进程 `ANDROID_AVD_HOME`，指向存放 `<name>.avd` / `<name>.ini` 的目录本身）。
 - 列表与配置来自 `.ini` / `config.ini` 的直接解析；创建走 `avdmanager create avd`（3 分钟超时，交互确认写入 `no`）。
 - 名称校验在本地完成（非法字符、重名、同名建议名）。
+- 硬件覆盖（可选）：创建向导里可填写内存、VM 堆、CPU 核心、分辨率与密度、数据分区、SD 卡容量；
+  `avdmanager` 仍是 config.ini 的生成者，后端只在创建成功后对指定键做定点修正
+  （`internal/avd/hardware.go`，原子写入，保留注释 / 顺序 / 未知键）。写入失败时回滚整个设备，
+  避免留下“参数与请求不符”的设备。区间校验在启动任务前完成，参考取值见上表。
+- 自定义分辨率会同时更新 `hw.lcd.width/height`，并让皮肤尺寸不再覆盖（`skin.path` 指向真实皮肤
+  或另一组数值尺寸时改为 `_no_skin`；`skin.name` 仅在已有该键时同步）。依据：模拟器实际使用
+  `skin.path`，`skin.name` 只供工具展示。
 - 删除前校验目标路径确实位于 AVD 根目录内，避免误删。
+
+| 参数 | config.ini 键 | 允许区间（防呆） |
+|---|---|---|
+| 内存 | `hw.ramSize` | 512–16384 MB |
+| VM 堆 | `vm.heapSize` | 16–2048 MB |
+| CPU 核心 | `hw.cpu.ncore` | 1–16 |
+| 分辨率 | `hw.lcd.width` / `hw.lcd.height` | 240–7680 px（需成对给出） |
+| 屏幕密度 | `hw.lcd.density` | 72–960 dpi |
+| 数据分区 | `disk.dataPartition.size` | 512–65536 MB |
+| SD 卡 | `sdcard.size`（并置 `hw.sdCard=yes`） | 64–65536 MB |
 
 ### Emulator
 

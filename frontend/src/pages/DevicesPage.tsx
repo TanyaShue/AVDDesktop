@@ -225,6 +225,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
               const inst = active.get(device.name);
               // Wails 把 Go 的 AvdState 生成为 string，这里收敛回联合类型后再交给状态展示函数
               const state = inst?.state as AvdState | undefined;
+              const hw = hardwareLabel(device);
               return (
                 <div key={device.name} className="card card--hover device">
                   <div className="device__thumb" aria-hidden>
@@ -239,6 +240,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                       <span className="chip">Android {device.api || "?"}</span>
                       {device.tag ? <span className="chip">{device.tag}</span> : null}
                       {device.abi ? <span className="chip">{device.abi}</span> : null}
+                      {hw ? <span className="chip" title="当前生效的硬件参数">{hw}</span> : null}
                       {device.broken ? <span className="chip chip--danger">配置异常</span> : null}
                     </div>
                     <div className="device__meta nums">
@@ -408,6 +410,15 @@ function MenuItem({ label, onClick, danger }: { label: string; onClick: () => vo
       {label}
     </button>
   );
+}
+
+/** 设备硬件摘要（核心数 / 内存 / 分辨率）；config.ini 未提供时返回空串。 */
+function hardwareLabel(device: AvdSummary): string {
+  const parts: string[] = [];
+  if (device.cpuCores) parts.push(`${device.cpuCores} 核`);
+  if (device.ramMb) parts.push(`${device.ramMb} MB`);
+  if (device.lcdWidth && device.lcdHeight) parts.push(`${device.lcdWidth}×${device.lcdHeight}`);
+  return parts.join(" · ");
 }
 
 /** 实例进程是否仍活着：stopped 表示已退出；error 状态只有在进程退出（有退出码）后才算结束。 */

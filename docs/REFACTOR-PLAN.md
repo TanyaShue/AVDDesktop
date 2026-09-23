@@ -11,8 +11,14 @@
 > 仅通过 `SDK_TEST_BASE_URL` 切换仓库根地址；同时提供连接、延迟、吞吐和资源完整性检测。
 > 未恢复自研仓库安装器、分片下载器或本地 package.xml 写入逻辑。
 >
-> 后续变更（2026-09-22）：JDK 增加独立镜像能力，内置南京大学 NJU、清华 TUNA、北外 BFSU 与
+> 后续变更（2026-09-23）：JDK 增加独立镜像能力，内置南京大学 NJU、清华 TUNA、北外 BFSU 与
 > GitHub 官方源，支持与 SDK 相同维度的延迟/采样速度检测；所有源继续使用内置 SHA-256 校验。
+>
+> 后续变更（2026-09-23）：创建 AVD 不再只限于设备档案默认值。向导新增可选的硬件参数
+> （内存、VM 堆、CPU 核心、分辨率与密度、数据分区、SD 卡），`avdmanager` 生成 config.ini 后
+> 由后端定点修正指定键（`internal/avd/hardware.go`）；未填写的项仍完全沿用设备档案。
+> 这不同于已删除的 `internal/avd/store/schema.go`（自建硬件 schema 与直写后端）：
+> 只覆盖用户显式给出的键，不维护 schema、不接管 config.ini 的生成。
 
 ## 1. 当前架构问题
 
@@ -118,7 +124,7 @@ internal/archive/   download.go zip.go tar.go（下载与安全解压）
 internal/jdk/       jdk.go sources.go checker.go（自带 JDK 镜像与安装）
 internal/mirror/    sources.go checker.go（SDK 镜像表与检测）
 internal/sdk/       sdk.go verify.go images.go repository.go progress.go local.go（工具链/自举/列表/安装）
-internal/avd/       avd.go profiles.go create.go launch.go（AVD 读写 + avdmanager 创建 + emulator 启动）
+internal/avd/       avd.go profiles.go create.go hardware.go launch.go（AVD 读写 + avdmanager 创建 + 硬件覆盖 + emulator 启动）
 internal/adb/       adb.go
 internal/service/   runtime.go env.go accel.go avd.go emulator.go misc.go mirror.go jobprogress.go
 internal/e2e/       e2e_test.go（3 个用例）

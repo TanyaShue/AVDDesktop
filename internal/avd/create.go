@@ -16,14 +16,17 @@ const createTimeout = 3 * time.Minute
 
 // Create 通过官方 avdmanager 创建 AVD。
 //
-// 不自行生成 config.ini：设备目录里的配置由 avdmanager 写入，
-// 这里只在命令结束后校验目录是否真的生成。
+// 不自行生成 config.ini：设备目录里的配置由 avdmanager 写入，这里只在命令结束后校验目录是否真的生成；
+// 若调用方给出了硬件覆盖项（内存 / 分辨率等），再对生成好的 config.ini 做定点修正。
 func (s *Store) Create(ctx context.Context, tools platform.Tools, env []string, spec domain.AvdSpec, onLine sdk.LineFunc) (domain.AvdSummary, error) {
 	if !tools.HasAvdmanager() {
 		return domain.AvdSummary{}, domain.ErrDetail(domain.CodeToolMissing,
 			"未找到软件自带的 avdmanager", tools.Avdmanager)
 	}
 	if _, err := sdk.ImageDir(spec.SystemImagePath); err != nil {
+		return domain.AvdSummary{}, err
+	}
+	if err := ValidateHardware(spec.Hardware); err != nil {
 		return domain.AvdSummary{}, err
 	}
 
@@ -58,6 +61,20 @@ func (s *Store) Create(ctx context.Context, tools platform.Tools, env []string, 
 		}
 		return domain.AvdSummary{}, domain.ErrDetail(domain.CodeProcessFailed,
 			"avdmanager 未能创建 AVD", detail).WithHint(hint)
+	}
+
+	// 硬件覆盖：avdmanager 已经按设备档案生成 config.ini，这里只改用户显式给出的键。
+	// 写入失败时回滚整个设备：宁可回到「不存在」，也不留下一个参数与请求不符的设备
+	//（残留的设备用户未必能看出哪里不对，删除也容易遗漏）。
+	if err := s.ApplyHardware(spec.Name, spec.Hardware); err != nil {
+		message := "写入自定义硬件参数失败，设备已回滚"
+		detail := err.Error()
+		if rollbackErr := s.Delete(spec.Name); rollbackErr != nil {
+			message = "写入自定义硬件参数失败，且回滚未完成"
+			detail += "；回滚失败：" + rollbackErr.Error()
+		}
+		return domain.AvdSummary{}, domain.ErrDetail(domain.CodeProcessFailed, message, detail).
+			WithHint("请确认 AVD 目录可写后重试，或去掉自定义参数改用设备档案默认值")
 	}
 	return s.summary(spec.Name)
 }
