@@ -1,5 +1,5 @@
 // 环境准备弹窗：分别检测 Android SDK 与 JDK 镜像的连接、延迟、下载速度和资源完整性。
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import * as api from "../bridge/api";
 import { errorText } from "../bridge/api";
@@ -33,6 +33,11 @@ export function EnvironmentSetupModal({
   const [selectedSDKId, setSelectedSDKId] = useState(currentSourceId);
   const [selectedJDKId, setSelectedJDKId] = useState(currentJdkSourceId);
 
+  // 只在挂载时检测一次：currentSourceId / currentJdkSourceId 来自首份环境报告，
+  // 可能晚于弹窗打开才到达。若把它们作为依赖，检测会在用户即将点击"准备"时重跑
+  // （重新发起整套联网检测并再次禁用按钮），因此这里固定初次拿到的取值。
+  const initialSources = useRef({ sdk: currentSourceId, jdk: currentJdkSourceId });
+
   const runChecks = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -42,14 +47,14 @@ export function EnvironmentSetupModal({
       const nextJDK = api.asArray(jdkRaw as MirrorCheck[]);
       setSdkChecks(nextSDK);
       setJdkChecks(nextJDK);
-      setSelectedSDKId((previous) => chooseSource(nextSDK, previous || currentSourceId));
-      setSelectedJDKId((previous) => chooseSource(nextJDK, previous || currentJdkSourceId));
+      setSelectedSDKId((previous) => chooseSource(nextSDK, previous || initialSources.current.sdk));
+      setSelectedJDKId((previous) => chooseSource(nextJDK, previous || initialSources.current.jdk));
     } catch (err) {
       setError(errorText(err));
     } finally {
       setLoading(false);
     }
-  }, [currentSourceId, currentJdkSourceId]);
+  }, []);
 
   useEffect(() => {
     void runChecks();
