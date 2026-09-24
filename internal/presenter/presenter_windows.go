@@ -165,6 +165,14 @@ func runOnWindowThread(ctx context.Context, cfg Config) (result runResult) {
 	p.positionToolbar()
 	showWindow(p.presenterHandle(), swShow)
 	showWindow(p.toolbarHandle(), swShowNoActivate)
+	// 当辅助进程由 exec.Command + CREATE_NO_WINDOW/HideWindow 启动时，Windows 会让
+	// 第一次 ShowWindow 使用启动信息里的 SW_HIDE。第二次显式 SWP_SHOWWINDOW 才能保证
+	// Presenter 真正可见；工具栏不受影响是因为它已经消耗了那一次被抑制的 ShowWindow。
+	_ = setWindowPos(p.presenterHandle(), 0, 0, 0, 0, 0,
+		swpNoMove|swpNoSize|swpShowWindow|swpNoActivate)
+	_ = setWindowPos(p.toolbarHandle(), 0, 0, 0, 0, 0,
+		swpNoMove|swpNoSize|swpShowWindow|swpNoActivate)
+	setForegroundWindow(p.presenterHandle())
 	p.invalidatePresenter()
 
 	var (

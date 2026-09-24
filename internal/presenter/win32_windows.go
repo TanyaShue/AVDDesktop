@@ -29,7 +29,9 @@ const (
 	swShowNoActivate = 4
 
 	swpNoSize     = 0x0001
+	swpNoMove     = 0x0002
 	swpNoZOrder   = 0x0004
+	swpShowWindow = 0x0040
 	swpNoActivate = 0x0010
 
 	wmDestroy        = 0x0002
@@ -167,33 +169,34 @@ var (
 	gdi32DLL    = windows.NewLazySystemDLL("gdi32.dll")
 	kernel32DLL = windows.NewLazySystemDLL("kernel32.dll")
 
-	procRegisterClassExW   = user32DLL.NewProc("RegisterClassExW")
-	procUnregisterClassW   = user32DLL.NewProc("UnregisterClassW")
-	procCreateWindowExW    = user32DLL.NewProc("CreateWindowExW")
-	procDestroyWindow      = user32DLL.NewProc("DestroyWindow")
-	procDefWindowProcW     = user32DLL.NewProc("DefWindowProcW")
-	procGetMessageW        = user32DLL.NewProc("GetMessageW")
-	procTranslateMessage   = user32DLL.NewProc("TranslateMessage")
-	procDispatchMessageW   = user32DLL.NewProc("DispatchMessageW")
-	procPostQuitMessage    = user32DLL.NewProc("PostQuitMessage")
-	procPostMessageW       = user32DLL.NewProc("PostMessageW")
-	procSendMessageW       = user32DLL.NewProc("SendMessageW")
-	procShowWindow         = user32DLL.NewProc("ShowWindow")
-	procUpdateWindow       = user32DLL.NewProc("UpdateWindow")
-	procInvalidateRect     = user32DLL.NewProc("InvalidateRect")
-	procBeginPaint         = user32DLL.NewProc("BeginPaint")
-	procEndPaint           = user32DLL.NewProc("EndPaint")
-	procGetClientRect      = user32DLL.NewProc("GetClientRect")
-	procGetWindowRect      = user32DLL.NewProc("GetWindowRect")
-	procMoveWindow         = user32DLL.NewProc("MoveWindow")
-	procSetWindowPos       = user32DLL.NewProc("SetWindowPos")
-	procSetCapture         = user32DLL.NewProc("SetCapture")
-	procReleaseCapture     = user32DLL.NewProc("ReleaseCapture")
-	procLoadCursorW        = user32DLL.NewProc("LoadCursorW")
-	procAdjustWindowRectEx = user32DLL.NewProc("AdjustWindowRectEx")
-	procFillRect           = user32DLL.NewProc("FillRect")
-	procMonitorFromWindow  = user32DLL.NewProc("MonitorFromWindow")
-	procGetMonitorInfoW    = user32DLL.NewProc("GetMonitorInfoW")
+	procRegisterClassExW    = user32DLL.NewProc("RegisterClassExW")
+	procUnregisterClassW    = user32DLL.NewProc("UnregisterClassW")
+	procCreateWindowExW     = user32DLL.NewProc("CreateWindowExW")
+	procDestroyWindow       = user32DLL.NewProc("DestroyWindow")
+	procDefWindowProcW      = user32DLL.NewProc("DefWindowProcW")
+	procGetMessageW         = user32DLL.NewProc("GetMessageW")
+	procTranslateMessage    = user32DLL.NewProc("TranslateMessage")
+	procDispatchMessageW    = user32DLL.NewProc("DispatchMessageW")
+	procPostQuitMessage     = user32DLL.NewProc("PostQuitMessage")
+	procPostMessageW        = user32DLL.NewProc("PostMessageW")
+	procSendMessageW        = user32DLL.NewProc("SendMessageW")
+	procShowWindow          = user32DLL.NewProc("ShowWindow")
+	procSetForegroundWindow = user32DLL.NewProc("SetForegroundWindow")
+	procUpdateWindow        = user32DLL.NewProc("UpdateWindow")
+	procInvalidateRect      = user32DLL.NewProc("InvalidateRect")
+	procBeginPaint          = user32DLL.NewProc("BeginPaint")
+	procEndPaint            = user32DLL.NewProc("EndPaint")
+	procGetClientRect       = user32DLL.NewProc("GetClientRect")
+	procGetWindowRect       = user32DLL.NewProc("GetWindowRect")
+	procMoveWindow          = user32DLL.NewProc("MoveWindow")
+	procSetWindowPos        = user32DLL.NewProc("SetWindowPos")
+	procSetCapture          = user32DLL.NewProc("SetCapture")
+	procReleaseCapture      = user32DLL.NewProc("ReleaseCapture")
+	procLoadCursorW         = user32DLL.NewProc("LoadCursorW")
+	procAdjustWindowRectEx  = user32DLL.NewProc("AdjustWindowRectEx")
+	procFillRect            = user32DLL.NewProc("FillRect")
+	procMonitorFromWindow   = user32DLL.NewProc("MonitorFromWindow")
+	procGetMonitorInfoW     = user32DLL.NewProc("GetMonitorInfoW")
 
 	procGetDpiForWindow           = user32DLL.NewProc("GetDpiForWindow")
 	procSetProcessDPIAware        = user32DLL.NewProc("SetProcessDPIAware")
@@ -390,6 +393,13 @@ func sendMessage(hwnd windows.Handle, msg uint32, wparam, lparam uintptr) uintpt
 
 func showWindow(hwnd windows.Handle, command int32) {
 	_, _, _ = winCall(procShowWindow, uintptr(hwnd), uintptr(command))
+}
+
+func setForegroundWindow(hwnd windows.Handle) {
+	if hwnd == 0 {
+		return
+	}
+	_, _, _ = winCall(procSetForegroundWindow, uintptr(hwnd))
 }
 
 func updateWindow(hwnd windows.Handle) {
