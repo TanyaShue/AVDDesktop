@@ -85,3 +85,23 @@ func TestParseSdkmanagerVersion(t *testing.T) {
 		t.Fatalf("旧版版本号解析错误: %q", got)
 	}
 }
+
+func TestCmdlineToolsAvailabilityDoesNotDependOnVersionProbe(t *testing.T) {
+	tests := []struct {
+		name    string
+		cmdline bool
+		java    bool
+		want    bool
+	}{
+		{name: "complete installation", cmdline: true, java: true, want: true},
+		{name: "incomplete cmdline-tools", cmdline: false, java: true, want: false},
+		{name: "jdk unavailable", cmdline: true, java: false, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cmdlineToolsAvailable(tc.cmdline, tc.java); got != tc.want {
+				t.Fatalf("cmdlineToolsAvailable(%v, %v) = %v, want %v", tc.cmdline, tc.java, got, tc.want)
+			}
+		})
+	}
+}
