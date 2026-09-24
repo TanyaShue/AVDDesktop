@@ -10,6 +10,4 @@ frontend/node_modules
 /config/
 /logs/
 /cache/
-
-# Native presenter 手工/自动验收输出
-build/test-artifacts/
+/build/

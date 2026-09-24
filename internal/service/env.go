@@ -21,7 +21,15 @@ import (
 )
 
 // EnvService 提供环境检查与自动准备（全局唯一入口）。
-type EnvService struct{ rt *Runtime }
+type EnvService struct {
+	rt *Runtime
+
+	checkMu   sync.Mutex
+	checking  bool
+	checkDone chan struct{}
+	last      *domain.EnvReport
+	lastErr   error
+}
 
 // NewEnvService 创建 EnvService。
 func NewEnvService(rt *Runtime) *EnvService { return &EnvService{rt: rt} }
@@ -29,13 +37,44 @@ func NewEnvService(rt *Runtime) *EnvService { return &EnvService{rt: rt} }
 // 各类命令的检测超时。
 const (
 	javaTimeout     = 30 * time.Second
-	sdkmanagerProbe = 60 * time.Second
+	sdkmanagerProbe = 15 * time.Second
 	adbProbe        = 30 * time.Second
 	emulatorProbe   = 90 * time.Second
 )
 
 // Check 执行唯一的环境检查：确认软件自带的 sdkmanager / avdmanager / emulator / adb 与 JDK 是否可用。
 func (s *EnvService) Check() (*domain.EnvReport, error) {
+	// Wails 启动回调和前端首次加载都会触发检查。合并同一时刻的在途请求，
+	// 避免两套 java / adb / emulator / sdkmanager 探测并发占用机器，
+	// 也避免两个结果以不同顺序覆盖界面。
+	s.checkMu.Lock()
+	if s.checking {
+		done := s.checkDone
+		s.checkMu.Unlock()
+		<-done
+		s.checkMu.Lock()
+		report, err := s.last, s.lastErr
+		s.checkMu.Unlock()
+		return report, err
+	}
+	s.checking = true
+	s.checkDone = make(chan struct{})
+	done := s.checkDone
+	s.checkMu.Unlock()
+
+	report, err := s.check()
+
+	s.checkMu.Lock()
+	s.last, s.lastErr = report, err
+	s.checking = false
+	s.checkDone = nil
+	close(done)
+	s.checkMu.Unlock()
+	return report, err
+}
+
+// check 执行实际探测。调用方必须通过 Check 合并并发请求。
+func (s *EnvService) check() (*domain.EnvReport, error) {
 	started := time.Now()
 	comp := s.rt.Components()
 	tools := comp.Tools
@@ -71,15 +110,21 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 	cmdlineOK := tools.HasSdkmanager() && sdk.VerifyPackage(tools, "cmdline-tools;latest") == nil
 
 	var (
-		javaVersion, adbVersion, emulatorVersion string
-		javaOK                                   bool
-		accel                                    domain.AccelInfo
-		probes                                   sync.WaitGroup
+		javaVersion, sdkmanagerVersion, adbVersion, emulatorVersion string
+		javaOK                                                      bool
+		accel                                                       domain.AccelInfo
+		probes                                                      sync.WaitGroup
 	)
-	probes.Add(4)
+	probes.Add(5)
 	go func() {
 		defer probes.Done()
 		javaVersion, javaOK = s.probeJava(ctx, report.JavaPath, env)
+	}()
+	go func() {
+		defer probes.Done()
+		if cmdlineOK && report.JavaPath != "" {
+			sdkmanagerVersion = s.probeSdkmanagerVersion(ctx, tools, env)
+		}
 	}()
 	go func() {
 		defer probes.Done()
@@ -107,14 +152,10 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 	}))
 
 	// sdkmanager / avdmanager 由 JDK 驱动：缺 JDK 时它们即使存在也无法运行。
-	// 同时检查包元数据，避免把以前版本留下的空目录/半成品当成可用环境。
-	// 这两项依赖 JDK 探测结果，因此在并发探测结束后串行执行。
-	sdkmanagerVersion := ""
-	if javaOK && cmdlineOK {
-		sdkmanagerVersion = parseSdkmanagerVersion(sdk.ToolOutput(ctx, tools.Sdkmanager, []string{"--version"}, env, sdkmanagerProbe))
-	}
-	sdkmanagerOK := cmdlineOK && sdkmanagerVersion != ""
-	avdmanagerOK := cmdlineOK && javaOK
+	// 可用性以包目录、source.properties 和关键脚本的本地完整性为准；
+	// `--version` 只负责展示版本，不能因为一次启动慢/输出异常就把完整安装判成缺失。
+	sdkmanagerOK := cmdlineToolsAvailable(cmdlineOK, javaOK)
+	avdmanagerOK := cmdlineToolsAvailable(cmdlineOK, javaOK)
 	report.Components = append(report.Components, toolStatus(domain.ToolSdkmanager, "sdkmanager", sdkmanagerOK, sdkmanagerVersion, tools.Sdkmanager, &domain.ToolFix{
 		Kind:  domain.FixPrepare,
 		Label: "准备 / 修复 SDK",
@@ -142,6 +183,9 @@ func (s *EnvService) Check() (*domain.EnvReport, error) {
 	if tools.HasSdkmanager() && !cmdlineOK {
 		setComponentDetail(report, domain.ToolSdkmanager, "检测到旧版本残留或不完整安装，请执行环境修复")
 		setComponentDetail(report, domain.ToolAvdmanager, "检测到旧版本残留或不完整安装，请执行环境修复")
+	}
+	if sdkmanagerOK && sdkmanagerVersion == "" {
+		setComponentDetail(report, domain.ToolSdkmanager, "版本探测暂未返回结果；工具文件与包元数据完整，可再次检查")
 	}
 	if tools.HasAdb() && !adbOK {
 		setComponentDetail(report, domain.ToolAdb, "目录存在但元数据不完整，可能为旧版本残留，请执行环境修复")
@@ -486,6 +530,12 @@ func (s *EnvService) buildIssues(report *domain.EnvReport, tools platform.Tools,
 	return domain.NonNil(issues)
 }
 
+// cmdlineToolsAvailable 表示命令行工具是否可用于业务链路。
+// 版本探测只用于展示，不能作为可用性判据；否则一次启动超时会被误报为缺失。
+func cmdlineToolsAvailable(cmdlineOK, javaOK bool) bool {
+	return cmdlineOK && javaOK
+}
+
 // toolStatus 构造组件状态，未就绪时附带修复动作。
 func toolStatus(id domain.ToolID, name string, ok bool, version, path string, fix *domain.ToolFix) domain.ToolStatus {
 	state := domain.StateMissing
@@ -528,6 +578,29 @@ func (s *EnvService) probeJava(ctx context.Context, javaPath string, env []strin
 		return "", false
 	}
 	return version, javaMajor(version) >= 17
+}
+
+// probeSdkmanagerVersion 只负责读取展示版本，不参与可用性判定。
+//
+// 新版 sdkmanager.bat 会再启动 android.exe；首次运行、杀毒扫描或模拟器抢占
+// IO 时可能短暂超时。此时本地包仍完整，记录诊断日志即可，下一次检查会恢复。
+func (s *EnvService) probeSdkmanagerVersion(ctx context.Context, tools platform.Tools, env []string) string {
+	res, err := proc.Run(ctx, tools.Sdkmanager, []string{"--version"}, proc.Options{
+		Env:     env,
+		Timeout: sdkmanagerProbe,
+	})
+	version := parseSdkmanagerVersion(res.Combined())
+	if version != "" {
+		return version
+	}
+
+	detail := strings.TrimSpace(res.Combined())
+	if len(detail) > 500 {
+		detail = detail[:500] + "…"
+	}
+	s.rt.Log().Warn("env", "sdkmanager 版本探测未取得结果（耗时 %s，退出码 %d，超时 %v，错误 %v）：%s",
+		res.Duration.Round(time.Millisecond), res.ExitCode, res.TimedOut, err, detail)
+	return ""
 }
 
 // parseJavaVersion 从 `java -version` 的完整输出中取版本号（形如 17.0.6 或 1.8.0_392）。
