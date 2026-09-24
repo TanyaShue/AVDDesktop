@@ -51,6 +51,11 @@ type Config struct {
 	// SendKey receives one of "Back", "Home" and "AppSwitch" from the toolbar.
 	SendKey func(key string) error
 
+	// OnReady is called after both native windows have been created and shown.
+	// It lets a parent process wait for actual window readiness instead of
+	// treating a successful child-process Start as completion.
+	OnReady func()
+
 	// OnClose is called after the presenter has stopped and all native
 	// resources have been released. It is not called when configuration or
 	// window initialization fails.

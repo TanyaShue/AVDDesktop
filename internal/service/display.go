@@ -58,16 +58,19 @@ var navKeys = map[string]int{
 	"appswitch": 187, // KEYCODE_APP_SWITCH
 }
 
-// DisplayService 把模拟器画面转成 WebView 可直接显示的 MJPEG 流，并回注触摸/导航键。
+// DisplayService 管理自定义 UI 的两条显示路径：
+//   - Windows：启动独立 Presenter 辅助进程，通过 MMAP 共享内存取帧；
+//   - 其它平台：保留 MJPEG + 前端 <img> 浮层作为兼容实现。
 //
-// 它不启动任何原生窗口：Wails v2.16 没有多窗口 API，前端用全屏浮层当作「设备窗口」，
-// 通过 <img src="http://127.0.0.1:<port>/display/<instanceID>"> 订阅画面。
+// native 路径见 native_display.go；本文件主体继续维护兼容路径。
 type DisplayService struct {
 	rt *Runtime
 
-	mu    sync.Mutex
-	srv   *display.Server
-	items map[string]*displayItem
+	mu            sync.Mutex
+	nativeStartMu sync.Mutex
+	srv           *display.Server
+	items         map[string]*displayItem
+	natives       map[string]*nativeSession
 	// closeEpoch 记录每个实例「被要求关闭」的次数：Open 在开始连接前记下当时的值，连接完成
 	// （可达数分钟）后若发现计数变了，说明用户在这期间关掉了设备窗口，于是直接拆掉刚建好的会话。
 	//
@@ -98,6 +101,7 @@ type DisplaySession struct {
 	DeviceHeight int    `json:"deviceHeight"` // 设备原生分辨率（输入映射基准）
 	StreamWidth  int    `json:"streamWidth"`
 	StreamHeight int    `json:"streamHeight"`
+	Mode         string `json:"mode"` // native | web
 }
 
 // NewDisplayService 创建 DisplayService。
@@ -106,6 +110,7 @@ func NewDisplayService(rt *Runtime) *DisplayService {
 	return &DisplayService{
 		rt:         rt,
 		items:      make(map[string]*displayItem),
+		natives:    make(map[string]*nativeSession),
 		closeEpoch: make(map[string]uint64),
 		base:       ctx,
 		cancel:     cancel,
@@ -181,6 +186,7 @@ func (s *DisplayService) Open(instanceID string) (*DisplaySession, error) {
 			DeviceHeight: nativeH,
 			StreamWidth:  streamW,
 			StreamHeight: streamH,
+			Mode:         "web",
 		},
 		client:  client,
 		session: srv.Session(id),
@@ -216,6 +222,11 @@ func (s *DisplayService) Close(instanceID string) error {
 	id := strings.TrimSpace(instanceID)
 	if id == "" {
 		return domain.Err(domain.CodeInvalidArgument, "缺少模拟器实例标识")
+	}
+	if native := s.takeNative(id); native != nil {
+		s.stopNativeSession(native, "")
+		s.rt.Log().Info("display", "已关闭 %s 的原生设备窗口", native.info.AvdName)
+		return nil
 	}
 	s.mu.Lock()
 	// 无论会话是否已登记都要计数：连接中的 Open 靠它发现「用户已经关掉了窗口」。
@@ -274,8 +285,11 @@ func (s *DisplayService) SendKey(instanceID string, key string) error {
 // Active 返回当前打开了设备画面的实例 ID（升序）。
 func (s *DisplayService) Active() []string {
 	s.mu.Lock()
-	out := make([]string, 0, len(s.items))
+	out := make([]string, 0, len(s.items)+len(s.natives))
 	for id := range s.items {
+		out = append(out, id)
+	}
+	for id := range s.natives {
 		out = append(out, id)
 	}
 	s.mu.Unlock()
@@ -296,6 +310,11 @@ func (s *DisplayService) Shutdown() {
 		items = append(items, item)
 		delete(s.items, id)
 	}
+	natives := make([]*nativeSession, 0, len(s.natives))
+	for id, item := range s.natives {
+		natives = append(natives, item)
+		delete(s.natives, id)
+	}
 	srv := s.srv
 	s.mu.Unlock()
 
@@ -303,6 +322,9 @@ func (s *DisplayService) Shutdown() {
 	s.cancel()
 	for _, item := range items {
 		s.teardown(item, "")
+	}
+	for _, item := range natives {
+		s.stopNativeSession(item, "")
 	}
 	if srv != nil {
 		_ = srv.Close()

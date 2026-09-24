@@ -6,7 +6,11 @@ export function Active():Promise<Array<string>>;
 
 export function Close(arg1:string):Promise<void>;
 
+export function NativeSupported():Promise<boolean>;
+
 export function Open(arg1:string):Promise<service.DisplaySession>;
+
+export function OpenNative(arg1:string):Promise<service.DisplaySession>;
 
 export function SendKey(arg1:string,arg2:string):Promise<void>;
 

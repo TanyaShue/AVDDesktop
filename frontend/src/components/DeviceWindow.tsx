@@ -1,4 +1,4 @@
-// 设备窗口：应用内全屏浮层（Wails v2 没有多窗口 API），显示「自定义 UI」实例的实时画面并回注触摸。
+// 设备窗口兼容层：仅当平台不支持原生 Presenter 时，用应用内浮层显示 MJPEG 画面并回注触摸。
 //
 // 画面来自后端 display.Session 的 MJPEG 流（<img> 直接消费 multipart/x-mixed-replace），
 // 触摸按归一化坐标经 gRPC 回注设备，导航键走 adb。关闭只停画面，不停模拟器。

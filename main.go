@@ -3,12 +3,14 @@ package main
 import (
 	"embed"
 	"log"
+	"os"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 
+	"AVDDesktop/internal/displayhost"
 	"AVDDesktop/internal/platform"
 )
 
@@ -16,6 +18,15 @@ import (
 var assets embed.FS
 
 func main() {
+	// 同一可执行文件同时承载设备 Presenter 辅助进程；必须在 NewApp 与单实例锁之前分流，
+	// 否则辅助进程会和主进程抢同一个实例锁。
+	if displayhost.IsHelperInvocation(os.Args[1:]) {
+		if err := displayhost.RunHelper(os.Args[1:]); err != nil {
+			log.Fatalf("设备窗口退出: %v", err)
+		}
+		return
+	}
+
 	app, err := NewApp()
 	if err != nil {
 		log.Fatalf("初始化失败: %v", err)

@@ -106,6 +106,24 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
     });
   }, [devices, query, sortBy]);
 
+  /** 打开设备窗口：优先使用独立原生 Presenter；不支持时才回退到应用内浮层。 */
+  const openDeviceWindow = useCallback(
+    async (instanceId: string, avdName: string) => {
+      try {
+        await api.Display.OpenNative(instanceId);
+        onToast("info", `${avdName} 的设备窗口已打开`, "设备画面和工具栏运行在独立窗口中");
+      } catch (err) {
+        const code = (err as { code?: string } | null)?.code;
+        if (code === "UNSUPPORTED") {
+          setOpenWindow({ instanceId, avdName });
+          return;
+        }
+        onToast("danger", "无法打开设备窗口", errorText(err));
+      }
+    },
+    [onToast],
+  );
+
   const startDevice = async (
     device: AvdSummary,
     opts?: { coldBoot?: boolean; noWindow?: boolean; customUI?: boolean },
@@ -120,8 +138,8 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
       });
       onToast("info", "正在启动 " + device.name, "首次启动可能需要几分钟，进度显示在底部任务区域");
       await load();
-      // 自定义 UI 的模拟器没有 Qt 窗口，画面只能由应用自建窗口接管：启动成功后直接打开。
-      if (opts?.customUI) setOpenWindow({ instanceId: inst.id, avdName: device.name });
+      // 自定义 UI 启动后优先打开独立原生窗口；非 Windows 平台回退到应用内浮层。
+      if (opts?.customUI) void openDeviceWindow(inst.id, device.name);
     } catch (err) {
       onToast("danger", "启动失败", errorText(err));
     } finally {
@@ -321,9 +339,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                         {inst?.customUI ? (
                           <MenuItem
                             label="打开设备窗口"
-                            onClick={() => {
-                              setOpenWindow({ instanceId: inst.id, avdName: device.name });
-                            }}
+                            onClick={() => void openDeviceWindow(inst.id, device.name)}
                           />
                         ) : (
                           <MenuItem

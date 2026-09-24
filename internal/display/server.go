@@ -1,5 +1,7 @@
 // Package display 把设备画面（JPEG 帧）以 MJPEG 形式暴露给应用内自建的「设备窗口」。
 //
+// 这是非 Windows/MJPEG 兼容路径；Windows 默认使用 internal/presenter 的原生 MMAP 显示。
+//
 // 设计要点：
 //   - 只监听 127.0.0.1：画面与触摸都在本机完成，不对外暴露端口
 //   - 每个会话只保留最新一帧，慢客户端（WebView 卡顿 / 用户拖动窗口）自然丢帧，

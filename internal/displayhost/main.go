@@ -20,7 +20,10 @@ import (
 	"AVDDesktop/internal/presenter"
 )
 
-const helperFlag = "--display-host"
+const (
+	helperFlag           = "--display-host"
+	presenterReadyMarker = "__AVDDESKTOP_PRESENTER_READY__"
+)
 
 // IsHelperInvocation 判断当前进程是否应以 native presenter 辅助进程启动。
 func IsHelperInvocation(args []string) bool {
@@ -94,7 +97,11 @@ func RunHelper(args []string) error {
 	}
 
 	return presenter.Run(ctx, presenter.Config{
-		Title:        cfg.AVDName,
+		Title: cfg.AVDName,
+		OnReady: func() {
+			// stdout 是给父进程的私有握手通道；父进程只识别这一行，不展示给用户。
+			_, _ = fmt.Fprintln(os.Stdout, presenterReadyMarker)
+		},
 		InstanceID:   cfg.InstanceID,
 		DeviceWidth:  width,
 		DeviceHeight: height,

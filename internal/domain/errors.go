@@ -17,6 +17,7 @@ const (
 	CodeJobBusy          = "JOB_BUSY"
 	CodeProcessFailed    = "PROCESS_FAILED"
 	CodeInvalidArgument  = "INVALID_ARGUMENT"
+	CodeUnsupported      = "UNSUPPORTED"
 )
 
 // AppError 是跨 Wails 边界的统一错误。

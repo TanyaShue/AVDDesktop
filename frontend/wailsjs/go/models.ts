@@ -685,6 +685,7 @@ export namespace service {
 	    deviceHeight: number;
 	    streamWidth: number;
 	    streamHeight: number;
+	    mode: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DisplaySession(source);
@@ -700,6 +701,7 @@ export namespace service {
 	        this.deviceHeight = source["deviceHeight"];
 	        this.streamWidth = source["streamWidth"];
 	        this.streamHeight = source["streamHeight"];
+	        this.mode = source["mode"];
 	    }
 	}
 	export class ResolvedPaths {

@@ -174,6 +174,9 @@ func runOnWindowThread(ctx context.Context, cfg Config) (result runResult) {
 		swpNoMove|swpNoSize|swpShowWindow|swpNoActivate)
 	setForegroundWindow(p.presenterHandle())
 	p.invalidatePresenter()
+	if cfg.OnReady != nil {
+		cfg.OnReady()
+	}
 
 	var (
 		done    = make(chan struct{})
