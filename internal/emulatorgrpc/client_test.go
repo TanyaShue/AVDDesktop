@@ -13,6 +13,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"AVDDesktop/internal/emulatorgrpc/pb"
@@ -23,12 +25,14 @@ import (
 type fakeController struct {
 	pb.UnimplementedEmulatorControllerServer
 
-	png    []byte
-	frames int
+	png        []byte
+	frames     int
+	mmapFrames []*pb.Image
 
-	mu      sync.Mutex
-	touches []*pb.TouchEvent
-	auths   []string
+	mu           sync.Mutex
+	touches      []*pb.TouchEvent
+	auths        []string
+	imageFormats []*pb.ImageFormat
 }
 
 func (f *fakeController) GetScreenshot(_ context.Context, req *pb.ImageFormat) (*pb.Image, error) {
@@ -39,9 +43,27 @@ func (f *fakeController) GetScreenshot(_ context.Context, req *pb.ImageFormat) (
 }
 
 func (f *fakeController) StreamScreenshot(req *pb.ImageFormat, stream pb.EmulatorController_StreamScreenshotServer) error {
+	f.mu.Lock()
+	f.imageFormats = append(f.imageFormats, proto.Clone(req).(*pb.ImageFormat))
+	f.mu.Unlock()
+
 	if req.GetFormat() != pb.ImageFormat_RGBA8888 {
 		return status.Error(codes.InvalidArgument, "只支持 RGBA8888 流")
 	}
+	if transport := req.GetTransport(); transport != nil {
+		if transport.GetChannel() != pb.ImageTransport_MMAP {
+			return status.Error(codes.InvalidArgument, "只支持 MMAP 共享内存流")
+		}
+		for _, frame := range f.mmapFrames {
+			if err := stream.Send(frame); err != nil {
+				return err
+			}
+		}
+		// MMAP 流同样是脏帧驱动：发送测试帧后保持流开启，直到客户端断开。
+		<-stream.Context().Done()
+		return nil
+	}
+
 	w, h := int(req.GetWidth()), int(req.GetHeight())
 	for i := 0; i < f.frames; i++ {
 		frame := make([]byte, w*h*4)
@@ -70,6 +92,12 @@ func (f *fakeController) snapshot() ([]*pb.TouchEvent, []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]*pb.TouchEvent(nil), f.touches...), append([]string(nil), f.auths...)
+}
+
+func (f *fakeController) streamRequests() []*pb.ImageFormat {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]*pb.ImageFormat(nil), f.imageFormats...)
 }
 
 // startFake 启动进程内的假模拟器（只监听 127.0.0.1 的随机端口）。
@@ -184,6 +212,148 @@ func TestStreamScreenshot_DeliversFramesInOrderThenCloses(t *testing.T) {
 		case <-deadline:
 			t.Fatal("ctx 取消后 channel 未关闭")
 		}
+	}
+}
+
+func TestImageTransportProtoContract(t *testing.T) {
+	transport := (&pb.ImageTransport{}).ProtoReflect().Descriptor()
+
+	channel := transport.Fields().ByName("channel")
+	if channel == nil || channel.Number() != 1 || channel.Kind() != protoreflect.EnumKind {
+		t.Fatalf("ImageTransport.channel = %v, want field 1 enum", channel)
+	}
+	if got := channel.Enum().Values().ByName("MMAP").Number(); got != 1 {
+		t.Fatalf("ImageTransport.MMAP = %d, want 1", got)
+	}
+
+	handle := transport.Fields().ByName("handle")
+	if handle == nil || handle.Number() != 2 || handle.Kind() != protoreflect.StringKind {
+		t.Fatalf("ImageTransport.handle = %v, want field 2 string", handle)
+	}
+
+	format := (&pb.ImageFormat{}).ProtoReflect().Descriptor()
+	field := format.Fields().ByName("transport")
+	if field == nil || field.Number() != 6 || field.Message() == nil {
+		t.Fatalf("ImageFormat.transport = %v, want field 6 message", field)
+	}
+}
+
+func TestStreamScreenshotMMAP_SendsRequestAndMetadataInOrder(t *testing.T) {
+	const (
+		requestWidth  = 160
+		requestHeight = 320
+	)
+	handle := "file:///tmp/avddesktop-mmap.bin"
+	// MMAP 回复的 Image.image 正常为空：第一帧使用服务端元数据，
+	// 第二帧故意省略 format，验证尺寸回退且空 image 不会被跳过。
+	fake := &fakeController{mmapFrames: []*pb.Image{
+		{
+			Format:      &pb.ImageFormat{Width: 720, Height: 1280, Rotation: 3},
+			Seq:         4,
+			TimestampUs: 111111,
+		},
+		{
+			Seq:         9,
+			TimestampUs: 222222,
+		},
+	}}
+	addr := startFake(t, fake)
+
+	client, err := Dial(context.Background(), addr, "")
+	if err != nil {
+		t.Fatalf("Dial 失败: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := client.StreamScreenshotMMAP(ctx, requestWidth, requestHeight, handle)
+	if err != nil {
+		cancel()
+		t.Fatalf("StreamScreenshotMMAP 失败: %v", err)
+	}
+
+	want := []FrameMeta{
+		{Width: 720, Height: 1280, Seq: 4, TimestampUs: 111111, Rotation: 3},
+		{Width: requestWidth, Height: requestHeight, Seq: 9, TimestampUs: 222222},
+	}
+	for i := range want {
+		select {
+		case got, ok := <-stream:
+			if !ok {
+				t.Fatalf("第 %d 帧之前 channel 已关闭", i)
+			}
+			if got != want[i] {
+				t.Fatalf("第 %d 帧元数据 = %+v，want %+v", i, got, want[i])
+			}
+		case <-time.After(3 * time.Second):
+			cancel()
+			t.Fatalf("等待第 %d 帧超时", i)
+		}
+	}
+
+	requests := fake.streamRequests()
+	if len(requests) != 1 {
+		cancel()
+		t.Fatalf("服务端收到 %d 个流请求，want 1", len(requests))
+	}
+	req := requests[0]
+	if req.GetFormat() != pb.ImageFormat_RGBA8888 {
+		t.Fatalf("请求格式 = %v，want RGBA8888", req.GetFormat())
+	}
+	if req.GetWidth() != requestWidth || req.GetHeight() != requestHeight {
+		t.Fatalf("请求尺寸 = %dx%d，want %dx%d", req.GetWidth(), req.GetHeight(), requestWidth, requestHeight)
+	}
+	if req.GetTransport().GetChannel() != pb.ImageTransport_MMAP {
+		t.Fatalf("请求 transport = %v，want MMAP", req.GetTransport().GetChannel())
+	}
+	if req.GetTransport().GetHandle() != handle {
+		t.Fatalf("请求 handle = %q，want %q", req.GetTransport().GetHandle(), handle)
+	}
+
+	cancel()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case _, ok := <-stream:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("ctx 取消后 channel 未关闭")
+		}
+	}
+}
+
+func TestStreamScreenshotMMAP_CancelClosesChannel(t *testing.T) {
+	addr := startFake(t, &fakeController{})
+
+	client, err := Dial(context.Background(), addr, "")
+	if err != nil {
+		t.Fatalf("Dial 失败: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := client.StreamScreenshotMMAP(ctx, 4, 3, "file:///tmp/avddesktop-cancel.bin")
+	if err != nil {
+		cancel()
+		t.Fatalf("StreamScreenshotMMAP 失败: %v", err)
+	}
+	cancel()
+
+	select {
+	case _, ok := <-stream:
+		if ok {
+			t.Fatal("取消后仍收到了帧")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ctx 取消后 channel 未关闭")
+	}
+}
+
+func TestDecodeFrameMeta_SkipsFrameWithoutUsableDimensions(t *testing.T) {
+	if _, ok := decodeFrameMeta(&pb.Image{}, 0, 0); ok {
+		t.Fatal("没有可用尺寸的帧不应返回元数据")
 	}
 }
 

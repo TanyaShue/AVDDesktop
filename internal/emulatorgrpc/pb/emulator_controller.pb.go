@@ -6,12 +6,14 @@
 // 同版本的官方全文同名文件随 SDK 一起发布（gitignore 的 build/bin 下）：
 // build/bin/sdk/emulator/lib/emulator_controller.proto —— 修改本文件时应与它核对字段号与类型。
 //
-// 重新生成命令（Windows，protoc 25.3；-I 第二项是 protobuf 自带的 well-known types 目录）：
+// 重新生成命令（protoc 25.x；第二个 -I 指向 protoc 自带的 well-known types 目录，
+// 通常是 <protoc 安装目录>/../include，例如 Windows 上 Anaconda 的
+// D:/DeveEnvironment/Program/Anaconda3/Library/include）：
 //
 //	go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
 //	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
 //	protoc -I internal/emulatorgrpc/proto \
-//	  -I "D:/DeveEnvironment/Program/Anaconda3/Library/include" \
+//	  -I "<protoc 的 include 目录>" \
 //	  --go_out=paths=source_relative:internal/emulatorgrpc/pb \
 //	  --go-grpc_out=paths=source_relative:internal/emulatorgrpc/pb \
 //	  internal/emulatorgrpc/proto/emulator_controller.proto
@@ -42,6 +44,53 @@ const (
 	// Verify that runtime/protoimpl is sufficiently up-to-date.
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
+
+type ImageTransport_TransportChannel int32
+
+const (
+	ImageTransport_TRANSPORT_CHANNEL_UNSPECIFIED ImageTransport_TransportChannel = 0
+	// 像素写入 handle 指定的共享内存，Image.image 保持为空。
+	ImageTransport_MMAP ImageTransport_TransportChannel = 1
+)
+
+// Enum value maps for ImageTransport_TransportChannel.
+var (
+	ImageTransport_TransportChannel_name = map[int32]string{
+		0: "TRANSPORT_CHANNEL_UNSPECIFIED",
+		1: "MMAP",
+	}
+	ImageTransport_TransportChannel_value = map[string]int32{
+		"TRANSPORT_CHANNEL_UNSPECIFIED": 0,
+		"MMAP":                          1,
+	}
+)
+
+func (x ImageTransport_TransportChannel) Enum() *ImageTransport_TransportChannel {
+	p := new(ImageTransport_TransportChannel)
+	*p = x
+	return p
+}
+
+func (x ImageTransport_TransportChannel) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ImageTransport_TransportChannel) Descriptor() protoreflect.EnumDescriptor {
+	return file_emulator_controller_proto_enumTypes[0].Descriptor()
+}
+
+func (ImageTransport_TransportChannel) Type() protoreflect.EnumType {
+	return &file_emulator_controller_proto_enumTypes[0]
+}
+
+func (x ImageTransport_TransportChannel) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ImageTransport_TransportChannel.Descriptor instead.
+func (ImageTransport_TransportChannel) EnumDescriptor() ([]byte, []int) {
+	return file_emulator_controller_proto_rawDescGZIP(), []int{0, 0}
+}
 
 type ImageFormat_ImgFormat int32
 
@@ -76,11 +125,11 @@ func (x ImageFormat_ImgFormat) String() string {
 }
 
 func (ImageFormat_ImgFormat) Descriptor() protoreflect.EnumDescriptor {
-	return file_emulator_controller_proto_enumTypes[0].Descriptor()
+	return file_emulator_controller_proto_enumTypes[1].Descriptor()
 }
 
 func (ImageFormat_ImgFormat) Type() protoreflect.EnumType {
-	return &file_emulator_controller_proto_enumTypes[0]
+	return &file_emulator_controller_proto_enumTypes[1]
 }
 
 func (x ImageFormat_ImgFormat) Number() protoreflect.EnumNumber {
@@ -89,24 +138,82 @@ func (x ImageFormat_ImgFormat) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ImageFormat_ImgFormat.Descriptor instead.
 func (ImageFormat_ImgFormat) EnumDescriptor() ([]byte, []int) {
-	return file_emulator_controller_proto_rawDescGZIP(), []int{0, 0}
+	return file_emulator_controller_proto_rawDescGZIP(), []int{1, 0}
+}
+
+// ImageTransport 指定图像帧的交付通道。
+type ImageTransport struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// channel 是帧交付方式，仅在 streamScreenshot 中生效。
+	Channel ImageTransport_TransportChannel `protobuf:"varint,1,opt,name=channel,proto3,enum=android.emulation.control.ImageTransport_TransportChannel" json:"channel,omitempty"`
+	// handle 由客户端创建并持有；MMAP 模式可使用共享内存或 file:/// URL。
+	Handle        string `protobuf:"bytes,2,opt,name=handle,proto3" json:"handle,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ImageTransport) Reset() {
+	*x = ImageTransport{}
+	mi := &file_emulator_controller_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ImageTransport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ImageTransport) ProtoMessage() {}
+
+func (x *ImageTransport) ProtoReflect() protoreflect.Message {
+	mi := &file_emulator_controller_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ImageTransport.ProtoReflect.Descriptor instead.
+func (*ImageTransport) Descriptor() ([]byte, []int) {
+	return file_emulator_controller_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *ImageTransport) GetChannel() ImageTransport_TransportChannel {
+	if x != nil {
+		return x.Channel
+	}
+	return ImageTransport_TRANSPORT_CHANNEL_UNSPECIFIED
+}
+
+func (x *ImageTransport) GetHandle() string {
+	if x != nil {
+		return x.Handle
+	}
+	return ""
 }
 
 // ImageFormat 描述请求的图像格式与尺寸。
 type ImageFormat struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Format        ImageFormat_ImgFormat  `protobuf:"varint,1,opt,name=format,proto3,enum=android.emulation.control.ImageFormat_ImgFormat" json:"format,omitempty"`
-	Rotation      int32                  `protobuf:"varint,2,opt,name=rotation,proto3" json:"rotation,omitempty"`
-	Width         uint32                 `protobuf:"varint,3,opt,name=width,proto3" json:"width,omitempty"`
-	Height        uint32                 `protobuf:"varint,4,opt,name=height,proto3" json:"height,omitempty"`
-	Display       int32                  `protobuf:"varint,5,opt,name=display,proto3" json:"display,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Format   ImageFormat_ImgFormat  `protobuf:"varint,1,opt,name=format,proto3,enum=android.emulation.control.ImageFormat_ImgFormat" json:"format,omitempty"`
+	Rotation int32                  `protobuf:"varint,2,opt,name=rotation,proto3" json:"rotation,omitempty"`
+	Width    uint32                 `protobuf:"varint,3,opt,name=width,proto3" json:"width,omitempty"`
+	Height   uint32                 `protobuf:"varint,4,opt,name=height,proto3" json:"height,omitempty"`
+	Display  int32                  `protobuf:"varint,5,opt,name=display,proto3" json:"display,omitempty"`
+	// transport=MMAP 时，服务端把像素写入 handle 指向的共享内存，
+	// 返回的 Image.image 为空，仅携带帧元数据。
+	Transport     *ImageTransport `protobuf:"bytes,6,opt,name=transport,proto3" json:"transport,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ImageFormat) Reset() {
 	*x = ImageFormat{}
-	mi := &file_emulator_controller_proto_msgTypes[0]
+	mi := &file_emulator_controller_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -118,7 +225,7 @@ func (x *ImageFormat) String() string {
 func (*ImageFormat) ProtoMessage() {}
 
 func (x *ImageFormat) ProtoReflect() protoreflect.Message {
-	mi := &file_emulator_controller_proto_msgTypes[0]
+	mi := &file_emulator_controller_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -131,7 +238,7 @@ func (x *ImageFormat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImageFormat.ProtoReflect.Descriptor instead.
 func (*ImageFormat) Descriptor() ([]byte, []int) {
-	return file_emulator_controller_proto_rawDescGZIP(), []int{0}
+	return file_emulator_controller_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *ImageFormat) GetFormat() ImageFormat_ImgFormat {
@@ -169,6 +276,13 @@ func (x *ImageFormat) GetDisplay() int32 {
 	return 0
 }
 
+func (x *ImageFormat) GetTransport() *ImageTransport {
+	if x != nil {
+		return x.Transport
+	}
+	return nil
+}
+
 // Image 是一帧图像。
 type Image struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -184,7 +298,7 @@ type Image struct {
 
 func (x *Image) Reset() {
 	*x = Image{}
-	mi := &file_emulator_controller_proto_msgTypes[1]
+	mi := &file_emulator_controller_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -196,7 +310,7 @@ func (x *Image) String() string {
 func (*Image) ProtoMessage() {}
 
 func (x *Image) ProtoReflect() protoreflect.Message {
-	mi := &file_emulator_controller_proto_msgTypes[1]
+	mi := &file_emulator_controller_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -209,7 +323,7 @@ func (x *Image) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Image.ProtoReflect.Descriptor instead.
 func (*Image) Descriptor() ([]byte, []int) {
-	return file_emulator_controller_proto_rawDescGZIP(), []int{1}
+	return file_emulator_controller_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Image) GetFormat() *ImageFormat {
@@ -276,7 +390,7 @@ type Touch struct {
 
 func (x *Touch) Reset() {
 	*x = Touch{}
-	mi := &file_emulator_controller_proto_msgTypes[2]
+	mi := &file_emulator_controller_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -288,7 +402,7 @@ func (x *Touch) String() string {
 func (*Touch) ProtoMessage() {}
 
 func (x *Touch) ProtoReflect() protoreflect.Message {
-	mi := &file_emulator_controller_proto_msgTypes[2]
+	mi := &file_emulator_controller_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -301,7 +415,7 @@ func (x *Touch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Touch.ProtoReflect.Descriptor instead.
 func (*Touch) Descriptor() ([]byte, []int) {
-	return file_emulator_controller_proto_rawDescGZIP(), []int{2}
+	return file_emulator_controller_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Touch) GetX() int32 {
@@ -371,7 +485,7 @@ type TouchEvent struct {
 
 func (x *TouchEvent) Reset() {
 	*x = TouchEvent{}
-	mi := &file_emulator_controller_proto_msgTypes[3]
+	mi := &file_emulator_controller_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -383,7 +497,7 @@ func (x *TouchEvent) String() string {
 func (*TouchEvent) ProtoMessage() {}
 
 func (x *TouchEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_emulator_controller_proto_msgTypes[3]
+	mi := &file_emulator_controller_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -396,7 +510,7 @@ func (x *TouchEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TouchEvent.ProtoReflect.Descriptor instead.
 func (*TouchEvent) Descriptor() ([]byte, []int) {
-	return file_emulator_controller_proto_rawDescGZIP(), []int{3}
+	return file_emulator_controller_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *TouchEvent) GetTouches() []*Touch {
@@ -417,13 +531,20 @@ var File_emulator_controller_proto protoreflect.FileDescriptor
 
 const file_emulator_controller_proto_rawDesc = "" +
 	"\n" +
-	"\x19emulator_controller.proto\x12\x19android.emulation.control\x1a\x1bgoogle/protobuf/empty.proto\"\xeb\x01\n" +
+	"\x19emulator_controller.proto\x12\x19android.emulation.control\x1a\x1bgoogle/protobuf/empty.proto\"\xbf\x01\n" +
+	"\x0eImageTransport\x12T\n" +
+	"\achannel\x18\x01 \x01(\x0e2:.android.emulation.control.ImageTransport.TransportChannelR\achannel\x12\x16\n" +
+	"\x06handle\x18\x02 \x01(\tR\x06handle\"?\n" +
+	"\x10TransportChannel\x12!\n" +
+	"\x1dTRANSPORT_CHANNEL_UNSPECIFIED\x10\x00\x12\b\n" +
+	"\x04MMAP\x10\x01\"\xb4\x02\n" +
 	"\vImageFormat\x12H\n" +
 	"\x06format\x18\x01 \x01(\x0e20.android.emulation.control.ImageFormat.ImgFormatR\x06format\x12\x1a\n" +
 	"\brotation\x18\x02 \x01(\x05R\brotation\x12\x14\n" +
 	"\x05width\x18\x03 \x01(\rR\x05width\x12\x16\n" +
 	"\x06height\x18\x04 \x01(\rR\x06height\x12\x18\n" +
-	"\adisplay\x18\x05 \x01(\x05R\adisplay\".\n" +
+	"\adisplay\x18\x05 \x01(\x05R\adisplay\x12G\n" +
+	"\ttransport\x18\x06 \x01(\v2).android.emulation.control.ImageTransportR\ttransport\".\n" +
 	"\tImgFormat\x12\a\n" +
 	"\x03PNG\x10\x00\x12\f\n" +
 	"\bRGBA8888\x10\x01\x12\n" +
@@ -472,31 +593,35 @@ func file_emulator_controller_proto_rawDescGZIP() []byte {
 	return file_emulator_controller_proto_rawDescData
 }
 
-var file_emulator_controller_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_emulator_controller_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_emulator_controller_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_emulator_controller_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_emulator_controller_proto_goTypes = []any{
-	(ImageFormat_ImgFormat)(0), // 0: android.emulation.control.ImageFormat.ImgFormat
-	(*ImageFormat)(nil),        // 1: android.emulation.control.ImageFormat
-	(*Image)(nil),              // 2: android.emulation.control.Image
-	(*Touch)(nil),              // 3: android.emulation.control.Touch
-	(*TouchEvent)(nil),         // 4: android.emulation.control.TouchEvent
-	(*emptypb.Empty)(nil),      // 5: google.protobuf.Empty
+	(ImageTransport_TransportChannel)(0), // 0: android.emulation.control.ImageTransport.TransportChannel
+	(ImageFormat_ImgFormat)(0),           // 1: android.emulation.control.ImageFormat.ImgFormat
+	(*ImageTransport)(nil),               // 2: android.emulation.control.ImageTransport
+	(*ImageFormat)(nil),                  // 3: android.emulation.control.ImageFormat
+	(*Image)(nil),                        // 4: android.emulation.control.Image
+	(*Touch)(nil),                        // 5: android.emulation.control.Touch
+	(*TouchEvent)(nil),                   // 6: android.emulation.control.TouchEvent
+	(*emptypb.Empty)(nil),                // 7: google.protobuf.Empty
 }
 var file_emulator_controller_proto_depIdxs = []int32{
-	0, // 0: android.emulation.control.ImageFormat.format:type_name -> android.emulation.control.ImageFormat.ImgFormat
-	1, // 1: android.emulation.control.Image.format:type_name -> android.emulation.control.ImageFormat
-	3, // 2: android.emulation.control.TouchEvent.touches:type_name -> android.emulation.control.Touch
-	1, // 3: android.emulation.control.EmulatorController.getScreenshot:input_type -> android.emulation.control.ImageFormat
-	1, // 4: android.emulation.control.EmulatorController.streamScreenshot:input_type -> android.emulation.control.ImageFormat
-	4, // 5: android.emulation.control.EmulatorController.sendTouch:input_type -> android.emulation.control.TouchEvent
-	2, // 6: android.emulation.control.EmulatorController.getScreenshot:output_type -> android.emulation.control.Image
-	2, // 7: android.emulation.control.EmulatorController.streamScreenshot:output_type -> android.emulation.control.Image
-	5, // 8: android.emulation.control.EmulatorController.sendTouch:output_type -> google.protobuf.Empty
-	6, // [6:9] is the sub-list for method output_type
-	3, // [3:6] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	0, // 0: android.emulation.control.ImageTransport.channel:type_name -> android.emulation.control.ImageTransport.TransportChannel
+	1, // 1: android.emulation.control.ImageFormat.format:type_name -> android.emulation.control.ImageFormat.ImgFormat
+	2, // 2: android.emulation.control.ImageFormat.transport:type_name -> android.emulation.control.ImageTransport
+	3, // 3: android.emulation.control.Image.format:type_name -> android.emulation.control.ImageFormat
+	5, // 4: android.emulation.control.TouchEvent.touches:type_name -> android.emulation.control.Touch
+	3, // 5: android.emulation.control.EmulatorController.getScreenshot:input_type -> android.emulation.control.ImageFormat
+	3, // 6: android.emulation.control.EmulatorController.streamScreenshot:input_type -> android.emulation.control.ImageFormat
+	6, // 7: android.emulation.control.EmulatorController.sendTouch:input_type -> android.emulation.control.TouchEvent
+	4, // 8: android.emulation.control.EmulatorController.getScreenshot:output_type -> android.emulation.control.Image
+	4, // 9: android.emulation.control.EmulatorController.streamScreenshot:output_type -> android.emulation.control.Image
+	7, // 10: android.emulation.control.EmulatorController.sendTouch:output_type -> google.protobuf.Empty
+	8, // [8:11] is the sub-list for method output_type
+	5, // [5:8] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_emulator_controller_proto_init() }
@@ -509,8 +634,8 @@ func file_emulator_controller_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_emulator_controller_proto_rawDesc), len(file_emulator_controller_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   4,
+			NumEnums:      2,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

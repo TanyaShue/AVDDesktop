@@ -41,6 +41,20 @@ service EmulatorController {
   rpc sendTouch(TouchEvent) returns (google.protobuf.Empty);
 }
 
+// ImageTransport 指定图像帧的交付通道。
+message ImageTransport {
+  enum TransportChannel {
+    TRANSPORT_CHANNEL_UNSPECIFIED = 0;
+    // 像素写入 handle 指定的共享内存，Image.image 保持为空。
+    MMAP = 1;
+  }
+
+  // channel 是帧交付方式，仅在 streamScreenshot 中生效。
+  TransportChannel channel = 1;
+  // handle 由客户端创建并持有；MMAP 模式可使用共享内存或 file:/// URL。
+  string handle = 2;
+}
+
 // ImageFormat 描述请求的图像格式与尺寸。
 message ImageFormat {
   enum ImgFormat {
@@ -53,6 +67,10 @@ message ImageFormat {
   uint32 width = 3;
   uint32 height = 4;
   int32 display = 5;
+
+  // transport=MMAP 时，服务端把像素写入 handle 指向的共享内存，
+  // 返回的 Image.image 为空，仅携带帧元数据。
+  ImageTransport transport = 6;
 }
 
 // Image 是一帧图像。

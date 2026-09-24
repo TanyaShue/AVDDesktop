@@ -6,12 +6,14 @@
 // 同版本的官方全文同名文件随 SDK 一起发布（gitignore 的 build/bin 下）：
 // build/bin/sdk/emulator/lib/emulator_controller.proto —— 修改本文件时应与它核对字段号与类型。
 //
-// 重新生成命令（Windows，protoc 25.3；-I 第二项是 protobuf 自带的 well-known types 目录）：
+// 重新生成命令（protoc 25.x；第二个 -I 指向 protoc 自带的 well-known types 目录，
+// 通常是 <protoc 安装目录>/../include，例如 Windows 上 Anaconda 的
+// D:/DeveEnvironment/Program/Anaconda3/Library/include）：
 //
 //	go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
 //	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
 //	protoc -I internal/emulatorgrpc/proto \
-//	  -I "D:/DeveEnvironment/Program/Anaconda3/Library/include" \
+//	  -I "<protoc 的 include 目录>" \
 //	  --go_out=paths=source_relative:internal/emulatorgrpc/pb \
 //	  --go-grpc_out=paths=source_relative:internal/emulatorgrpc/pb \
 //	  internal/emulatorgrpc/proto/emulator_controller.proto

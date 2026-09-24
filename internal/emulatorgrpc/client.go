@@ -52,6 +52,18 @@ type Frame struct {
 	Seq    uint32
 }
 
+// FrameMeta 是 MMAP 传输下的一帧元数据。
+//
+// MMAP 模式下服务端把 RGBA8888 像素直接写入客户端提供的共享内存，
+// 对应的 gRPC Image.image 为空，因此这里只携带帧尺寸、序号、时间戳和旋转信息。
+type FrameMeta struct {
+	Width       int
+	Height      int
+	Seq         uint32
+	TimestampUs int64
+	Rotation    int32
+}
+
 // Client 是模拟器 gRPC 客户端。可并发调用，Close 后不可再使用。
 type Client struct {
 	conn *grpc.ClientConn
@@ -166,6 +178,58 @@ func (c *Client) StreamScreenshot(ctx context.Context, width, height int) (<-cha
 	return out, nil
 }
 
+// StreamScreenshotMMAP 打开 MMAP 画面流：请求 RGBA8888 像素写入 handle 指定的
+// 共享内存，gRPC 流只返回帧元数据（Image.image 为空）。
+//
+// 返回帧的尺寸优先使用服务端 format.width/height；服务端未提供或提供 0 时，
+// 分别回退到调用方传入的 width/height。channel 在流结束或 ctx 取消后关闭，
+// 且不会泄漏 goroutine；channel/goroutine 语义与 StreamScreenshot 一致。
+func (c *Client) StreamScreenshotMMAP(ctx context.Context, width, height int, handle string) (<-chan FrameMeta, error) {
+	if c == nil || c.cc == nil {
+		return nil, domain.Err(domain.CodeProcessFailed, "模拟器 gRPC 客户端未初始化")
+	}
+	req := &pb.ImageFormat{
+		Format: pb.ImageFormat_RGBA8888,
+		Transport: &pb.ImageTransport{
+			Channel: pb.ImageTransport_MMAP,
+			Handle:  handle,
+		},
+	}
+	if width > 0 {
+		req.Width = uint32(width)
+	}
+	if height > 0 {
+		req.Height = uint32(height)
+	}
+
+	stream, err := c.cc.StreamScreenshot(ctx, req)
+	if err != nil {
+		return nil, domain.ErrDetail(domain.CodeProcessFailed, "打开模拟器 MMAP 画面流失败", err.Error())
+	}
+
+	out := make(chan FrameMeta, 1)
+	go func() {
+		defer close(out)
+		for {
+			img, err := stream.Recv()
+			if err != nil {
+				// ctx 取消或流被服务端结束：正常收尾，由 defer 关闭 channel。
+				return
+			}
+			meta, ok := decodeFrameMeta(img, width, height)
+			if !ok {
+				continue
+			}
+			select {
+			case out <- meta:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
+}
+
 // SendTouch 注入触点（单指、identifier 固定 0）。
 //
 // release=true 表示抬起：该次事件的 expiration 与 pressure 同时归零，模拟器才会把
@@ -213,6 +277,32 @@ func decodeFrame(img *pb.Image, reqWidth, reqHeight int) (Frame, bool) {
 	pix := make([]byte, need)
 	copy(pix, data[:need])
 	return Frame{Pix: pix, Width: w, Height: h, Seq: img.GetSeq()}, true
+}
+
+// decodeFrameMeta 把一条 MMAP 流消息转成 FrameMeta。
+//
+// MMAP 模式下 Image.image 为空是正常语义，不能据此丢弃消息；只有最终尺寸不可用时
+// 才跳过。服务端的 format.width/height 优先于请求值，便于调用方发现分辨率变化。
+func decodeFrameMeta(img *pb.Image, reqWidth, reqHeight int) (FrameMeta, bool) {
+	w, h := reqWidth, reqHeight
+	if format := img.GetFormat(); format != nil {
+		if serverWidth := int(format.GetWidth()); serverWidth > 0 {
+			w = serverWidth
+		}
+		if serverHeight := int(format.GetHeight()); serverHeight > 0 {
+			h = serverHeight
+		}
+	}
+	if w <= 0 || h <= 0 {
+		return FrameMeta{}, false
+	}
+	return FrameMeta{
+		Width:       w,
+		Height:      h,
+		Seq:         img.GetSeq(),
+		TimestampUs: img.GetTimestampUs(),
+		Rotation:    img.GetFormat().GetRotation(),
+	}, true
 }
 
 // bearerUnaryInterceptor 为每次一元调用附加 `authorization: Bearer <token>` 元数据。
