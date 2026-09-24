@@ -19,17 +19,17 @@ internal/avd        AVD 配置读写（.ini/config.ini）、创建（avdmanager�
 internal/adb        `adb devices -l` 解析与轮询、`adb shell` 调用
 internal/emulatorgrpc 模拟器 gRPC 控制通道（截图 / MMAP 画面流 / 触摸注入）
 internal/sharedmem   file-backed 共享内存（emulator MMAP 帧缓冲）
-internal/displayhost 独立 Presenter 辅助进程（MMAP → Presenter → 工具栏）
-internal/presenter   Windows 原生 Presenter 窗口与独立工具栏（无 cgo）
-internal/display     本机 MJPEG 画面服务（非 Windows 兼容路径）
+internal/displayhost 独立设备窗口辅助进程（MMAP → JPEG → WebView 窗口与方法绑定）
+internal/display     本机 MJPEG 画面服务（辅助进程与主窗口浮层共用）
 internal/job        统一长任务管理器（进度 + 日志 → 事件流）
 internal/service    Wails 绑定层：参数校验 → 领域逻辑 → 注册 Job → 返回 jobID
 internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/AVD）
 ```
 
 数据流：`React UI → wailsjs 绑定方法 → service → jdk/sdk/avd/adb → 官方 CLI`。
-自定义 UI 在 Windows 上走原生路径：`emulator renderer → streamScreenshot(MMAP) → internal/sharedmem → internal/displayhost → internal/presenter（独立画面窗口 + 独立工具栏）`。
-其它平台保留兼容路径：`React UI（设备窗口 <img>）→ 本机 MJPEG（internal/display）← gRPC 画面流（internal/emulatorgrpc）← emulator`。
+自定义 UI 走独立设备窗口：`emulator renderer → streamScreenshot(MMAP) → internal/sharedmem → internal/displayhost（JPEG 编码 + 本机 MJPEG 服务）→ WebView 设备窗口`；
+主进程只负责启动/回收该辅助进程，不接触像素。同一条 MJPEG 链路也被应用内浮层复用：
+`React UI（<img>）→ 本机 MJPEG（internal/display）← gRPC 画面流（internal/emulatorgrpc）← emulator`。
 耗时操作不在绑定方法里同步执行：`service` 只做校验并登记 Job，绑定方法立即返回 `jobID`；
 进度与日志通过 `job:created/progress/log/done/failed` 事件流推送到前端，统一显示在底部任务与日志区域。
 
@@ -104,21 +104,24 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
   等待设备 3 分钟、`sys.boot_completed` 5 分钟、停止宽限 30 秒、强杀等待 15 秒。
 - 退出码可诊断（如加速不可用），`emulator -accel-check` 结果进入环境检查。
 
-#### 自定义 UI：MMAP + 独立原生 Presenter（Windows）
+#### 自定义 UI：MMAP + WebView 设备窗口
 
 - 启动仍为 `-no-window -grpc <gRPC 端口>`；Qt 主窗口不加载。
-- 辅助进程与主程序使用同一个可执行文件，以 `--display-host` 模式启动，不初始化 Wails、不抢单实例锁。
+- 辅助进程与主程序使用同一个可执行文件，以 `--display-host` 模式启动：不初始化主程序、不抢单实例锁，
+  但**自己跑一个 Wails 窗口**（`internal/displayhost/window.go`），用 AssetServer 中间件把 `/` 重写到
+  `device.html` 入口，于是同一份 embed 资源能同时承载主窗口与设备窗口。
 - `getScreenshot(PNG)` 读 IHDR 探测原生分辨率，随后请求
-  `streamScreenshot(RGBA8888, ImageTransport.MMAP)`；像素写入客户端创建的 file-backed 共享内存，
-  gRPC 只传尺寸、序号、时间戳和旋转元数据。
-- `internal/displayhost` 读取共享内存并复制稳定帧，`internal/presenter` 在独立顶层窗口用
-  GDI top-down DIB 显示；工具栏是另一个 `WS_EX_TOOLWINDOW` 顶层窗口，不占用主程序布局。
-- 输入：Presenter 鼠标事件映射为设备坐标并调用 gRPC `sendTouch`；工具栏 Back/Home/Apps 调用
-  `adb shell input keyevent`（4/3/187）。
-- 帧是脏帧驱动的，窗口必须保留最后一帧。MMAP 传输可能 tearing，因此 data plane 在消息到达后复制帧再转换。
-- 非 Windows 平台返回 `UNSUPPORTED`，前端自动回退到原有 MJPEG + `<img>` 浮层。
-- 已知缺口：gRPC 默认无认证；当前原生 Presenter 仍使用 CPU 帧复制与 GDI 展示，未实现 DMA-BUF / GPU 零拷贝。
-- 非目标：音频、多显示器、折叠屏、旋转、剪贴板与快照。
+  `streamScreenshot(RGBA8888, ImageTransport.MMAP, width=540)`：宽高都显式请求，由模拟器侧缩放，
+  返回尺寸不会超过请求值，共享内存按上界一次性分配，设备旋转也不会越界。
+- `internal/displayhost` 把共享内存里的帧复制成稳定帧（规避 MMAP 撕裂）后编码 JPEG，发布到
+  `internal/display` 的本机 MJPEG 会话；WebView 里的 `<img>` 直接消费，慢客户端自动丢帧。
+- 输入：设备窗口的指针事件映射为归一化坐标 → 绑定方法 → gRPC `sendTouch`（16ms 节流）；
+  工具栏与键盘快捷键走 `adb shell input keyevent`（返回 4 / 主页 3 / 多任务 187 / 音量 24·25 / 方向键等）。
+- 截图走 `adb shell screencap` + `adb pull` 落到 `<Root>/screenshots`（不经二进制管道，避免被按行处理破坏）。
+- 生命周期：窗口关闭 = 辅助进程退出；主进程 `Close` 先关 stdin 请求优雅退出（保证删除共享内存映射文件），
+  超时才强杀；父进程退出/崩溃时管道断开同样触发收尾。
+- 已知缺口：gRPC 默认无认证；JPEG 编解码为 CPU 路径（未使用 WebCodecs/GPU 零拷贝）；单屏。
+- 非目标：音频、多显示器、折叠屏、剪贴板与原生快照。
 
 ## 跨平台注意
 
@@ -141,3 +144,4 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
 - 单元测试全部 hermetic：临时目录自造样本，不依赖本机 SDK/JDK。
 - `internal/e2e`（`-tags e2e`）才使用真实网络与 `AVDDESKTOP_E2E_HOME` 指定的真实目录，
   覆盖 JDK/SDK 环境准备、创建 AVD、启动 emulator 三条链路。JDK/SDK 镜像检测均有 hermetic 单测。
+

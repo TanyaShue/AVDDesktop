@@ -1,4 +1,9 @@
-# MMAP 共享内存 + 独立原生 Presenter + 独立工具栏
+# MMAP 共享内存 + 独立原生 Presenter + 独立工具栏（历史方案）
+
+> **状态：已被取代。** 阶段 1（MMAP 传输、共享内存封装、gRPC 客户端）全部沿用；
+> 阶段 2/3 的「原生 Presenter + 独立原生工具栏」在实现后因观感与可维护性问题被
+> **WebView 设备窗口**取代（见 [DEVICE_WINDOW_WEBVIEW.md](DEVICE_WINDOW_WEBVIEW.md)），
+> `internal/presenter` 已删除。下文保留为实现前的原始计划，仅供追溯。
 
 ## 目标
 
@@ -110,3 +115,4 @@ emulator renderer
 - 不 fork Android Emulator，不注入 DLL，不复制 `aemu-gl-init` 内部实现。
 - 不实现 DMA-BUF / 原生 GPU handle 零拷贝。
 - 不在首版同时交付 macOS/Linux 原生显示后端；这些平台继续使用现有 MJPEG 兜底。
+

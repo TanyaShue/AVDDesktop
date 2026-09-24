@@ -12,9 +12,11 @@
   也可以覆盖内存（GB）、CPU 核心与分辨率三项常用参数（其余参数完全沿用档案默认值，
   设备卡片上直接显示当前生效的核心 / 内存 / 分辨率）
 - **自定义 UI 设备窗口**：设备卡片「更多操作 → 使用自定义 UI 启动」让模拟器以无窗口方式运行；
-  Windows 上通过 MMAP 共享内存把画面交给独立原生 Presenter，工具栏也是独立窗口，不再由主窗口 WebView 渲染设备画面。
-  鼠标点击 / 拖拽即设备触摸，并提供返回 / 主页 / 多任务导航键；关闭设备窗口不会停止模拟器。
-  非 Windows 平台保留应用内 MJPEG 设备窗口作为兼容路径（见 [原生 Presenter 验收记录](docs/MMAP_NATIVE_PRESENTER_ACCEPTANCE.md)）
+  画面经 MMAP 共享内存取出后编码为 MJPEG，由**独立 WebView 设备窗口**（MuMu 风格：自绘标题栏 + 画面区 + 工具栏）承载，
+  不再由主窗口渲染设备画面。工具栏提供返回 / 主页 / 多任务 / 音量 / 截图，标题栏可置顶、最小化、最大化；
+  鼠标点击 / 拖拽即设备触摸（支持下滑拉出通知栏），Escape / 方向键 / 回车 / 退格直接转发到设备；
+  截图保存在 `<Root>/screenshots`。关闭设备窗口不会停止模拟器，主窗口仍保留应用内浮层作为兜底。
+  详见 [WebView 设备窗口](docs/DEVICE_WINDOW_WEBVIEW.md)
 - **统一日志与任务**：底部区域显示长任务进度与日志
 
 技术栈：Wails v2 + Go + React 19 + TypeScript + Vite。
@@ -33,6 +35,7 @@
 <Root>/config    设置文件 settings.json
 <Root>/logs      应用日志（按天 + 按大小滚动）
 <Root>/cache     下载临时文件
+<Root>/screenshots 设备窗口截图
 ```
 
 ## 首次运行行为
@@ -62,10 +65,10 @@ wails build
 # 单元测试（全部 hermetic，不需要网络与本机 SDK/JDK）
 go test ./...
 
-# Windows 原生 Presenter 端到端测试（需要本机已有 SDK/AVD；先执行 wails build）
+# 设备窗口端到端测试（真实启动模拟器 + 独立 WebView 窗口；先执行 wails build）
 $env:AVDDESKTOP_E2E_HOME = (Resolve-Path "build/bin").Path
 $env:AVDDESKTOP_NATIVE_BINARY = (Resolve-Path "build/bin/AVDDesktop.exe").Path
-go test -tags e2e -count=1 -timeout 20m -run '^TestE2E_NativePresenter$' -v ./internal/e2e
+go test -tags e2e -count=1 -timeout 20m -run '^TestE2E_DeviceWindow$' -v ./internal/e2e
 
 # 端到端测试（真实网络 + 真实 JDK/SDK/AVD 目录，耗时较长）
 $env:AVDDESKTOP_E2E_HOME = "E:\avddesktop-e2e"
@@ -89,7 +92,9 @@ go test -tags e2e -count=1 -timeout 300m ./internal/e2e/ -v
 ## 文档
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：模块划分、数据流、JDK / SDK / AVD / emulator 的关键约束与超时策略。
+- [docs/DEVICE_WINDOW_WEBVIEW.md](docs/DEVICE_WINDOW_WEBVIEW.md)：自定义 UI 的 WebView 设备窗口（架构、数据面、验收记录）。
 
 ## 许可证
 
 本项目基于 [MIT License](LICENSE) 开源。
+

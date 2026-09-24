@@ -1,4 +1,7 @@
-# MMAP 原生 Presenter 验收记录
+# MMAP 原生 Presenter 验收记录（历史）
+
+> **状态：历史记录。** 原生 Presenter 已被 WebView 设备窗口取代（见
+> [DEVICE_WINDOW_WEBVIEW.md](DEVICE_WINDOW_WEBVIEW.md)），本文件仅保留当时的验收结果。
 
 ## 验收环境
 
@@ -92,3 +95,4 @@ ok  AVDDesktop/internal/e2e  41.263s
 - MMAP 为单缓冲语义，官方文档提示可能 tearing；当前实现用帧消息后的复制降低风险，但未做大分辨率/持续动画压力基准。
 - macOS / Linux 不提供原生 Presenter，自动回退到应用内 MJPEG 设备窗口。
 - gRPC 默认未启用 token 认证。
+
