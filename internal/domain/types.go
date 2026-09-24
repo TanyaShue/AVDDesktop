@@ -275,10 +275,12 @@ type NameValidation struct {
 
 // ---------------------------------------------------------------- 模拟器实例
 
-// LaunchOptions 是启动参数（界面只暴露冷启动与无窗口两个开关；端口由启动器内部决定）。
+// LaunchOptions 是启动参数（界面只暴露冷启动、无窗口与自定义 UI 三个开关；端口由启动器内部决定）。
 type LaunchOptions struct {
 	ColdBoot bool `json:"coldBoot"`
 	NoWindow bool `json:"noWindow"`
+	// CustomUI 表示使用应用自建窗口显示设备画面：不启动 Qt 窗口，并开启模拟器 gRPC 图像通道。
+	CustomUI bool `json:"customUI"`
 }
 
 // EmulatorInstance 是一个模拟器实例（只保留界面展示与诊断需要的字段）。
@@ -294,6 +296,9 @@ type EmulatorInstance struct {
 	ExitCode  *int     `json:"exitCode,omitempty"`
 	LastError string   `json:"lastError,omitempty"`
 	Args      []string `json:"args"`
+	// CustomUI 表示该实例由应用自建窗口接管显示；GrpcPort 是其 gRPC 控制端口（未启用时为 0）。
+	CustomUI bool `json:"customUI,omitempty"`
+	GrpcPort int  `json:"grpcPort,omitempty"`
 }
 
 // AdbDevice 是 `adb devices -l` 中的一行。

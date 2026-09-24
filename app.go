@@ -33,6 +33,7 @@ type App struct {
 	Mirror   *service.MirrorService
 	Avd      *service.AvdService
 	Emulator *service.EmulatorService
+	Display  *service.DisplayService
 	Settings *service.SettingsService
 	Logs     *service.LogService
 	Jobs     *service.JobService
@@ -87,6 +88,7 @@ func NewApp() (*App, error) {
 		Mirror:   service.NewMirrorService(rt),
 		Avd:      service.NewAvdService(rt),
 		Emulator: service.NewEmulatorService(rt),
+		Display:  service.NewDisplayService(rt),
 		Settings: service.NewSettingsService(rt),
 		Logs:     service.NewLogService(rt),
 		Jobs:     service.NewJobService(rt),
@@ -126,6 +128,8 @@ func (a *App) startup(ctx context.Context) {
 
 // shutdown 由 Wails 在窗口关闭时调用。
 func (a *App) shutdown(ctx context.Context) {
+	// 先结束设备画面（HTTP 流 + gRPC 连接），再停模拟器实例。
+	a.Display.Shutdown()
 	a.rt.Shutdown()
 	a.log.Info("app", "应用退出")
 	_ = a.log.Close()

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -38,23 +39,34 @@ func newTestLauncher() *Launcher {
 	return NewLauncher(platform.Tools{}, nil, nil, nil, nil, logging.Nop())
 }
 
-// TestBuildArgs 验证启动参数只包含端口与冷启动/无窗口两个开关的组合。
+// TestBuildArgs 验证启动参数：端口、冷启动/无窗口开关，以及自定义 UI 的 -no-window -grpc 组合。
 func TestBuildArgs(t *testing.T) {
 	cases := []struct {
-		name string
-		opts domain.LaunchOptions
-		port int
-		want []string
+		name     string
+		opts     domain.LaunchOptions
+		port     int
+		grpcPort int
+		want     []string
 	}{
-		{"默认", domain.LaunchOptions{}, 5554, []string{"-avd", "Dev1", "-port", "5554"}},
-		{"冷启动", domain.LaunchOptions{ColdBoot: true}, 5556, []string{"-avd", "Dev1", "-port", "5556", "-no-snapshot-load"}},
-		{"无窗口", domain.LaunchOptions{NoWindow: true}, 5558, []string{"-avd", "Dev1", "-port", "5558", "-no-window"}},
-		{"冷启动+无窗口", domain.LaunchOptions{ColdBoot: true, NoWindow: true}, 5560,
+		{"默认", domain.LaunchOptions{}, 5554, 0, []string{"-avd", "Dev1", "-port", "5554"}},
+		{"冷启动", domain.LaunchOptions{ColdBoot: true}, 5556, 0, []string{"-avd", "Dev1", "-port", "5556", "-no-snapshot-load"}},
+		{"无窗口", domain.LaunchOptions{NoWindow: true}, 5558, 0, []string{"-avd", "Dev1", "-port", "5558", "-no-window"}},
+		{"冷启动+无窗口", domain.LaunchOptions{ColdBoot: true, NoWindow: true}, 5560, 0,
 			[]string{"-avd", "Dev1", "-port", "5560", "-no-snapshot-load", "-no-window"}},
+		{"自定义 UI", domain.LaunchOptions{CustomUI: true}, 5562, 8554,
+			[]string{"-avd", "Dev1", "-port", "5562", "-no-window", "-grpc", "8554"}},
+		{"冷启动+自定义 UI", domain.LaunchOptions{ColdBoot: true, CustomUI: true}, 5564, 8556,
+			[]string{"-avd", "Dev1", "-port", "5564", "-no-snapshot-load", "-no-window", "-grpc", "8556"}},
+		// gRPC 端口未分配（<=0）时不得出现空的 -grpc 参数。
+		{"自定义 UI 未分配 gRPC 端口", domain.LaunchOptions{CustomUI: true}, 5566, 0,
+			[]string{"-avd", "Dev1", "-port", "5566", "-no-window"}},
+		// 只有自定义 UI 才追加 -grpc：普通无窗口启动即使传了端口也不该开启 gRPC。
+		{"无窗口不追加 gRPC", domain.LaunchOptions{NoWindow: true}, 5568, 8558,
+			[]string{"-avd", "Dev1", "-port", "5568", "-no-window"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := BuildArgs("Dev1", tc.opts, tc.port); !reflect.DeepEqual(got, tc.want) {
+			if got := BuildArgs("Dev1", tc.opts, tc.port, tc.grpcPort); !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("BuildArgs = %v，期望 %v", got, tc.want)
 			}
 		})
@@ -123,6 +135,156 @@ func freePortRange(t *testing.T, count int) (int, int) {
 	}
 	t.Fatal("本机没有可用的偶数端口段用于测试")
 	return 0, 0
+}
+
+// freePortBlock 找一段本机可用的连续端口（任意奇偶，用于 gRPC 单端口池）。
+func freePortBlock(t *testing.T, count int) (int, int) {
+	t.Helper()
+	for start := 8600; start <= 8800; start++ {
+		free := true
+		for i := range count {
+			if !isPortFree(start + i) {
+				free = false
+				break
+			}
+		}
+		if free {
+			return start, start + count - 1
+		}
+	}
+	t.Fatal("本机没有可用的连续端口段用于 gRPC 测试")
+	return 0, 0
+}
+
+// TestAllocateGrpcPort 验证 gRPC 端口分配：连续分配不重复、耗尽报错、归还后可再次分配。
+func TestAllocateGrpcPort(t *testing.T) {
+	first, last := freePortBlock(t, 3)
+	l := newTestLauncher()
+	l.grpcFirst, l.grpcLast = first, last
+
+	seen := map[int]bool{}
+	for i := 1; i <= 3; i++ {
+		port, err := l.allocateGrpcPortLocked()
+		if err != nil {
+			t.Fatalf("第 %d 次分配 gRPC 端口失败（范围 %d-%d）：%v", i, first, last, err)
+		}
+		if port < first || port > last {
+			t.Fatalf("分配的 gRPC 端口 %d 不在范围内（%d-%d）", port, first, last)
+		}
+		if seen[port] {
+			t.Fatalf("gRPC 端口 %d 被重复分配", port)
+		}
+		seen[port] = true
+	}
+	if _, err := l.allocateGrpcPortLocked(); err == nil {
+		t.Fatalf("范围 %d-%d 已耗尽，应返回明确错误", first, last)
+	}
+	l.releaseGrpcPort(first)
+	if port, err := l.allocateGrpcPortLocked(); err != nil || port != first {
+		t.Fatalf("归还 %d 后应能重新分配：port=%d err=%v", first, port, err)
+	}
+}
+
+// TestGrpcPortSkipsConsolePort 验证 gRPC 端口池与 console 端口池隔离：
+// 即使两段范围重叠，也不会把已分配给 console 的端口再给 gRPC。
+func TestGrpcPortSkipsConsolePort(t *testing.T) {
+	first, last := freePortRange(t, 2) // 两个连续偶数 console 端口
+	l := newTestLauncher()
+	l.first, l.last = first, last
+	l.grpcFirst, l.grpcLast = first, last // 故意让 gRPC 池与 console 池重叠
+
+	console, err := l.AllocatePort()
+	if err != nil {
+		t.Fatalf("分配 console 端口失败：%v", err)
+	}
+	grpc, err := l.allocateGrpcPortLocked()
+	if err != nil {
+		t.Fatalf("分配 gRPC 端口失败：%v", err)
+	}
+	if grpc == console {
+		t.Fatalf("gRPC 端口 %d 与已分配的 console 端口冲突", grpc)
+	}
+}
+
+// TestGrpcPortReleasedAfterExit 验证实例退出后 gRPC 端口被归还，可再次分配。
+func TestGrpcPortReleasedAfterExit(t *testing.T) {
+	first, last := freePortBlock(t, 1)
+	l := newTestLauncher()
+	l.grpcFirst, l.grpcLast = first, last
+	port, err := l.allocateGrpcPortLocked()
+	if err != nil {
+		t.Fatalf("准备 gRPC 端口失败：%v", err)
+	}
+	inst := testInstance("Dev1", 5560)
+	inst.grpcPort = port
+	inst.info.CustomUI, inst.info.GrpcPort = true, port
+	registerInstance(l, inst)
+	close(inst.exit) // 进程已退出
+
+	l.monitor(context.Background(), inst)
+
+	if got, err := l.allocateGrpcPortLocked(); err != nil || got != port {
+		t.Fatalf("实例结束后 gRPC 端口 %d 应可再次分配：port=%d err=%v", port, got, err)
+	}
+}
+
+// TestStartFillsCustomUIInstance 验证 Start 返回的快照带上了 CustomUI/GrpcPort 与完整命令行。
+//
+// procStart 被替换为不产生真实进程的桩：命令行的验证只看 BuildArgs 的结果，不依赖真实模拟器。
+func TestStartFillsCustomUIInstance(t *testing.T) {
+	emulator := filepath.Join(t.TempDir(), "emulator")
+	if err := os.WriteFile(emulator, nil, 0o644); err != nil {
+		t.Fatalf("创建测试用 emulator 占位文件失败：%v", err)
+	}
+	console, _ := freePortRange(t, 1)
+	grpcFirst, grpcLast := freePortBlock(t, 1)
+	l := newTestLauncher()
+	l.tools.Emulator = emulator
+	l.first, l.last = console, console
+	l.grpcFirst, l.grpcLast = grpcFirst, grpcLast
+	l.procStart = func(*exec.Cmd) error { return nil } // 桩：不产生真实进程
+
+	inst, err := l.Start(context.Background(), "Dev1", domain.LaunchOptions{CustomUI: true})
+	if err != nil {
+		t.Fatalf("启动失败：%v", err)
+	}
+	if !inst.CustomUI {
+		t.Error("自定义 UI 实例的 CustomUI 应为 true")
+	}
+	if inst.GrpcPort != grpcFirst {
+		t.Errorf("GrpcPort = %d，期望 %d", inst.GrpcPort, grpcFirst)
+	}
+	if inst.Port != console {
+		t.Errorf("Port = %d，期望 %d", inst.Port, console)
+	}
+	want := BuildArgs("Dev1", domain.LaunchOptions{CustomUI: true}, console, grpcFirst)
+	if !reflect.DeepEqual(inst.Args, want) {
+		t.Errorf("Args = %v，期望完整命令行 %v", inst.Args, want)
+	}
+}
+
+// TestStartNonCustomUIHasNoGrpcPort 验证普通启动不占用 gRPC 端口。
+func TestStartNonCustomUIHasNoGrpcPort(t *testing.T) {
+	emulator := filepath.Join(t.TempDir(), "emulator")
+	if err := os.WriteFile(emulator, nil, 0o644); err != nil {
+		t.Fatalf("创建测试用 emulator 占位文件失败：%v", err)
+	}
+	console, _ := freePortRange(t, 1)
+	l := newTestLauncher()
+	l.tools.Emulator = emulator
+	l.first, l.last = console, console
+	l.procStart = func(*exec.Cmd) error { return nil }
+
+	inst, err := l.Start(context.Background(), "Dev1", domain.LaunchOptions{NoWindow: true})
+	if err != nil {
+		t.Fatalf("启动失败：%v", err)
+	}
+	if inst.CustomUI || inst.GrpcPort != 0 {
+		t.Errorf("普通启动不应带 gRPC：CustomUI=%v GrpcPort=%d", inst.CustomUI, inst.GrpcPort)
+	}
+	if want := []string{"-avd", "Dev1", "-port", strconv.Itoa(console), "-no-window"}; !reflect.DeepEqual(inst.Args, want) {
+		t.Errorf("Args = %v，期望 %v", inst.Args, want)
+	}
 }
 
 // TestExplainExit 验证退出原因按关键词给出可操作说明。

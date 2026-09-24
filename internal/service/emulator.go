@@ -20,11 +20,13 @@ type EmulatorService struct{ rt *Runtime }
 // NewEmulatorService 创建 EmulatorService。
 func NewEmulatorService(rt *Runtime) *EmulatorService { return &EmulatorService{rt: rt} }
 
-// StartRequest 是启动请求（只保留界面需要的两个开关）。
+// StartRequest 是启动请求（只保留界面需要的三个开关）。
 type StartRequest struct {
 	AvdName  string `json:"avdName"`
 	ColdBoot bool   `json:"coldBoot"`
 	NoWindow bool   `json:"noWindow"`
+	// CustomUI 表示使用应用自建窗口接管画面：不启动 Qt 窗口，并开启模拟器 gRPC 图像通道。
+	CustomUI bool `json:"customUI"`
 }
 
 // Start 启动模拟器实例。
@@ -37,10 +39,12 @@ func (s *EmulatorService) Start(req StartRequest) (*domain.EmulatorInstance, err
 		return nil, domain.Err(domain.CodeToolMissing, "尚未安装模拟器（emulator）").
 			WithAction("install", "安装模拟器", "emulator")
 	}
-	inst, err := comp.Launcher.Start(s.rt.Context(), req.AvdName, domain.LaunchOptions{
-		ColdBoot: req.ColdBoot,
-		NoWindow: req.NoWindow,
-	})
+	opts := domain.LaunchOptions{ColdBoot: req.ColdBoot, NoWindow: req.NoWindow, CustomUI: req.CustomUI}
+	if opts.CustomUI {
+		// 自定义 UI 必须无窗口：否则会出现"有 Qt 窗口 + gRPC 通道"这种无意义组合。
+		opts.NoWindow = true
+	}
+	inst, err := comp.Launcher.Start(s.rt.Context(), req.AvdName, opts)
 	if err != nil {
 		return nil, err
 	}

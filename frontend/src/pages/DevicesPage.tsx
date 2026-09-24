@@ -6,6 +6,7 @@ import { EVENTS, errorText } from "../bridge/api";
 import type { AvdState, AvdSummary, EmulatorInstance } from "../bridge/types";
 import type { EnvCheck } from "../hooks/useEnvCheck";
 import { useWailsEvent } from "../hooks/useApp";
+import { DeviceWindow } from "../components/DeviceWindow";
 import { DeviceWizard } from "./DeviceWizard";
 
 interface Props {
@@ -25,8 +26,20 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
   const [busyNames, setBusyNames] = useState<ReadonlySet<string>>(() => new Set());
   /** 当前展开「更多操作」的设备名：同一时间只允许一个菜单展开。 */
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  /** 当前打开的设备窗口（应用内全屏浮层，同一时间只允许一个）。 */
+  const [openWindow, setOpenWindow] = useState<{ instanceId: string; avdName: string } | null>(null);
 
   const closeMenu = useCallback(() => setOpenMenu(null), []);
+
+  /** 设备窗口只存在于设备页：切走页面时兜底关闭画面，避免后端帧循环空转（只关画面，不停模拟器）。 */
+  const openWindowRef = useRef(openWindow);
+  openWindowRef.current = openWindow;
+  useEffect(() => {
+    return () => {
+      const current = openWindowRef.current;
+      if (current) void api.Display.Close(current.instanceId).catch(() => undefined);
+    };
+  }, []);
 
   /** 标记 / 解除某台设备的操作中状态（按设备名分别管理，避免并发操作互相清除）。 */
   const setBusy = useCallback((name: string, busy: boolean) => {
@@ -93,16 +106,22 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
     });
   }, [devices, query, sortBy]);
 
-  const startDevice = async (device: AvdSummary, opts?: { coldBoot?: boolean; noWindow?: boolean }) => {
+  const startDevice = async (
+    device: AvdSummary,
+    opts?: { coldBoot?: boolean; noWindow?: boolean; customUI?: boolean },
+  ) => {
     setBusy(device.name, true);
     try {
-      await api.Emulator.Start({
+      const inst = await api.Emulator.Start({
         avdName: device.name,
         coldBoot: opts?.coldBoot ?? false,
         noWindow: opts?.noWindow ?? false,
+        customUI: opts?.customUI ?? false,
       });
       onToast("info", "正在启动 " + device.name, "首次启动可能需要几分钟，进度显示在底部任务区域");
       await load();
+      // 自定义 UI 的模拟器没有 Qt 窗口，画面只能由应用自建窗口接管：启动成功后直接打开。
+      if (opts?.customUI) setOpenWindow({ instanceId: inst.id, avdName: device.name });
     } catch (err) {
       onToast("danger", "启动失败", errorText(err));
     } finally {
@@ -241,6 +260,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                       {device.tag ? <span className="chip">{device.tag}</span> : null}
                       {device.abi ? <span className="chip">{device.abi}</span> : null}
                       {hw ? <span className="chip" title="当前生效的硬件参数">{hw}</span> : null}
+                      {inst?.customUI ? <span className="chip chip--info">自定义 UI</span> : null}
                       {device.broken ? <span className="chip chip--danger">配置异常</span> : null}
                     </div>
                     <div className="device__meta nums">
@@ -298,6 +318,19 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                           label="无窗口启动"
                           onClick={() => void startDevice(device, { noWindow: true })}
                         />
+                        {inst?.customUI ? (
+                          <MenuItem
+                            label="打开设备窗口"
+                            onClick={() => {
+                              setOpenWindow({ instanceId: inst.id, avdName: device.name });
+                            }}
+                          />
+                        ) : (
+                          <MenuItem
+                            label="使用自定义 UI 启动"
+                            onClick={() => void startDevice(device, { customUI: true })}
+                          />
+                        )}
                         <MenuItem
                           label="复制启动命令"
                           onClick={() =>
@@ -321,6 +354,16 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
         <DeviceWizard
           onClose={() => setShowWizard(false)}
           onCreated={() => void load()}
+          onToast={onToast}
+        />
+      ) : null}
+
+      {/* 设备窗口：应用内全屏浮层，浮层挂载在页面根部，覆盖侧边栏与工具栏 */}
+      {openWindow ? (
+        <DeviceWindow
+          instanceId={openWindow.instanceId}
+          avdName={openWindow.avdName}
+          onClose={() => setOpenWindow(null)}
           onToast={onToast}
         />
       ) : null}

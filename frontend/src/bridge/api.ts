@@ -8,6 +8,7 @@ export * as Env from "../../wailsjs/go/service/EnvService";
 export * as Mirror from "../../wailsjs/go/service/MirrorService";
 export * as Avd from "../../wailsjs/go/service/AvdService";
 export * as Emulator from "../../wailsjs/go/service/EmulatorService";
+export * as Display from "../../wailsjs/go/service/DisplayService";
 export * as Settings from "../../wailsjs/go/service/SettingsService";
 export * as Jobs from "../../wailsjs/go/service/JobService";
 export * as Logs from "../../wailsjs/go/service/LogService";

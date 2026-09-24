@@ -23,6 +23,7 @@ export type LogLine = domain.LogLine;
 export type AppSettings = domain.AppSettings;
 
 export type ResolvedPaths = service.ResolvedPaths;
+export type DisplaySession = service.DisplaySession;
 
 /** 导航页签名：只保留核心流程所需的两个页面。 */
 export type PageKey = "devices" | "settings";

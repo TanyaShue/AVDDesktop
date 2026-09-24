@@ -62,6 +62,7 @@ func main() {
 			app.Mirror,
 			app.Avd,
 			app.Emulator,
+			app.Display,
 			app.Settings,
 			app.Logs,
 			app.Jobs,

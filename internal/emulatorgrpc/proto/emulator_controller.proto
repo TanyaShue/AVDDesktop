@@ -1,0 +1,89 @@
+// 模拟器 gRPC 控制通道的最小 proto 子集（仅保留自定义 UI 画面接管用到的三个 rpc）。
+//
+// 消息字段号/类型来自模拟器 37.1.11.0 的 gRPC 反射 dump，必须逐字保持一致，
+// 否则序列化结果会被服务端忽略（尤其注意 pressure / touch_major / touch_minor 是 int32，不是 float）。
+//
+// 同版本的官方全文同名文件随 SDK 一起发布（gitignore 的 build/bin 下）：
+// build/bin/sdk/emulator/lib/emulator_controller.proto —— 修改本文件时应与它核对字段号与类型。
+//
+// 重新生成命令（protoc 25.x；第二个 -I 指向 protoc 自带的 well-known types 目录，
+// 通常是 <protoc 安装目录>/../include，例如 Windows 上 Anaconda 的
+// D:/DeveEnvironment/Program/Anaconda3/Library/include）：
+//
+//	go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+//	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+//	protoc -I internal/emulatorgrpc/proto \
+//	  -I "<protoc 的 include 目录>" \
+//	  --go_out=paths=source_relative:internal/emulatorgrpc/pb \
+//	  --go-grpc_out=paths=source_relative:internal/emulatorgrpc/pb \
+//	  internal/emulatorgrpc/proto/emulator_controller.proto
+//
+// 注意：protoc / protoc-gen-go / protoc-gen-go-grpc 必须都在 PATH 中；在 Windows 上
+// go install 的产物位于 %GOPATH%\bin（通常是 C:\Users\<用户>\go\bin）。
+
+syntax = "proto3";
+
+package android.emulation.control;
+
+import "google/protobuf/empty.proto";
+
+option go_package = "AVDDesktop/internal/emulatorgrpc/pb;pb";
+
+// EmulatorController 是模拟器暴露的图像/输入控制接口。
+service EmulatorController {
+  // getScreenshot 取一张指定格式的截图（用于探测原生分辨率）。
+  rpc getScreenshot(ImageFormat) returns (Image);
+
+  // streamScreenshot 持续推送画面帧（脏帧驱动：画面静止时几乎不推帧）。
+  rpc streamScreenshot(ImageFormat) returns (stream Image);
+
+  // sendTouch 注入触点（按下/移动 expiration=1，抬起 expiration=0）。
+  rpc sendTouch(TouchEvent) returns (google.protobuf.Empty);
+}
+
+// ImageFormat 描述请求的图像格式与尺寸。
+message ImageFormat {
+  enum ImgFormat {
+    PNG = 0;
+    RGBA8888 = 1;
+    RGB888 = 2;
+  }
+  ImgFormat format = 1;
+  int32 rotation = 2;
+  uint32 width = 3;
+  uint32 height = 4;
+  int32 display = 5;
+}
+
+// Image 是一帧图像。
+message Image {
+  ImageFormat format = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  bytes image = 4;
+  uint32 seq = 5;
+  int64 timestampUs = 6;
+}
+
+// Touch 是单个触点。
+message Touch {
+  int32 x = 1;
+  int32 y = 2;
+  // identifier 是触点标识（同一手势内需唯一）。
+  int32 identifier = 3;
+  // pressure 是按 0 - 1<<15 量程解析的裸值：接触期间必须非零，
+  // 结束该触点时必须置 0，否则该 identifier 永远不会被注销。
+  int32 pressure = 4;
+  // touch_major / touch_minor 是触点面积（可选项，0 表示不上报）。
+  int32 touch_major = 5;
+  int32 touch_minor = 6;
+  // expiration=NEVER_EXPIRE(1) 表示按下/移动，0 表示本次事件后过期（抬起）。
+  int32 expiration = 7;
+  int32 orientation = 8;
+}
+
+// TouchEvent 是一次触点事件（可携带多指）。
+message TouchEvent {
+  repeated Touch touches = 1;
+  int32 display = 2;
+}

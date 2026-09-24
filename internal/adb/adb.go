@@ -141,6 +141,35 @@ func (c *Client) WaitForBoot(ctx context.Context, serial string, timeout time.Du
 	}
 }
 
+// Shell 执行 `adb -s <serial> shell <args...>` 并返回标准输出（带超时与取消）。
+//
+// 用途：无窗口模式下模拟器的 gRPC 键盘注入无效，导航键（返回/主页/多任务）只能走 adb；
+// 单次调用约 600ms。
+func (c *Client) Shell(ctx context.Context, serial string, args ...string) (string, error) {
+	if !c.Available() {
+		return "", domain.Err(domain.CodeToolMissing, "未找到 adb（platform-tools 未安装）")
+	}
+	if strings.TrimSpace(serial) == "" {
+		return "", domain.Err(domain.CodeInvalidArgument, "缺少 adb 设备串号")
+	}
+	if len(args) == 0 {
+		return "", domain.Err(domain.CodeInvalidArgument, "缺少要执行的 shell 命令")
+	}
+	argv := make([]string, 0, len(args)+3)
+	argv = append(argv, "-s", serial, "shell")
+	argv = append(argv, args...)
+
+	started := time.Now()
+	out, err := proc.Output(ctx, c.AdbPath, argv, proc.Options{Env: c.Env, Timeout: 20 * time.Second})
+	if err != nil {
+		c.log.Warn("adb", "adb shell %s 失败（serial=%s）：%v", strings.Join(args, " "), serial, err)
+		return out, err
+	}
+	c.log.Debug("adb", "adb shell %s 完成（serial=%s，耗时 %s）",
+		strings.Join(args, " "), serial, time.Since(started).Round(time.Millisecond))
+	return out, nil
+}
+
 // EmuKill 请求模拟器实例优雅退出（有界）。
 func (c *Client) EmuKill(ctx context.Context, serial string) error {
 	c.log.Info("adb", "请求优雅停止 %s（adb emu kill）", serial)

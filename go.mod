@@ -2,7 +2,11 @@ module AVDDesktop
 
 go 1.25.0
 
-require github.com/wailsapp/wails/v2 v2.16.0
+require (
+	github.com/wailsapp/wails/v2 v2.16.0
+	google.golang.org/grpc v1.71.1
+	google.golang.org/protobuf v1.36.11
+)
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
@@ -33,4 +37,5 @@ require (
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250115164207-1a7da9e5054f // indirect
 )

@@ -1888,6 +1888,142 @@ body.modal-open .pagecontent {
   white-space: nowrap;
 }
 
+/* ------------------------------------------------------- 设备窗口（自定义 UI 浮层） */
+/* Wails v2 没有多窗口 API，设备画面只能在本窗口内用全屏浮层接管显示。
+   画面高度 = 视口高度减去固定 chrome（内边距 / 顶部信息行 / 底部工具条），
+   再用 aspect-ratio + 宽度上限（可用高度 × 宽高比）保证画面盒子严格等于设备比例，
+   元素内不出现留白，坐标归一化可以直接用元素盒子换算。 */
+
+.devicewindow {
+  --devicewindow-head-h: 40px;
+  --devicewindow-toolbar-h: 64px;
+  --devicewindow-avail-h: calc(
+    100vh - 2 * var(--sp-4) - var(--devicewindow-head-h) - var(--devicewindow-toolbar-h) - 2 * var(--sp-3)
+  );
+
+  position: fixed;
+  inset: 0;
+  /* 高于侧边栏、工具栏与弹窗（100），低于 toast（200）：实例停止的提示仍要能看见 */
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  background: rgba(29, 33, 41, 0.92);
+  animation: fade 120ms var(--ease);
+}
+
+.devicewindow__head {
+  flex: 0 0 auto;
+  height: var(--devicewindow-head-h);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  color: var(--text-inverse);
+}
+
+.devicewindow__title {
+  font-size: 16px;
+  font-weight: 600;
+  max-width: 60%;
+}
+
+.devicewindow__status {
+  margin-left: auto;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.devicewindow__frame {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.devicewindow__screen {
+  /* --device-ar 由组件按设备原生分辨率注入（calc(设备宽 / 设备高)） */
+  aspect-ratio: var(--device-ar);
+  width: min(100%, calc(var(--devicewindow-avail-h) * var(--device-ar)));
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: #000;
+  box-shadow: var(--shadow-modal);
+  /* 触摸全部交给 pointer 事件：禁止浏览器自带的滚动、缩放与文本选择 */
+  touch-action: none;
+  user-select: none;
+  cursor: crosshair;
+}
+
+.devicewindow__screen img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.devicewindow__state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  max-width: 420px;
+  text-align: center;
+}
+
+.devicewindow__state-icon {
+  font-size: 28px;
+}
+
+.devicewindow__state-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-inverse);
+}
+
+.devicewindow__state-text {
+  font-size: 13px;
+  line-height: 20px;
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.devicewindow__toolbar {
+  flex: 0 0 auto;
+  height: var(--devicewindow-toolbar-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+
+.devicewindow__toolbar-gap {
+  width: var(--sp-5);
+}
+
+/* 深色浮层上的按钮：沿用原有尺寸与圆角，只把底色换成半透明描边，避免白块刺眼 */
+.devicewindow__toolbar .btn--secondary {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.24);
+  color: var(--text-inverse);
+}
+
+.devicewindow__toolbar .btn--secondary:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.devicewindow__toolbar .btn--danger-ghost {
+  color: #ff9a8b;
+}
+
+.devicewindow__toolbar .btn--danger-ghost:hover {
+  background: rgba(245, 63, 63, 0.24);
+}
+
 /* ------------------------------------------------------------- 窄窗口 / 移动端 */
 /* 页面与任务区在窄宽度下改为纵向布局，避免按钮拥挤和误触。 */
 

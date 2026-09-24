@@ -39,6 +39,12 @@ const (
 	ringLimit                         = 200
 )
 
+// 自定义 UI 的 gRPC 控制端口范围：只占一个端口（不像 console 那样成对占用 adb），
+// 且与 console/adb 端口池分开，避免与模拟器控制台互相抢占。
+const (
+	defaultFirstGrpcPort, defaultLastGrpcPort = 8554, 8680
+)
+
 // adbClient 是启动状态机所需的 adb 能力，便于测试替换。
 type adbClient interface {
 	WaitForDevice(ctx context.Context, serial string, timeout time.Duration) error
@@ -49,13 +55,16 @@ type adbClient interface {
 
 // Launcher 管理模拟器实例：端口分配、启动、状态机与停止。
 type Launcher struct {
-	tools       platform.Tools
-	env         []string
-	store       *Store
-	adb         adbClient
-	log         logging.Interface
-	sink        func(event string, payload any)
-	first, last int // 端口范围，0 表示默认 5554-5680
+	tools platform.Tools
+	env   []string
+	store *Store
+	adb   adbClient
+	log   logging.Interface
+	sink  func(event string, payload any)
+	// 端口范围：first/last 为 console（0 表示默认 5554-5680），
+	// grpcFirst/grpcLast 为自定义 UI 的 gRPC 控制端口（0 表示默认 8554-8680）。
+	first, last         int
+	grpcFirst, grpcLast int
 
 	runningProbe  time.Duration
 	deviceLostFor time.Duration
@@ -63,6 +72,7 @@ type Launcher struct {
 	mu        sync.Mutex
 	instances map[string]*instance
 	ports     map[int]bool // 已占用的 console 端口
+	grpcPorts map[int]bool // 已占用的 gRPC 控制端口
 	seq       int64
 
 	// procStart 拉起模拟器进程；默认 cmd.Start，测试可替换为不产生真实进程的实现。
@@ -74,6 +84,9 @@ type instance struct {
 	cmd  *exec.Cmd
 	exit chan struct{} // cmd.Wait 返回后关闭；code 只允许在其后读取
 	code int
+
+	// grpcPort 是该实例占用的 gRPC 控制端口（0 表示未启用自定义 UI），进程退出时归还。
+	grpcPort int
 
 	// stopRequested 表示用户已请求停止（受 Launcher.mu 保护）：之后的非 0 退出记为 stopped 而非 error。
 	stopRequested bool
@@ -87,19 +100,25 @@ type instance struct {
 // NewLauncher 创建启动器。log 为 nil 时使用空日志器。
 func NewLauncher(tools platform.Tools, env []string, store *Store, adbClient adbClient, sink func(string, any), log logging.Interface) *Launcher {
 	return &Launcher{tools: tools, env: env, store: store, adb: adbClient, sink: sink, log: logging.Or(log),
-		instances: map[string]*instance{}, ports: map[int]bool{},
+		instances: map[string]*instance{}, ports: map[int]bool{}, grpcPorts: map[int]bool{},
 		procStart:    func(cmd *exec.Cmd) error { return cmd.Start() },
 		runningProbe: runningProbeInterval, deviceLostFor: deviceLostGrace}
 }
 
 // BuildArgs 组装 emulator 命令行参数（纯函数，便于测试与"查看等效命令"）。
-func BuildArgs(avdName string, opts domain.LaunchOptions, port int) []string {
+//
+// 顺序固定：-avd <name> -port <port> [-no-snapshot-load] [-no-window] [-grpc <grpcPort>]。
+// 自定义 UI 必须无窗口（否则会出现"有 Qt 窗口 + gRPC 通道"的无意义组合）；grpcPort<=0 时不追加 -grpc。
+func BuildArgs(avdName string, opts domain.LaunchOptions, port, grpcPort int) []string {
 	args := []string{"-avd", avdName, "-port", strconv.Itoa(port)}
 	if opts.ColdBoot {
 		args = append(args, "-no-snapshot-load")
 	}
-	if opts.NoWindow {
+	if opts.NoWindow || opts.CustomUI {
 		args = append(args, "-no-window")
+	}
+	if opts.CustomUI && grpcPort > 0 {
+		args = append(args, "-grpc", strconv.Itoa(grpcPort))
 	}
 	return args
 }
@@ -129,6 +148,34 @@ func (l *Launcher) allocatePortLocked() (int, error) {
 }
 
 func (l *Launcher) releasePort(port int) { l.mu.Lock(); delete(l.ports, port); l.mu.Unlock() }
+
+// allocateGrpcPortLocked 返回一个空闲的 gRPC 控制端口并占用；要求调用方已持有 l.mu。
+//
+// 与 console 端口池隔离：gRPC 只占一个端口，且已分配的 console 端口一律跳过，
+// 避免自定义 UI 通道与模拟器控制台撞在同一端口上。端口耗尽时给出明确错误。
+func (l *Launcher) allocateGrpcPortLocked() (int, error) {
+	first, last := l.grpcFirst, l.grpcLast
+	if first <= 0 {
+		first, last = defaultFirstGrpcPort, defaultLastGrpcPort
+	}
+	for port := first; port <= last; port++ {
+		if l.grpcPorts[port] || l.ports[port] || !isPortFree(port) {
+			continue
+		}
+		l.grpcPorts[port] = true
+		return port, nil
+	}
+	return 0, domain.Err(domain.CodePortExhausted,
+		fmt.Sprintf("没有可用的模拟器 gRPC 端口（%d-%d 已用尽）", first, last)).
+		WithHint("请先关闭运行中的模拟器实例，或结束占用这些端口的程序")
+}
+
+// releaseGrpcPort 归还 gRPC 控制端口。
+func (l *Launcher) releaseGrpcPort(port int) {
+	l.mu.Lock()
+	delete(l.grpcPorts, port)
+	l.mu.Unlock()
+}
 
 // isPortFree 探测本机端口是否可绑定。
 func isPortFree(port int) bool {
@@ -166,15 +213,25 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 		l.mu.Unlock()
 		return nil, err
 	}
+	// 自定义 UI 需要一个独立的 gRPC 控制端口；分配失败时要把已占用的 console 端口一并归还。
+	grpcPort := 0
+	if opts.CustomUI {
+		if grpcPort, err = l.allocateGrpcPortLocked(); err != nil {
+			delete(l.ports, port)
+			l.mu.Unlock()
+			return nil, err
+		}
+	}
 	l.seq++
-	inst := &instance{exit: make(chan struct{}), info: domain.EmulatorInstance{
+	inst := &instance{exit: make(chan struct{}), grpcPort: grpcPort, info: domain.EmulatorInstance{
 		ID: fmt.Sprintf("emu-%d-%d", port, l.seq), AvdName: avdName, Serial: adb.SerialForPort(port),
 		Port: port, State: domain.AvdStarting, StartedAt: platform.NowMs(),
+		CustomUI: opts.CustomUI, GrpcPort: grpcPort,
 	}}
 	l.instances[inst.info.ID] = inst
 	l.mu.Unlock()
 
-	args := BuildArgs(avdName, opts, port)
+	args := BuildArgs(avdName, opts, port, grpcPort)
 	cmd := exec.Command(l.tools.Emulator, args...)
 	cmd.Dir, cmd.Env = l.tools.EmulatorDir, l.env
 	proc.Prepare(cmd)
@@ -184,6 +241,7 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 		l.mu.Lock()
 		delete(l.instances, inst.info.ID)
 		delete(l.ports, port)
+		delete(l.grpcPorts, grpcPort)
 		l.mu.Unlock()
 		_ = pw.Close()
 		_ = pr.Close()
@@ -193,8 +251,10 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 
 	l.mu.Lock()
 	inst.cmd = cmd
+	pid := 0
 	if cmd.Process != nil {
-		inst.info.PID = cmd.Process.Pid
+		pid = cmd.Process.Pid
+		inst.info.PID = pid
 	}
 	inst.info.Args = args
 	// 快照必须在锁内复制：monitor 随后会并发写 inst.info.State。
@@ -221,7 +281,7 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 	}()
 	go l.monitor(ctx, inst)
 	l.log.Info("emulator", "已启动 %s：pid=%d serial=%s port=%d\n  参数：%s %s", avdName,
-		cmd.Process.Pid, inst.info.Serial, port, l.tools.Emulator, strings.Join(args, " "))
+		pid, inst.info.Serial, port, l.tools.Emulator, strings.Join(args, " "))
 	return &snapshot, nil
 }
 
@@ -252,6 +312,9 @@ func (l *Launcher) monitor(ctx context.Context, inst *instance) {
 	}
 	<-inst.exit
 	l.releasePort(inst.info.Port)
+	if inst.grpcPort > 0 {
+		l.releaseGrpcPort(inst.grpcPort)
+	}
 	code := inst.code
 	l.mu.Lock()
 	inst.info.ExitCode, inst.info.EndedAt = &code, platform.NowMs()
