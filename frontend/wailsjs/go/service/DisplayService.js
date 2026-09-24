@@ -10,16 +10,12 @@ export function Close(arg1) {
   return window['go']['service']['DisplayService']['Close'](arg1);
 }
 
-export function NativeSupported() {
-  return window['go']['service']['DisplayService']['NativeSupported']();
-}
-
 export function Open(arg1) {
   return window['go']['service']['DisplayService']['Open'](arg1);
 }
 
-export function OpenNative(arg1) {
-  return window['go']['service']['DisplayService']['OpenNative'](arg1);
+export function OpenWindow(arg1) {
+  return window['go']['service']['DisplayService']['OpenWindow'](arg1);
 }
 
 export function SendKey(arg1, arg2) {
@@ -32,4 +28,8 @@ export function SendTouch(arg1, arg2, arg3, arg4) {
 
 export function Shutdown() {
   return window['go']['service']['DisplayService']['Shutdown']();
+}
+
+export function WindowSupported() {
+  return window['go']['service']['DisplayService']['WindowSupported']();
 }

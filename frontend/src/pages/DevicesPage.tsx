@@ -106,19 +106,17 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
     });
   }, [devices, query, sortBy]);
 
-  /** 打开设备窗口：优先使用独立原生 Presenter；不支持时才回退到应用内浮层。 */
+  /** 打开设备窗口：独立 WebView 窗口（MuMu 风格）；不可用时回退到应用内浮层。 */
   const openDeviceWindow = useCallback(
     async (instanceId: string, avdName: string) => {
       try {
-        await api.Display.OpenNative(instanceId);
+        await api.Display.OpenWindow(instanceId);
         onToast("info", `${avdName} 的设备窗口已打开`, "设备画面和工具栏运行在独立窗口中");
       } catch (err) {
-        const code = (err as { code?: string } | null)?.code;
-        if (code === "UNSUPPORTED") {
-          setOpenWindow({ instanceId, avdName });
-          return;
-        }
-        onToast("danger", "无法打开设备窗口", errorText(err));
+        // 独立窗口不可用时退回应用内浮层：两者共用同一套画面与输入链路，
+        // 浮层里会显示具体失败原因并提供重试入口。
+        onToast("warning", "已退回应用内设备窗口", errorText(err));
+        setOpenWindow({ instanceId, avdName });
       }
     },
     [onToast],
@@ -138,7 +136,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
       });
       onToast("info", "正在启动 " + device.name, "首次启动可能需要几分钟，进度显示在底部任务区域");
       await load();
-      // 自定义 UI 启动后优先打开独立原生窗口；非 Windows 平台回退到应用内浮层。
+      // 自定义 UI 启动后优先打开独立设备窗口；失败时回退到应用内浮层。
       if (opts?.customUI) void openDeviceWindow(inst.id, device.name);
     } catch (err) {
       onToast("danger", "启动失败", errorText(err));
@@ -525,3 +523,5 @@ function stateLabel(state: AvdState | undefined): string {
       return "已停止";
   }
 }
+
+

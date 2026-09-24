@@ -1,0 +1,329 @@
+/* ============================================================================
+ * 独立设备窗口（MuMu 风格）样式
+ *
+ * 只作用于 device.html 入口：深色、无边框，标题栏 / 画面区 / 工具栏三段式。
+ * 高度常量必须与 Go 侧 displayhost/window.go 的 deviceTitleBarHeight /
+ * deviceToolbarHeight 保持一致，否则初始窗口尺寸会与内容对不齐。
+ * ========================================================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif);
+  font-size: 13px;
+  color: #e7e9ef;
+  background: #0b0d11;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+.dw {
+  /* 三段式外壳：标题栏与工具栏固定在视口上下边缘，画面区夹在中间。
+     刻意不依赖 html/body/#root 的 height:100% 链——WebView2 的视口与窗口尺寸
+     一旦不一致，百分比链会让工具栏被挤出可视区。 */
+  --dw-titlebar-h: 40px;
+  --dw-toolbar-h: 48px;
+  --dw-surface: #12151c;
+  --dw-surface-2: #1a1f29;
+  --dw-border: rgba(255, 255, 255, 0.07);
+  --dw-text: #e7e9ef;
+  --dw-text-dim: #8b93a7;
+  --dw-accent: #4a8cff;
+
+  height: 100vh;
+  background: #0b0d11;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------- 标题栏 */
+
+.dw__titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--dw-titlebar-h);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 6px 0 12px;
+  background: var(--dw-surface);
+  border-bottom: 1px solid var(--dw-border);
+  /* 无边框窗口的拖拽区；按钮单独声明 no-drag */
+  --wails-draggable: drag;
+}
+
+.dw__brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.dw__logo {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, #4a8cff, #7b5cff);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.dw__name {
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 220px;
+}
+
+.dw__meta {
+  margin-left: auto;
+  color: var(--dw-text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.dw__winbtns {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  --wails-draggable: no-drag;
+}
+
+.dw__winbtn {
+  width: 30px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dw-text-dim);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+  --wails-draggable: no-drag;
+}
+
+.dw__winbtn:hover {
+  background: var(--dw-surface-2);
+  color: var(--dw-text);
+}
+
+.dw__winbtn.is-active {
+  color: var(--dw-accent);
+  background: rgba(74, 140, 255, 0.14);
+}
+
+.dw__winbtn--close:hover {
+  background: #e5484d;
+  color: #fff;
+}
+
+/* ---------------------------------------------------------------- 画面区 */
+
+.dw__stage {
+  position: fixed;
+  top: var(--dw-titlebar-h);
+  bottom: var(--dw-toolbar-h);
+  left: 0;
+  right: 0;
+  background: radial-gradient(120% 120% at 50% 0%, #12161e 0%, #05070a 70%);
+  overflow: hidden;
+}
+
+.dw__screen {
+  /* inset:0 + margin:auto + max-* 是「保持宽高比放进盒子并居中」的稳定写法：
+     元素最终尺寸就是真实渲染尺寸，指针坐标按 getBoundingClientRect 换算即精确。 */
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  background: #000;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 18px 48px rgba(0, 0, 0, 0.55);
+  cursor: default;
+  touch-action: none;
+  -webkit-user-drag: none;
+}
+
+.dw__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  background: rgba(5, 7, 10, 0.86);
+}
+
+.dw__overlay-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dw__overlay-text {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dw-text-dim);
+  max-width: 320px;
+  word-break: break-all;
+}
+
+.dw__action {
+  margin-top: 4px;
+  padding: 7px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--dw-accent);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dw__action:hover {
+  background: #3d7ce8;
+}
+
+.spinner {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-top-color: var(--dw-accent);
+  animation: dw-spin 900ms linear infinite;
+}
+
+@keyframes dw-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------------------------------------------------------------- 工具栏 */
+
+.dw__toolbar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: var(--dw-toolbar-h);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 12px;
+  background: var(--dw-surface);
+  border-top: 1px solid var(--dw-border);
+}
+
+.dw__group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dw__divider {
+  width: 1px;
+  height: 20px;
+  background: var(--dw-border);
+  margin: 0 2px;
+}
+
+.dw__tool {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: var(--dw-surface-2);
+  color: #cbd2e0;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.dw__tool:hover {
+  background: #232a36;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.dw__tool:active {
+  transform: translateY(1px);
+}
+
+.dw__tool:focus-visible,
+.dw__winbtn:focus-visible,
+.dw__action:focus-visible {
+  outline: 2px solid var(--dw-accent);
+  outline-offset: 1px;
+}
+
+/* ------------------------------------------------------------------ 提示 */
+
+.dw__toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--dw-toolbar-h) + 14px);
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(24, 28, 37, 0.96);
+  color: var(--dw-text);
+  font-size: 12px;
+  line-height: 17px;
+  word-break: break-all;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  animation: dw-toast-in 160ms ease-out;
+}
+
+.dw__toast--danger {
+  border-color: rgba(229, 72, 77, 0.5);
+  color: #ffd7d8;
+}
+
+@keyframes dw-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+

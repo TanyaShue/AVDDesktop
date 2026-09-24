@@ -10,10 +10,17 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // maxRegionSize keeps every offset and size representable on 32-bit hosts.
 const maxRegionSize = int64(1<<31 - 1)
+
+// 删除映射文件的重试参数：总等待约 0.6s，足够覆盖模拟器释放映射的时间。
+const (
+	removeRetryAttempts = 5
+	removeRetryDelay    = 40 * time.Millisecond
+)
 
 type regionFileOps struct {
 	createTemp func(pattern string) (*os.File, error)
@@ -205,9 +212,26 @@ func cleanupCreatedFile(file *os.File, path string, mappings ...*platformMapping
 		}
 	}
 	if path != "" {
-		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := removeFileWithRetry(path); err != nil {
 			errs = append(errs, fmt.Errorf("remove shared memory file: %w", err))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// removeFileWithRetry 删除映射文件，并在失败时做有界重试。
+//
+// Windows 不允许删除仍被其它进程映射的文件：模拟器在 MMAP 传输结束后的极短时间内可能
+// 还持有映射，此时 DeleteFile 会失败。重试可以避免在 %TEMP% 留下无人清理的残留文件。
+func removeFileWithRetry(path string) error {
+	delay := removeRetryDelay
+	var err error
+	for attempt := 0; attempt < removeRetryAttempts; attempt++ {
+		if err = os.Remove(path); err == nil || errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		time.Sleep(delay)
+		delay *= 2
+	}
+	return err
 }

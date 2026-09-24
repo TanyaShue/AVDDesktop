@@ -59,10 +59,10 @@ var navKeys = map[string]int{
 }
 
 // DisplayService 管理自定义 UI 的两条显示路径：
-//   - Windows：启动独立 Presenter 辅助进程，通过 MMAP 共享内存取帧；
-//   - 其它平台：保留 MJPEG + 前端 <img> 浮层作为兼容实现。
+//   - 独立设备窗口：辅助进程取 MMAP 帧、编码 JPEG、由 WebView 承载窗口与工具栏（native_display.go）；
+//   - 应用内浮层：MJPEG + 前端 <img>，作为设备窗口不可用时的兼容路径（本文件主体）。
 //
-// native 路径见 native_display.go；本文件主体继续维护兼容路径。
+// 两条路径共用同一份 MJPEG 服务与触摸映射实现。
 type DisplayService struct {
 	rt *Runtime
 
@@ -101,7 +101,7 @@ type DisplaySession struct {
 	DeviceHeight int    `json:"deviceHeight"` // 设备原生分辨率（输入映射基准）
 	StreamWidth  int    `json:"streamWidth"`
 	StreamHeight int    `json:"streamHeight"`
-	Mode         string `json:"mode"` // native | web
+	Mode         string `json:"mode"` // webview | web
 }
 
 // NewDisplayService 创建 DisplayService。
@@ -225,7 +225,7 @@ func (s *DisplayService) Close(instanceID string) error {
 	}
 	if native := s.takeNative(id); native != nil {
 		s.stopNativeSession(native, "")
-		s.rt.Log().Info("display", "已关闭 %s 的原生设备窗口", native.info.AvdName)
+		s.rt.Log().Info("display", "已关闭 %s 的设备窗口", native.info.AvdName)
 		return nil
 	}
 	s.mu.Lock()
