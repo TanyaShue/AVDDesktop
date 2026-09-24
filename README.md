@@ -11,9 +11,10 @@
 - **AVD 管理**：列出 / 创建 / 删除设备，启动与停止模拟器并显示运行状态；创建时按系统镜像与设备档案生成，
   也可以覆盖内存（GB）、CPU 核心与分辨率三项常用参数（其余参数完全沿用档案默认值，
   设备卡片上直接显示当前生效的核心 / 内存 / 分辨率）
-- **自定义 UI 设备窗口**：设备卡片「更多操作 → 使用自定义 UI 启动」让模拟器以无窗口方式运行（不出现模拟器自带的 Qt 窗口），
-  画面由应用内自建的设备窗口接管：实时显示设备画面，鼠标点击 / 拖拽即设备触摸，并提供返回 / 主页 / 多任务导航键；
-  关闭设备窗口不会停止模拟器，模拟器停止时窗口自动关闭
+- **自定义 UI 设备窗口**：设备卡片「更多操作 → 使用自定义 UI 启动」让模拟器以无窗口方式运行；
+  Windows 上通过 MMAP 共享内存把画面交给独立原生 Presenter，工具栏也是独立窗口，不再由主窗口 WebView 渲染设备画面。
+  鼠标点击 / 拖拽即设备触摸，并提供返回 / 主页 / 多任务导航键；关闭设备窗口不会停止模拟器。
+  非 Windows 平台保留应用内 MJPEG 设备窗口作为兼容路径（见 [原生 Presenter 验收记录](docs/MMAP_NATIVE_PRESENTER_ACCEPTANCE.md)）
 - **统一日志与任务**：底部区域显示长任务进度与日志
 
 技术栈：Wails v2 + Go + React 19 + TypeScript + Vite。
@@ -60,6 +61,11 @@ wails build
 
 # 单元测试（全部 hermetic，不需要网络与本机 SDK/JDK）
 go test ./...
+
+# Windows 原生 Presenter 端到端测试（需要本机已有 SDK/AVD；先执行 wails build）
+$env:AVDDESKTOP_E2E_HOME = (Resolve-Path "build/bin").Path
+$env:AVDDESKTOP_NATIVE_BINARY = (Resolve-Path "build/bin/AVDDesktop.exe").Path
+go test -tags e2e -count=1 -timeout 20m -run '^TestE2E_NativePresenter$' -v ./internal/e2e
 
 # 端到端测试（真实网络 + 真实 JDK/SDK/AVD 目录，耗时较长）
 $env:AVDDESKTOP_E2E_HOME = "E:\avddesktop-e2e"

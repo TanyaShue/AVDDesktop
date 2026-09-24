@@ -17,15 +17,19 @@ internal/mirror     Android SDK 镜像表、连接/延迟/吞吐检测、资源�
 internal/sdk        SDK 自举（从所选镜像解析 cmdline-tools）、sdkmanager 封装、镜像解析
 internal/avd        AVD 配置读写（.ini/config.ini）、创建（avdmanager）、启动与状态机（emulator + adb）
 internal/adb        `adb devices -l` 解析与轮询、`adb shell` 调用
-internal/emulatorgrpc 模拟器 gRPC 控制通道（截图 / 画面流 / 触摸注入）
-internal/display    本机 MJPEG 画面服务（仅供应用内「设备窗口」订阅）
+internal/emulatorgrpc 模拟器 gRPC 控制通道（截图 / MMAP 画面流 / 触摸注入）
+internal/sharedmem   file-backed 共享内存（emulator MMAP 帧缓冲）
+internal/displayhost 独立 Presenter 辅助进程（MMAP → Presenter → 工具栏）
+internal/presenter   Windows 原生 Presenter 窗口与独立工具栏（无 cgo）
+internal/display     本机 MJPEG 画面服务（非 Windows 兼容路径）
 internal/job        统一长任务管理器（进度 + 日志 → 事件流）
 internal/service    Wails 绑定层：参数校验 → 领域逻辑 → 注册 Job → 返回 jobID
 internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/AVD）
 ```
 
 数据流：`React UI → wailsjs 绑定方法 → service → jdk/sdk/avd/adb → 官方 CLI`。
-自定义 UI 的画面不走绑定方法：`React UI（设备窗口 <img>）→ 本机 MJPEG（internal/display）← 帧循环（internal/service）← gRPC 画面流（internal/emulatorgrpc）← emulator`。
+自定义 UI 在 Windows 上走原生路径：`emulator renderer → streamScreenshot(MMAP) → internal/sharedmem → internal/displayhost → internal/presenter（独立画面窗口 + 独立工具栏）`。
+其它平台保留兼容路径：`React UI（设备窗口 <img>）→ 本机 MJPEG（internal/display）← gRPC 画面流（internal/emulatorgrpc）← emulator`。
 耗时操作不在绑定方法里同步执行：`service` 只做校验并登记 Job，绑定方法立即返回 `jobID`；
 进度与日志通过 `job:created/progress/log/done/failed` 事件流推送到前端，统一显示在底部任务与日志区域。
 
@@ -100,23 +104,20 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
   等待设备 3 分钟、`sys.boot_completed` 5 分钟、停止宽限 30 秒、强杀等待 15 秒。
 - 退出码可诊断（如加速不可用），`emulator -accel-check` 结果进入环境检查。
 
-#### 自定义 UI 设备窗口（用应用内窗口接管画面）
+#### 自定义 UI：MMAP + 独立原生 Presenter（Windows）
 
-- 启动：`-no-window -grpc <gRPC 端口>`。此时实际运行的是 `qemu-system-x86_64-headless.exe`，
-  Qt 界面完全不加载（不是「隐藏窗口」）。gRPC 端口在 8554–8680 中单独分配，与 console/adb 端口对隔离，
-  进程退出即归还；端口被占用时模拟器的 gRPC 服务会静默不启动，因此客户端必须自行轮询拨号（上限 3 分钟，
-  实例提前退出立即失败）。
-- 画面链路：`getScreenshot(PNG)` 的 IHDR 读出设备原生分辨率（模拟器返回的 `Image.width/height` 恒为 0）
-  → `streamScreenshot(RGBA8888，宽 = min(原生宽, 540)、高按比例)` → `image/jpeg`（质量 80）
-  → 只监听 127.0.0.1 的 MJPEG 流（`internal/display`）→ 前端 `<img>`。
-- MJPEG 必须每 500ms 重发最近一帧：Chromium 只在收到下一个 part 时才提交当前帧，否则静止画面永远不显示
-  （实测：只写一帧后静默 → `naturalWidth` 恒为 0；每 500ms 重发 → 1.5s 内正常显示）。
-- 帧是脏帧驱动的：画面静止时几乎不推帧，界面必须保留最后一帧，不能假设持续有帧。
-- 输入：指针坐标归一化到 [0,1] 后由后端换算成设备像素，经 gRPC `sendTouch` 注入
-  （按下/移动 `expiration = NEVER_EXPIRE`，抬起为 0）；导航键走 `adb shell input keyevent`
-  （`-no-window` 下模拟器的 gRPC 按键注入实测无效）：返回 4 / 主页 3 / 多任务 187。
-- 已知缺口：模拟器 gRPC 服务监听所有网卡且默认无认证（可用 `-grpc-use-token` 收紧，届时需从
-  `<临时目录>/avd/running/pid_<pid>.ini` 读取 `grpc.token` 并附加 `authorization: Bearer` 头）；本次未启用。
+- 启动仍为 `-no-window -grpc <gRPC 端口>`；Qt 主窗口不加载。
+- 辅助进程与主程序使用同一个可执行文件，以 `--display-host` 模式启动，不初始化 Wails、不抢单实例锁。
+- `getScreenshot(PNG)` 读 IHDR 探测原生分辨率，随后请求
+  `streamScreenshot(RGBA8888, ImageTransport.MMAP)`；像素写入客户端创建的 file-backed 共享内存，
+  gRPC 只传尺寸、序号、时间戳和旋转元数据。
+- `internal/displayhost` 读取共享内存并复制稳定帧，`internal/presenter` 在独立顶层窗口用
+  GDI top-down DIB 显示；工具栏是另一个 `WS_EX_TOOLWINDOW` 顶层窗口，不占用主程序布局。
+- 输入：Presenter 鼠标事件映射为设备坐标并调用 gRPC `sendTouch`；工具栏 Back/Home/Apps 调用
+  `adb shell input keyevent`（4/3/187）。
+- 帧是脏帧驱动的，窗口必须保留最后一帧。MMAP 传输可能 tearing，因此 data plane 在消息到达后复制帧再转换。
+- 非 Windows 平台返回 `UNSUPPORTED`，前端自动回退到原有 MJPEG + `<img>` 浮层。
+- 已知缺口：gRPC 默认无认证；当前原生 Presenter 仍使用 CPU 帧复制与 GDI 展示，未实现 DMA-BUF / GPU 零拷贝。
 - 非目标：音频、多显示器、折叠屏、旋转、剪贴板与快照。
 
 ## 跨平台注意
