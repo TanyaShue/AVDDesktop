@@ -132,6 +132,28 @@ func (s *Store) ApplyHardware(name string, hw *domain.AvdHardware) error {
 	return nil
 }
 
+// EnsureGPUDefaults 把新建 AVD 的图形后端固定到宿主 GPU。
+//
+// 仅在 Create 成功生成 config.ini 后调用；不会迁移或修改已有 AVD。
+func (s *Store) EnsureGPUDefaults(name string) error {
+	l := s.Resolve(name)
+	if !l.Exists {
+		return domain.Err(domain.CodeAvdNotFound, "设备不存在: "+name)
+	}
+	data, err := os.ReadFile(l.ConfigIni)
+	if err != nil {
+		return domain.Wrap(domain.CodePathNotFound, "无法读取 config.ini", err)
+	}
+	changes := []iniChange{
+		{key: "hw.gpu.enabled", value: "yes"},
+		{key: "hw.gpu.mode", value: "host"},
+	}
+	if err := writeFileAtomic(l.ConfigIni, []byte(applyIniChanges(string(data), changes))); err != nil {
+		return domain.Wrap(domain.CodePermissionDenied, "无法写入 config.ini", err)
+	}
+	return nil
+}
+
 // hardwareChanges 返回覆盖项对应的 config.ini 键值（不含分辨率相关的皮肤键）。
 func hardwareChanges(hw *domain.AvdHardware) []iniChange {
 	if hw == nil {

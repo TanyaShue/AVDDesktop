@@ -182,6 +182,46 @@ func TestApplyHardwareUpdatesConfig(t *testing.T) {
 	}
 }
 
+// TestEnsureGPUDefaults 验证新建 AVD 的 GPU 默认值会被写入并覆盖软件渲染配置。
+func TestEnsureGPUDefaults(t *testing.T) {
+	s, home, _ := newTestStore(t)
+	writeAvd(t, home, "Dev1", "", "# 由 avdmanager 生成的配置\n"+
+		"hw.gpu.enabled=no\nhw.gpu.mode=swiftshader_indirect\ntarget=android-34\n")
+
+	if err := s.EnsureGPUDefaults("Dev1"); err != nil {
+		t.Fatalf("EnsureGPUDefaults 失败: %v", err)
+	}
+	config, err := s.ReadConfig("Dev1")
+	if err != nil {
+		t.Fatalf("ReadConfig 失败: %v", err)
+	}
+	if config["hw.gpu.enabled"] != "yes" || config["hw.gpu.mode"] != "host" {
+		t.Fatalf("GPU 默认值错误: enabled=%q mode=%q", config["hw.gpu.enabled"], config["hw.gpu.mode"])
+	}
+	raw, err := os.ReadFile(filepath.Join(home, "Dev1.avd", "config.ini"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if !strings.HasPrefix(text, "# 由 avdmanager 生成的配置\n") || !strings.Contains(text, "target=android-34\n") {
+		t.Fatalf("写入 GPU 默认值不应破坏原配置:\n%s", text)
+	}
+	if strings.Contains(text, "\r") || strings.HasSuffix(text, "\n\n") {
+		t.Fatalf("config.ini 换行格式不正确: %q", text)
+	}
+	// 幂等：重复调用不应重复追加键或改变内容。
+	if err := s.EnsureGPUDefaults("Dev1"); err != nil {
+		t.Fatalf("第二次 EnsureGPUDefaults 失败: %v", err)
+	}
+	again, err := os.ReadFile(filepath.Join(home, "Dev1.avd", "config.ini"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(again) != text {
+		t.Fatalf("重复调用不应改变 config.ini:\n第一次:\n%s\n第二次:\n%s", text, string(again))
+	}
+}
+
 // TestApplyHardwareForcesNoSkin 覆盖档案自带真实皮肤时的处理：
 // 模拟器使用 skin.path，不改它的话请求的分辨率不会生效。
 func TestApplyHardwareForcesNoSkin(t *testing.T) {

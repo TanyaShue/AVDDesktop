@@ -281,6 +281,9 @@ type LaunchOptions struct {
 	NoWindow bool `json:"noWindow"`
 	// CustomUI 表示使用应用自建窗口显示设备画面：不启动 Qt 窗口，并开启模拟器 gRPC 图像通道。
 	CustomUI bool `json:"customUI"`
+	// GPU 指定模拟器图形后端：host / auto / swiftshader_indirect / angle_indirect / guest / off。
+	// 空值或 off 时不追加 -gpu 参数。
+	GPU string `json:"gpu,omitempty"`
 }
 
 // EmulatorInstance 是一个模拟器实例（只保留界面展示与诊断需要的字段）。

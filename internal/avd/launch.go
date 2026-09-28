@@ -107,7 +107,7 @@ func NewLauncher(tools platform.Tools, env []string, store *Store, adbClient adb
 
 // BuildArgs 组装 emulator 命令行参数（纯函数，便于测试与"查看等效命令"）。
 //
-// 顺序固定：-avd <name> -port <port> [-no-snapshot-load] [-no-window] [-grpc <grpcPort>]。
+// 顺序固定：-avd <name> -port <port> [-no-snapshot-load] [-no-window] [-gpu <value>] [-grpc <grpcPort>]。
 // 自定义 UI 必须无窗口（否则会出现"有 Qt 窗口 + gRPC 通道"的无意义组合）；grpcPort<=0 时不追加 -grpc。
 func BuildArgs(avdName string, opts domain.LaunchOptions, port, grpcPort int) []string {
 	args := []string{"-avd", avdName, "-port", strconv.Itoa(port)}
@@ -116,6 +116,9 @@ func BuildArgs(avdName string, opts domain.LaunchOptions, port, grpcPort int) []
 	}
 	if opts.NoWindow || opts.CustomUI {
 		args = append(args, "-no-window")
+	}
+	if opts.GPU != "" && opts.GPU != "off" {
+		args = append(args, "-gpu", opts.GPU)
 	}
 	if opts.CustomUI && grpcPort > 0 {
 		args = append(args, "-grpc", strconv.Itoa(grpcPort))

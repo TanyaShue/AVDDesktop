@@ -39,7 +39,7 @@ func newTestLauncher() *Launcher {
 	return NewLauncher(platform.Tools{}, nil, nil, nil, nil, logging.Nop())
 }
 
-// TestBuildArgs 验证启动参数：端口、冷启动/无窗口开关，以及自定义 UI 的 -no-window -grpc 组合。
+// TestBuildArgs 验证启动参数：端口、冷启动/无窗口开关，以及自定义 UI 的 GPU/gRPC 组合与 off 回退。
 func TestBuildArgs(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -57,6 +57,12 @@ func TestBuildArgs(t *testing.T) {
 			[]string{"-avd", "Dev1", "-port", "5562", "-no-window", "-grpc", "8554"}},
 		{"冷启动+自定义 UI", domain.LaunchOptions{ColdBoot: true, CustomUI: true}, 5564, 8556,
 			[]string{"-avd", "Dev1", "-port", "5564", "-no-snapshot-load", "-no-window", "-grpc", "8556"}},
+		{"自定义 UI+宿主 GPU", domain.LaunchOptions{CustomUI: true, GPU: "host"}, 5570, 8560,
+			[]string{"-avd", "Dev1", "-port", "5570", "-no-window", "-gpu", "host", "-grpc", "8560"}},
+		{"自定义 UI GPU off", domain.LaunchOptions{CustomUI: true, GPU: "off"}, 5572, 8562,
+			[]string{"-avd", "Dev1", "-port", "5572", "-no-window", "-grpc", "8562"}},
+		{"非自定义 UI", domain.LaunchOptions{NoWindow: true}, 5574, 0,
+			[]string{"-avd", "Dev1", "-port", "5574", "-no-window"}},
 		// gRPC 端口未分配（<=0）时不得出现空的 -grpc 参数。
 		{"自定义 UI 未分配 gRPC 端口", domain.LaunchOptions{CustomUI: true}, 5566, 0,
 			[]string{"-avd", "Dev1", "-port", "5566", "-no-window"}},

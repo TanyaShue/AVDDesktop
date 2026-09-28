@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -13,6 +14,9 @@ import (
 
 // startTrackInterval 是启动任务跟随实例状态的轮询间隔。
 const startTrackInterval = 500 * time.Millisecond
+
+// emulatorGPUEnv 可覆盖自定义 UI 使用的模拟器图形后端。
+const emulatorGPUEnv = "AVDDESKTOP_EMULATOR_GPU"
 
 // EmulatorService 管理模拟器实例：启动、停止、列表与应用退出时的统一清理。
 type EmulatorService struct{ rt *Runtime }
@@ -43,6 +47,17 @@ func (s *EmulatorService) Start(req StartRequest) (*domain.EmulatorInstance, err
 	if opts.CustomUI {
 		// 自定义 UI 必须无窗口：否则会出现"有 Qt 窗口 + gRPC 通道"这种无意义组合。
 		opts.NoWindow = true
+		// 自定义 UI 默认强制宿主 GPU，避免模拟器落到 SwiftShader；环境变量可用于兼容性回退。
+		gpu := strings.TrimSpace(os.Getenv(emulatorGPUEnv))
+		switch gpu {
+		case "":
+			gpu = "host"
+		case "host", "auto", "swiftshader_indirect", "angle_indirect", "guest", "off":
+		default:
+			s.rt.Log().Warn("emulator", "环境变量 %s=%q 不是合法图形后端，回退为 host", emulatorGPUEnv, gpu)
+			gpu = "host"
+		}
+		opts.GPU = gpu
 	}
 	inst, err := comp.Launcher.Start(s.rt.Context(), req.AvdName, opts)
 	if err != nil {
