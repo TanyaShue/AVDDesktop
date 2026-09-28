@@ -79,12 +79,6 @@ type DeviceWindow struct {
 	base  context.Context
 	logf  func(format string, args ...any)
 
-	// 前端 FrameCanvas 每秒上报一次的呈现统计（math.Float64bits 存储）。
-	clientPresentFPS       atomic.Uint64
-	clientFrameIntervalP95 atomic.Uint64
-	clientUploadMsP95      atomic.Uint64
-	clientDropped          atomic.Uint64
-
 	// onReady 在「窗口已创建」且「首帧已发布」后调用一次，用于向父进程握手。
 	onReady func()
 
@@ -126,10 +120,11 @@ func (d *DeviceWindow) ReportClientStats(presentFps, frameIntervalP95, uploadMsP
 	if d == nil {
 		return
 	}
-	d.clientPresentFPS.Store(math.Float64bits(presentFps))
-	d.clientFrameIntervalP95.Store(math.Float64bits(frameIntervalP95))
-	d.clientUploadMsP95.Store(math.Float64bits(uploadMsP95))
-	d.clientDropped.Store(dropped)
+	if d.stats != nil {
+		d.stats.recordClientStats(presentFps, frameIntervalP95, uploadMsP95, dropped)
+	}
+	d.logf("前端呈现统计：presentFps=%.1f intervalP95=%.1fms uploadP95=%.2fms dropped=%d",
+		presentFps, frameIntervalP95, uploadMsP95, dropped)
 }
 
 // SendTouch 注入触摸：x/y 是画面区域内的归一化坐标（[0,1]）。

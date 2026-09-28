@@ -36,6 +36,12 @@ const (
 
 	// jpegQuality 是发布给设备窗口的 MJPEG 编码质量。
 	jpegQuality = 75
+
+	// adaptivePerformanceCap 是自适应模式下的性能上限。
+	//
+	// 实测 480 宽在高 DPI 下接近 60fps，540 宽会出现 3–8% 的 WebSocket 丢帧；
+	// 清晰度优先的 540/720 由显式 streamWidth 设置绕过该上限。
+	adaptivePerformanceCap = 480
 )
 
 // keyCodes 是设备窗口可以注入的按键（adb keyevent 码）。
@@ -232,6 +238,33 @@ func sanitizeName(v string) string {
 		return "device"
 	}
 	return b.String()
+}
+
+// adaptiveStreamLimit 按设备窗口的物理像素收敛流宽度。
+//
+// 设备窗口初始逻辑宽度已知，乘上主显示器缩放系数即为画布大致物理像素；再夹到
+// [360, maxLimit] 内。这样可以避免 100% DPI 下向 WebView 传输远超显示尺寸的像素，
+// 显著降低 WebSocket 带宽与浏览器主线程压力。
+func adaptiveStreamLimit(deviceWidth, deviceHeight, maxLimit int, scale float64) int {
+	if maxLimit <= 0 {
+		maxLimit = defaultStreamWidth
+	}
+	if scale <= 0 {
+		scale = 1
+	}
+	windowWidth, _ := windowSize(deviceWidth, deviceHeight)
+	physical := int(math.Round(float64(windowWidth) * scale))
+	if physical < 360 {
+		physical = 360
+	}
+	cap := maxLimit
+	if cap > adaptivePerformanceCap {
+		cap = adaptivePerformanceCap
+	}
+	if physical > cap {
+		physical = cap
+	}
+	return physical
 }
 
 // streamSize 把设备原生分辨率缩放到不超过 limit 的请求尺寸。

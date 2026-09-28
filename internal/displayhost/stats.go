@@ -60,6 +60,7 @@ type PipelineStats struct {
 	ClientFrameIntervalP95 float64 `json:"clientFrameIntervalP95"`
 	ClientUploadMsP95      float64 `json:"clientUploadMsP95"`
 	ClientDropped          uint64  `json:"clientDropped"`
+	ClientReportCount      uint64  `json:"clientReportCount"`
 }
 
 // durationRing 是固定大小的原子耗时环形缓冲。
@@ -140,6 +141,12 @@ type pipelineStats struct {
 
 	copyDurations   durationRing
 	encodeDurations durationRing
+
+	clientPresentFPS       atomic.Uint64 // math.Float64bits
+	clientFrameIntervalP95 atomic.Uint64 // math.Float64bits
+	clientUploadMsP95      atomic.Uint64 // math.Float64bits
+	clientDropped          atomic.Uint64
+	clientReportCount      atomic.Uint64
 
 	// subscribers / dropForClient 由 display.Session 的统计接口提供，
 	// 由 RunHelper 在会话创建后接线；未接线时返回 0。
@@ -222,6 +229,18 @@ func (s *pipelineStats) recordDropBeforeEncode() {
 		return
 	}
 	s.dropBeforeEncode.Add(1)
+}
+
+// recordClientStats 记录一次前端 FrameCanvas 的 1Hz 呈现统计。
+func (s *pipelineStats) recordClientStats(presentFps, frameIntervalP95, uploadMsP95 float64, dropped uint64) {
+	if s == nil {
+		return
+	}
+	s.clientPresentFPS.Store(math.Float64bits(presentFps))
+	s.clientFrameIntervalP95.Store(math.Float64bits(frameIntervalP95))
+	s.clientUploadMsP95.Store(math.Float64bits(uploadMsP95))
+	s.clientDropped.Store(dropped)
+	s.clientReportCount.Add(1)
 }
 
 // run 每秒计算最近一秒的接收/发布 FPS；report 为真时同时向 out 写统计行。
@@ -318,6 +337,12 @@ func (s *pipelineStats) snapshot() PipelineStats {
 		RawSubscribers:   raw.Subscribers,
 		RawPublishFPS:    raw.PublishFPS,
 		RawDropForClient: raw.DropForClient,
+
+		ClientPresentFPS:       math.Float64frombits(s.clientPresentFPS.Load()),
+		ClientFrameIntervalP95: math.Float64frombits(s.clientFrameIntervalP95.Load()),
+		ClientUploadMsP95:      math.Float64frombits(s.clientUploadMsP95.Load()),
+		ClientDropped:          s.clientDropped.Load(),
+		ClientReportCount:      s.clientReportCount.Load(),
 	}
 }
 
@@ -336,9 +361,5 @@ func (d *DeviceWindow) Stats() PipelineStats {
 	} else {
 		out = d.stats.snapshot()
 	}
-	out.ClientPresentFPS = math.Float64frombits(d.clientPresentFPS.Load())
-	out.ClientFrameIntervalP95 = math.Float64frombits(d.clientFrameIntervalP95.Load())
-	out.ClientUploadMsP95 = math.Float64frombits(d.clientUploadMsP95.Load())
-	out.ClientDropped = d.clientDropped.Load()
 	return out
 }

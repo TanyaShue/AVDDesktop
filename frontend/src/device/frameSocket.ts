@@ -62,8 +62,6 @@ export class FrameSocket {
   private closed = false;
   private retryDelay = MIN_RETRY_MS;
   private reconnectTimer: number | null = null;
-  private flushTimer: number | null = null;
-  private pendingFrame: RawFrame | null = null;
   private dropped = 0;
 
   // 用固定环形窗口统计最近 1 秒的接收帧数，避免每帧分配数组。
@@ -90,8 +88,6 @@ export class FrameSocket {
     this.closed = true;
     this.started = false;
     this.clearReconnect();
-    this.clearFlush();
-    this.pendingFrame = null;
 
     const socket = this.socket;
     this.socket = null;
@@ -171,32 +167,18 @@ export class FrameSocket {
     this.reconnectTimer = null;
   }
 
-  private clearFlush(): void {
-    if (this.flushTimer === null) return;
-    window.clearTimeout(this.flushTimer);
-    this.flushTimer = null;
-  }
 
   /**
-   * 单槽 pending 队列：上一帧尚未交给画布时直接替换，并在下一轮任务交付最新帧。
-   * 这样网络突发不会把旧帧排进画布，也不会阻塞 WebSocket 事件线程。
+   * 直接交付最新帧：画布内部只保留一帧并在 rAF 中消费，网络突发不会排队；
+   * 这里不再引入额外的宏任务，减少一帧从 onmessage 到 rAF 的延迟。
    */
   private enqueue(frame: RawFrame): void {
-    if (this.pendingFrame) this.dropped += 1;
-    this.pendingFrame = frame;
-    if (this.flushTimer !== null) return;
-
-    this.flushTimer = window.setTimeout(() => {
-      this.flushTimer = null;
-      const pending = this.pendingFrame;
-      this.pendingFrame = null;
-      if (!pending || this.closed) return;
-      try {
-        this.onFrame(pending);
-      } catch (err: unknown) {
-        console.error("[display] raw frame callback failed", err);
-      }
-    }, 0);
+    if (this.closed) return;
+    try {
+      this.onFrame(frame);
+    } catch (err: unknown) {
+      console.error("[display] raw frame callback failed", err);
+    }
   }
 
   private recordReceive(): void {

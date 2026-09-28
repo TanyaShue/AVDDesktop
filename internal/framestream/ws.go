@@ -82,6 +82,9 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	}
 	upgrader := websocket.Upgrader{
 		EnableCompression: false,
+		// 单帧约 1.5–2.5MB，较大的写缓冲减少小包系统调用开销。
+		WriteBufferSize: 64 * 1024,
+		ReadBufferSize:  1024,
 		CheckOrigin: func(*http.Request) bool {
 			// 回环地址 + token 是本端点的访问边界；允许 WebView 自身的 Origin。
 			return true

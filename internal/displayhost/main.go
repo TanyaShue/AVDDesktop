@@ -24,6 +24,7 @@ import (
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/emulatorgrpc"
 	"AVDDesktop/internal/framestream"
+	"AVDDesktop/internal/platform"
 )
 
 const (
@@ -111,7 +112,11 @@ func RunHelper(args []string, assets fs.FS) error {
 		}
 	}
 
-	streamW, streamH := streamSize(width, height, cfg.streamWidthLimit())
+	streamLimit := cfg.streamWidthLimit()
+	if cfg.StreamWidth <= 0 {
+		streamLimit = adaptiveStreamLimit(width, height, streamLimit, platform.DisplayScale())
+	}
+	streamW, streamH := streamSize(width, height, streamLimit)
 
 	frames, err := display.NewServer(nil)
 	if err != nil {

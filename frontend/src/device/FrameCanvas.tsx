@@ -17,6 +17,8 @@ const WEBGL_OPTIONS: WebGLContextAttributes = {
   depth: false,
   stencil: false,
   powerPreference: "high-performance",
+  // Windows 上允许 Chromium 走低延迟合成路径；不支持时会被忽略。
+  desynchronized: true,
 };
 
 const VERTEX_SHADER = `#version 300 es
@@ -387,8 +389,13 @@ export function FrameCanvas({
     const socket = new FrameSocket(url, token, onFrame);
     socket.start();
 
+    // 独立 1Hz 上报：即使窗口被系统节流、rAF 暂时不跑，也能让服务端诊断面板
+    // 看到“前端仍在线但 presentFps=0”，便于区分节流与链路故障。
+    const statsTimer = window.setInterval(() => emitStats(performance.now()), STATS_INTERVAL_MS);
+
     return () => {
       disposed = true;
+      window.clearInterval(statsTimer);
       socket.close();
       canvas.removeEventListener("webglcontextlost", handleContextLost, false);
       canvas.removeEventListener("webglcontextrestored", handleContextRestored, false);
@@ -414,3 +421,4 @@ export function FrameCanvas({
     />
   );
 }
+
