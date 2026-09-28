@@ -159,7 +159,8 @@ body {
 
 .dw__screen {
   /* inset:0 + margin:auto + max-* 是「保持宽高比放进盒子并居中」的稳定写法：
-     元素最终尺寸就是真实渲染尺寸，指针坐标按 getBoundingClientRect 换算即精确。 */
+     元素最终尺寸就是真实渲染尺寸，指针坐标按 getBoundingClientRect 换算即精确。
+     img 与 canvas 共用本规则；画面元素单独合成，避免每帧阴影/滤镜参与重绘。 */
   position: absolute;
   inset: 0;
   margin: auto;
@@ -167,10 +168,12 @@ body {
   max-width: 100%;
   max-height: 100%;
   background: #000;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 18px 48px rgba(0, 0, 0, 0.55);
   cursor: default;
   touch-action: none;
   -webkit-user-drag: none;
+  contain: layout paint;
+  will-change: transform;
+  transform: translateZ(0);
 }
 
 .dw__overlay {

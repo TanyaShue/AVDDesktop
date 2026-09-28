@@ -27,6 +27,14 @@ export interface DeviceSession {
   serial: string;
   /** MJPEG 画面地址（127.0.0.1 随机端口）。 */
   url: string;
+  /** 原始 RGBA 帧 WebSocket 地址；旧版辅助进程可能暂不提供。 */
+  rawUrl?: string;
+  /** 原始帧订阅使用的一次性 token。 */
+  rawToken?: string;
+  /** 原始帧格式，当前为 rgba8888；缺失时按兼容模式处理。 */
+  rawFormat?: string;
+  /** 原始帧行序是否自底向上。 */
+  rawBottomUp?: boolean;
   /** 设备原生分辨率，触摸映射基准。 */
   deviceWidth: number;
   deviceHeight: number;

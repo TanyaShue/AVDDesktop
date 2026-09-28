@@ -1,13 +1,14 @@
 // 独立设备窗口（MuMu 风格）：自绘标题栏 + 画面区 + 工具栏。
 //
 // 与主窗口内的 DeviceWindow 浮层不同，这个页面运行在辅助进程自己的 Wails 窗口里：
-//   - 画面：MJPEG（<img> 直接消费 multipart/x-mixed-replace）
+//   - 画面：优先 WebSocket 原始帧 + WebGL2，WebGL2 不可用时回落到 MJPEG
 //   - 输入：指针 → 归一化坐标 → 辅助进程 → gRPC sendTouch；按键 → adb keyevent
 //   - 窗口：无边框，拖拽区由 --wails-draggable 提供，按钮走辅助进程绑定
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import * as win from "../bridge/deviceWindow";
 import type { DeviceSession } from "../bridge/deviceWindow";
+import { FrameCanvas, supportsWebGL2 } from "../device/FrameCanvas";
 import { Icon } from "./deviceWindowIcons";
 import { DeviceStatsOverlay } from "./DeviceStatsOverlay";
 
@@ -49,12 +50,13 @@ export function DeviceWindowApp() {
   const [error, setError] = useState("");
   const [frameReady, setFrameReady] = useState(false);
   const [frameBroken, setFrameBroken] = useState(false);
+  const [rawFailed, setRawFailed] = useState(false);
+  const [webgl2Available] = useState(() => supportsWebGL2());
   const [reloadKey, setReloadKey] = useState(0);
   const [pinned, setPinned] = useState(false);
   const [maximised, setMaximised] = useState(false);
   const [statsVisible, setStatsVisible] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
-  const screenRef = useRef<HTMLImageElement | null>(null);
   const lastTouchAt = useRef(0);
   const touchFailed = useRef(false);
   const toastSeq = useRef(0);
@@ -95,11 +97,9 @@ export function DeviceWindowApp() {
     [notify],
   );
 
-  /** 指针位置 → 画面归一化坐标：元素盒子就是画面区域，直接按元素宽度换算。 */
-  const normalized = (e: ReactPointerEvent<HTMLImageElement>) => {
-    const el = screenRef.current;
-    if (!el) return null;
-    const rect = el.getBoundingClientRect();
+  /** 指针位置 → 画面归一化坐标：img 与 canvas 共用同一个几何盒子。 */
+  const normalized = (e: ReactPointerEvent<HTMLElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return null;
     return {
       x: Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1),
@@ -107,7 +107,7 @@ export function DeviceWindowApp() {
     };
   };
 
-  const handlePointerDown = (e: ReactPointerEvent<HTMLImageElement>) => {
+  const handlePointerDown = (e: ReactPointerEvent<HTMLElement>) => {
     if (e.button !== 0) return;
     const p = normalized(e);
     if (!p) return;
@@ -117,7 +117,7 @@ export function DeviceWindowApp() {
     sendTouch(p.x, p.y, false);
   };
 
-  const handlePointerMove = (e: ReactPointerEvent<HTMLImageElement>) => {
+  const handlePointerMove = (e: ReactPointerEvent<HTMLElement>) => {
     if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
     const now = performance.now();
     if (now - lastTouchAt.current < TOUCH_INTERVAL_MS) return;
@@ -126,7 +126,7 @@ export function DeviceWindowApp() {
     if (p) sendTouch(p.x, p.y, false);
   };
 
-  const handlePointerEnd = (e: ReactPointerEvent<HTMLImageElement>) => {
+  const handlePointerEnd = (e: ReactPointerEvent<HTMLElement>) => {
     if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
     const p = normalized(e);
     if (p) sendTouch(p.x, p.y, true);
@@ -187,6 +187,32 @@ export function DeviceWindowApp() {
       .then((path) => notify("info", `截图已保存：${path}`))
       .catch((err: unknown) => notify("danger", `截图失败：${errText(err)}`));
   }, [notify]);
+
+  const handleFirstFrame = useCallback(() => {
+    setFrameReady(true);
+    setFrameBroken(false);
+  }, []);
+
+  const handleRawFallback = useCallback(() => {
+    setRawFailed(true);
+    setFrameReady(false);
+    setFrameBroken(false);
+  }, []);
+
+  // raw 字段是主流程渐进接入的；任一字段不满足时原样使用 MJPEG。
+  const rawSession =
+    session &&
+    !rawFailed &&
+    webgl2Available &&
+    session.rawUrl &&
+    session.rawToken !== undefined &&
+    (!session.rawFormat || session.rawFormat === "rgba8888")
+      ? {
+          url: session.rawUrl,
+          token: session.rawToken,
+          bottomUp: session.rawBottomUp ?? false,
+        }
+      : null;
 
   const aspect = session ? session.deviceWidth / session.deviceHeight : 0;
   const screenStyle = session
@@ -253,19 +279,32 @@ export function DeviceWindowApp() {
       </header>
 
       <main className="dw__stage">
-        {session ? (
+        {session && rawSession ? (
+          <FrameCanvas
+            className="dw__screen"
+            style={screenStyle}
+            url={rawSession.url}
+            token={rawSession.token}
+            rawBottomUp={rawSession.bottomUp}
+            initialWidth={session.streamWidth}
+            initialHeight={session.streamHeight}
+            ariaLabel={`${session.avdName} 的设备画面`}
+            onFirstFrame={handleFirstFrame}
+            onFallback={handleRawFallback}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerEnd}
+            onPointerCancel={handlePointerEnd}
+          />
+        ) : session ? (
           // 画面元素本身就是画面区域：指针坐标按它的盒子换算，因此信箱边框不会影响映射。
           <img
-            ref={screenRef}
             className="dw__screen"
             style={screenStyle}
             src={`${session.url}?r=${reloadKey}`}
             alt={`${session.avdName} 的设备画面`}
             draggable={false}
-            onLoad={() => {
-              setFrameReady(true);
-              setFrameBroken(false);
-            }}
+            onLoad={handleFirstFrame}
             onError={() => {
               if (frameReady) setFrameBroken(true);
             }}
@@ -302,6 +341,7 @@ export function DeviceWindowApp() {
               onClick={() => {
                 setFrameReady(false);
                 setFrameBroken(false);
+                setRawFailed(false);
                 setReloadKey((v) => v + 1);
               }}
             >
