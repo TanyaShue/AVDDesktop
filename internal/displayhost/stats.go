@@ -127,10 +127,10 @@ type pipelineStats struct {
 	copyDurations   durationRing
 	encodeDurations durationRing
 
-	// subscribers 由 display.Session 的订阅者统计接口提供。
-	// TODO(phase0): internal/display.Session 尚未导出 HasSubscribers/Stats，
-	// 当前为空并由 snapshot 返回 0；该包补齐最小接口后再接入。
-	subscribers func() int
+	// subscribers / dropForClient 由 display.Session 的统计接口提供，
+	// 由 RunHelper 在会话创建后接线；未接线时返回 0。
+	subscribers   func() int
+	dropForClient func() uint64
 }
 
 // newPipelineStats 创建一条链路的统计聚合器。
@@ -262,6 +262,10 @@ func (s *pipelineStats) snapshot() PipelineStats {
 	if s.subscribers != nil {
 		subscribers = s.subscribers()
 	}
+	dropForClient := uint64(0)
+	if s.dropForClient != nil {
+		dropForClient = s.dropForClient()
+	}
 
 	return PipelineStats{
 		UptimeMs:         uptimeMs,
@@ -280,7 +284,7 @@ func (s *pipelineStats) snapshot() PipelineStats {
 		EncodeMsP95:      s.encodeDurations.percentile(95),
 		Subscribers:      subscribers,
 		DropBeforeEncode: 0,
-		DropForClient:    0,
+		DropForClient:    dropForClient,
 		LastSeqAtUnixMs:  s.lastSeqAtUnixMs.Load(),
 	}
 }

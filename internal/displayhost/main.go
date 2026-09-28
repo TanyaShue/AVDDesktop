@@ -148,6 +148,8 @@ func RunHelper(args []string, assets fs.FS) error {
 	logf("设备 %dx%d → 画面流 %dx%d，监听 %s", width, height, streamW, streamH, frames.Addr())
 
 	stats := newPipelineStats(pipelineMode(cfg.Benchmark), streamW, streamH)
+	stats.subscribers = func() int { return session.Stats().Subscribers }
+	stats.dropForClient = func() uint64 { return session.Stats().DropForClient }
 	go stats.run(ctx, cfg.Stats, os.Stdout)
 
 	window := &DeviceWindow{
