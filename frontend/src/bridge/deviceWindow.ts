@@ -81,6 +81,14 @@ export const SendKey = (key: string) => call<void>("SendKey", key);
 /** 抓取设备画面并保存到软件目录的 screenshots/，返回本地路径。 */
 export const Screenshot = () => call<string>("Screenshot");
 
+/** WebGL 画布每秒上报一次的呈现统计（仅用于诊断与验收）。 */
+export const ReportClientStats = (
+  presentFps: number,
+  frameIntervalP95: number,
+  uploadMsP95: number,
+  dropped: number,
+) => call<void>("ReportClientStats", presentFps, frameIntervalP95, uploadMsP95, dropped);
+
 export const Minimise = () => call<void>("Minimise");
 
 /** 切换最大化，返回切换后的状态。 */
@@ -93,4 +101,5 @@ export const SetAlwaysOnTop = (on: boolean) => call<boolean>("SetAlwaysOnTop", o
 
 /** 关闭设备窗口（只关画面，不停模拟器）。 */
 export const Close = () => call<void>("Close");
+
 

@@ -51,6 +51,12 @@ type DeviceSession struct {
 	StreamWidth  int    `json:"streamWidth"`
 	StreamHeight int    `json:"streamHeight"`
 	Mode         string `json:"mode"` // webview
+
+	// 原始帧 WebSocket（Phase 2 主路径）。RawURL 为空时前端回落到 MJPEG <img>。
+	RawURL      string `json:"rawUrl"`
+	RawToken    string `json:"rawToken"`
+	RawFormat   string `json:"rawFormat"`
+	RawBottomUp bool   `json:"rawBottomUp"`
 }
 
 // DeviceWindow 是独立设备窗口：既是被 Wails 绑定的服务对象，也持有画面与输入的运行时依赖。
@@ -58,9 +64,11 @@ type DeviceSession struct {
 // 之所以把窗口放在辅助进程里：主进程只做控制面，画面解码/编码与 WebView 渲染都不占用
 // 主窗口资源，也不随主窗口一起退出；窗口关闭 = 本进程退出，资源随之回收。
 type DeviceWindow struct {
-	cfg    HelperConfig
-	client *emulatorgrpc.Client
-	url    string
+	cfg      HelperConfig
+	client   *emulatorgrpc.Client
+	url      string
+	rawURL   string
+	rawToken string
 
 	nativeW int
 	nativeH int
@@ -70,6 +78,12 @@ type DeviceWindow struct {
 	stats *pipelineStats
 	base  context.Context
 	logf  func(format string, args ...any)
+
+	// 前端 FrameCanvas 每秒上报一次的呈现统计（math.Float64bits 存储）。
+	clientPresentFPS       atomic.Uint64
+	clientFrameIntervalP95 atomic.Uint64
+	clientUploadMsP95      atomic.Uint64
+	clientDropped          atomic.Uint64
 
 	// onReady 在「窗口已创建」且「首帧已发布」后调用一次，用于向父进程握手。
 	onReady func()
@@ -98,7 +112,24 @@ func (d *DeviceWindow) Session() DeviceSession {
 		StreamWidth:  d.streamW,
 		StreamHeight: d.streamH,
 		Mode:         "webview",
+		RawURL:       d.rawURL,
+		RawToken:     d.rawToken,
+		RawFormat:    "rgba8888",
+		RawBottomUp:  false,
 	}
+}
+
+// ReportClientStats 接收前端 FrameCanvas 的 1Hz 呈现统计。
+//
+// 该统计只用于诊断面板与验收记录，不参与画面链路决策。
+func (d *DeviceWindow) ReportClientStats(presentFps, frameIntervalP95, uploadMsP95 float64, dropped uint64) {
+	if d == nil {
+		return
+	}
+	d.clientPresentFPS.Store(math.Float64bits(presentFps))
+	d.clientFrameIntervalP95.Store(math.Float64bits(frameIntervalP95))
+	d.clientUploadMsP95.Store(math.Float64bits(uploadMsP95))
+	d.clientDropped.Store(dropped)
 }
 
 // SendTouch 注入触摸：x/y 是画面区域内的归一化坐标（[0,1]）。

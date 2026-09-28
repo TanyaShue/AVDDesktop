@@ -6,6 +6,8 @@ package displayhost
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -21,6 +23,7 @@ import (
 	"AVDDesktop/internal/display"
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/emulatorgrpc"
+	"AVDDesktop/internal/framestream"
 )
 
 const (
@@ -145,24 +148,36 @@ func RunHelper(args []string, assets fs.FS) error {
 	}
 
 	session := frames.Session(cfg.InstanceID)
+	rawToken, err := newSessionToken()
+	if err != nil {
+		return err
+	}
+	session.AttachHub(framestream.NewHub(framestream.Options{
+		Token:        rawToken,
+		WriteTimeout: 250 * time.Millisecond,
+		Logf:         logf,
+	}))
 	logf("设备 %dx%d → 画面流 %dx%d，监听 %s", width, height, streamW, streamH, frames.Addr())
 
 	stats := newPipelineStats(pipelineMode(cfg.Benchmark), streamW, streamH)
 	stats.subscribers = func() int { return session.Stats().Subscribers }
 	stats.dropForClient = func() uint64 { return session.Stats().DropForClient }
+	stats.rawStats = session.HubStats
 	go stats.run(ctx, cfg.Stats, os.Stdout)
 
 	window := &DeviceWindow{
-		cfg:     cfg,
-		client:  client,
-		url:     frames.URL(cfg.InstanceID),
-		nativeW: width,
-		nativeH: height,
-		streamW: streamW,
-		streamH: streamH,
-		stats:   stats,
-		base:    ctx,
-		logf:    logf,
+		cfg:      cfg,
+		client:   client,
+		url:      frames.URL(cfg.InstanceID),
+		rawURL:   frames.RawURL(cfg.InstanceID),
+		rawToken: rawToken,
+		nativeW:  width,
+		nativeH:  height,
+		streamW:  streamW,
+		streamH:  streamH,
+		stats:    stats,
+		base:     ctx,
+		logf:     logf,
 	}
 	window.onReady = func() {
 		// stdout 是给父进程的私有握手通道：这一行同时承担「就绪」与「会话信息上报」，
@@ -174,19 +189,23 @@ func RunHelper(args []string, assets fs.FS) error {
 		_, _ = fmt.Fprintln(os.Stdout, readyMarker)
 	}
 
+	source := &frameSource{
+		ctx:    ctx,
+		region: region,
+		meta:   stream,
+		width:  streamW,
+		height: streamH,
+		stats:  stats,
+	}
 	pump := &framePump{
-		source: &frameSource{
-			ctx:    ctx,
-			region: region,
-			meta:   stream,
-			width:  streamW,
-			height: streamH,
-			stats:  stats,
-		},
+		source: source,
 		sink: func(jpeg []byte) {
 			session.Publish(jpeg)
-			window.MarkFirstFrame()
 		},
+		rawSink: func(frame Frame) {
+			session.PublishRaw(source.RawFrame(frame))
+		},
+		markFirstFrame: window.MarkFirstFrame,
 		quality:        jpegQuality,
 		recvOnly:       cfg.Benchmark == statsModeRecvOnly,
 		hasSubscribers: session.HasSubscribers,
@@ -207,6 +226,15 @@ func RunHelper(args []string, assets fs.FS) error {
 	}()
 
 	return window.Run(assets)
+}
+
+// newSessionToken 生成一次性 WebSocket 订阅 token。
+func newSessionToken() (string, error) {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", fmt.Errorf("生成设备窗口 token 失败: %w", err)
+	}
+	return hex.EncodeToString(buf[:]), nil
 }
 
 // watchParentExit 在父进程关闭 stdin 管道后触发退出。

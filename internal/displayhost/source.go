@@ -16,6 +16,7 @@ import (
 
 	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/emulatorgrpc"
+	"AVDDesktop/internal/framestream"
 	"AVDDesktop/internal/proc"
 	"AVDDesktop/internal/sharedmem"
 )
@@ -136,6 +137,24 @@ func (s *frameSource) Next(ctx context.Context) (Frame, error) {
 			buffer:     buffer,
 			generation: buffer.generation.Load(),
 		}, nil
+	}
+}
+
+// RawFrame 把 displayhost 帧转换为 framestream 帧，并把释放回调交给 Hub。
+//
+// Hub 在该帧不再被任何订阅者使用时调用 Release，最终把缓冲归还 frameSource 池。
+func (s *frameSource) RawFrame(frame Frame) framestream.Frame {
+	return framestream.Frame{
+		Pix:       frame.Pix,
+		Width:     frame.Width,
+		Height:    frame.Height,
+		Format:    framestream.FormatRGBA8888,
+		Seq:       frame.Seq,
+		Timestamp: time.Now(),
+		BottomUp:  false,
+		Release: func() {
+			s.Release(frame)
+		},
 	}
 }
 

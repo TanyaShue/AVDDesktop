@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"AVDDesktop/internal/framestream"
 )
 
 const (
@@ -47,6 +49,17 @@ type PipelineStats struct {
 	DropBeforeEncode uint64  `json:"dropBeforeEncode"`
 	DropForClient    uint64  `json:"dropForClient"`
 	LastSeqAtUnixMs  int64   `json:"lastSeqAtUnixMs"`
+
+	// Phase 2 原始帧 Hub 统计（未挂载时为零值）。
+	RawSubscribers   int     `json:"rawSubscribers"`
+	RawPublishFPS    float64 `json:"rawPublishFps"`
+	RawDropForClient uint64  `json:"rawDropForClient"`
+
+	// 前端 FrameCanvas 的 1Hz 呈现统计。
+	ClientPresentFPS       float64 `json:"clientPresentFps"`
+	ClientFrameIntervalP95 float64 `json:"clientFrameIntervalP95"`
+	ClientUploadMsP95      float64 `json:"clientUploadMsP95"`
+	ClientDropped          uint64  `json:"clientDropped"`
 }
 
 // durationRing 是固定大小的原子耗时环形缓冲。
@@ -132,6 +145,7 @@ type pipelineStats struct {
 	// 由 RunHelper 在会话创建后接线；未接线时返回 0。
 	subscribers   func() int
 	dropForClient func() uint64
+	rawStats      func() (framestream.Stats, bool)
 }
 
 // newPipelineStats 创建一条链路的统计聚合器。
@@ -275,6 +289,12 @@ func (s *pipelineStats) snapshot() PipelineStats {
 	if s.dropForClient != nil {
 		dropForClient = s.dropForClient()
 	}
+	var raw framestream.Stats
+	if s.rawStats != nil {
+		if snapshot, ok := s.rawStats(); ok {
+			raw = snapshot
+		}
+	}
 
 	return PipelineStats{
 		UptimeMs:         uptimeMs,
@@ -295,6 +315,9 @@ func (s *pipelineStats) snapshot() PipelineStats {
 		DropBeforeEncode: s.dropBeforeEncode.Load(),
 		DropForClient:    dropForClient,
 		LastSeqAtUnixMs:  s.lastSeqAtUnixMs.Load(),
+		RawSubscribers:   raw.Subscribers,
+		RawPublishFPS:    raw.PublishFPS,
+		RawDropForClient: raw.DropForClient,
 	}
 }
 
@@ -303,12 +326,19 @@ func (d *DeviceWindow) Stats() PipelineStats {
 	if d == nil {
 		return PipelineStats{}
 	}
+	var out PipelineStats
 	if d.stats == nil {
-		return PipelineStats{
+		out = PipelineStats{
 			Mode:         pipelineMode(d.cfg.Benchmark),
 			StreamWidth:  d.streamW,
 			StreamHeight: d.streamH,
 		}
+	} else {
+		out = d.stats.snapshot()
 	}
-	return d.stats.snapshot()
+	out.ClientPresentFPS = math.Float64frombits(d.clientPresentFPS.Load())
+	out.ClientFrameIntervalP95 = math.Float64frombits(d.clientFrameIntervalP95.Load())
+	out.ClientUploadMsP95 = math.Float64frombits(d.clientUploadMsP95.Load())
+	out.ClientDropped = d.clientDropped.Load()
+	return out
 }

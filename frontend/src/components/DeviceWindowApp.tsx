@@ -9,6 +9,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import * as win from "../bridge/deviceWindow";
 import type { DeviceSession } from "../bridge/deviceWindow";
 import { FrameCanvas, supportsWebGL2 } from "../device/FrameCanvas";
+import type { FrameCanvasStats } from "../device/FrameCanvas";
 import { Icon } from "./deviceWindowIcons";
 import { DeviceStatsOverlay } from "./DeviceStatsOverlay";
 
@@ -199,6 +200,18 @@ export function DeviceWindowApp() {
     setFrameBroken(false);
   }, []);
 
+  // 前端呈现统计上报给辅助进程，最终由 --stats 日志与诊断面板消费。
+  const handleClientStats = useCallback((stats: FrameCanvasStats) => {
+    void win
+      .ReportClientStats(
+        stats.presentFps,
+        stats.frameIntervalP95,
+        stats.uploadMsP95,
+        stats.dropped,
+      )
+      .catch(() => undefined);
+  }, []);
+
   // raw 字段是主流程渐进接入的；任一字段不满足时原样使用 MJPEG。
   const rawSession =
     session &&
@@ -291,6 +304,7 @@ export function DeviceWindowApp() {
             ariaLabel={`${session.avdName} 的设备画面`}
             onFirstFrame={handleFirstFrame}
             onFallback={handleRawFallback}
+            onStats={handleClientStats}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerEnd}
@@ -407,3 +421,4 @@ function errText(err: unknown): string {
   const e = err as { message?: string; hint?: string };
   return [e.message, e.hint].filter(Boolean).join("　") || "未知错误";
 }
+

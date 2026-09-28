@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/jpeg"
 	"io"
+	"sync"
 	"time"
 )
 
@@ -18,12 +19,16 @@ import (
 type framePump struct {
 	source         *frameSource
 	sink           func(jpeg []byte)
+	rawSink        func(frame Frame)
+	markFirstFrame func()
 	quality        int
 	recvOnly       bool
 	hasSubscribers func() bool
 	stats          *pipelineStats
 	logf           func(format string, args ...any)
 	quit           func(reason string)
+
+	firstOnce sync.Once
 }
 
 // run 持续搬运画面，直到上下文结束或画面流断开。
@@ -31,7 +36,7 @@ func (p *framePump) run(ctx context.Context) {
 	if p == nil || p.source == nil {
 		return
 	}
-	if !p.recvOnly && p.sink == nil {
+	if !p.recvOnly && p.sink == nil && p.rawSink == nil {
 		return
 	}
 	for {
@@ -40,15 +45,30 @@ func (p *framePump) run(ctx context.Context) {
 			p.finish(ctx, err)
 			return
 		}
-		// recv-only 只保留接收/复制统计，不进入编码和发布路径。
+		// recv-only 只保留接收/复制统计，不进入任何发布路径。
 		if p.recvOnly {
 			p.release(frame)
 			continue
 		}
 
-		// WebView 断开后不再做无意义的 JPEG 编码；仍持续复制统计输入帧，
-		// 这样帧池、seq/gap 和重新订阅后的首帧都保持正常。
-		if p.hasSubscribers != nil && !p.hasSubscribers() {
+		// JPEG 仅服务 MJPEG 回落订阅者；rawSink 存在时主路径不再受编码影响。
+		mjpegSubscriber := p.hasSubscribers != nil && p.hasSubscribers()
+		if mjpegSubscriber {
+			encodeStarted := time.Now()
+			encoded, encodeErr := encodeJPEG(frame, p.quality)
+			if p.stats != nil {
+				p.stats.recordEncode(time.Since(encodeStarted))
+			}
+			if encodeErr != nil {
+				p.log("画面编码失败：%v", encodeErr)
+			} else if p.sink != nil {
+				p.sink(encoded)
+				if p.stats != nil {
+					p.stats.recordPublish()
+				}
+			}
+		} else if p.rawSink == nil {
+			// 两个出口都没有订阅者：直接归还，并保留 Phase 0 的丢帧计数语义。
 			p.release(frame)
 			if p.stats != nil {
 				p.stats.recordDropBeforeEncode()
@@ -56,22 +76,22 @@ func (p *framePump) run(ctx context.Context) {
 			continue
 		}
 
-		encodeStarted := time.Now()
-		encoded, err := encodeJPEG(frame, p.quality)
-		if p.stats != nil {
-			p.stats.recordEncode(time.Since(encodeStarted))
+		if p.rawSink != nil {
+			// 所有权在 PublishRaw/Hub 内部转移；pump 不能再触碰 frame.Pix。
+			p.rawSink(frame)
+		} else {
+			p.release(frame)
 		}
-		// JPEG 已经独立于像素缓冲，编码完成后即可归还，不必等慢客户端写完。
-		p.release(frame)
-		if err != nil {
-			p.log("画面编码失败：%v", err)
-			continue
-		}
-		p.sink(encoded)
-		if p.stats != nil {
-			p.stats.recordPublish()
-		}
+		p.markFirst()
 	}
+}
+
+// markFirst 幂等通知窗口首帧可用；原始帧和 MJPEG 两条出口共用。
+func (p *framePump) markFirst() {
+	if p == nil || p.markFirstFrame == nil {
+		return
+	}
+	p.firstOnce.Do(p.markFirstFrame)
 }
 
 func (p *framePump) finish(ctx context.Context, err error) {

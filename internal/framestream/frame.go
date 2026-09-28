@@ -150,6 +150,13 @@ func (h Header) ValidatePayload(payload int) error {
 	return nil
 }
 
+// ReleaseFrame 调用帧的释放回调（允许 nil）。
+//
+// 供 Hub 之外的兜底路径使用：例如 Hub 未挂载、会话已关闭时，调用方仍应把帧缓冲归还帧池。
+func ReleaseFrame(f Frame) {
+	release(f)
+}
+
 // release 调用帧的释放回调（允许 nil）。
 func release(f Frame) {
 	if f.Release != nil {

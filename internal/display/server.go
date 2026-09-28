@@ -16,11 +16,13 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"AVDDesktop/internal/domain"
+	"AVDDesktop/internal/framestream"
 	"AVDDesktop/internal/logging"
 )
 
@@ -76,8 +78,13 @@ func (s *Server) Addr() string {
 	return s.ln.Addr().String()
 }
 
-// URL 返回某个会话的订阅地址。
+// URL 返回某个会话的 MJPEG 订阅地址。
 func (s *Server) URL(id string) string { return "http://" + s.Addr() + "/display/" + id }
+
+// RawURL 返回某个会话的原始帧 WebSocket 地址。
+func (s *Server) RawURL(id string) string {
+	return "ws://" + s.Addr() + "/ws/display/" + url.PathEscape(id)
+}
 
 // Session 幂等获取（不存在则创建）会话。
 func (s *Server) Session(id string) *Session {
@@ -128,8 +135,22 @@ func (s *Server) Close() error {
 	return s.http.Close()
 }
 
-// ServeHTTP 处理 `GET /display/{id}`：输出 multipart/x-mixed-replace 的 JPEG 帧流。
+// ServeHTTP 处理两类订阅：
+//   - `GET /display/{id}`：MJPEG（兼容路径）；
+//   - `GET /ws/display/{id}?token=...`：原始帧 WebSocket（主路径）。
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if id, ok := wsSessionID(r.URL.Path); ok {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "原始帧通道只支持 GET", http.StatusMethodNotAllowed)
+			return
+		}
+		ss := s.lookup(id)
+		if ss == nil || !ss.serveRawWS(w, r) {
+			http.NotFound(w, r)
+		}
+		return
+	}
 	id, ok := sessionID(r.URL.Path)
 	if !ok {
 		http.NotFound(w, r)
@@ -154,6 +175,15 @@ func (s *Server) lookup(id string) *Session {
 	return s.sessions[id]
 }
 
+// wsSessionID 从路径中解析 WebSocket 会话 id；非 /ws/display/<id> 形状时返回 false。
+func wsSessionID(path string) (string, bool) {
+	rest, ok := strings.CutPrefix(path, "/ws/display/")
+	if !ok || rest == "" || strings.Contains(rest, "/") {
+		return "", false
+	}
+	return rest, true
+}
+
 // sessionID 从路径中解析会话 id；非 /display/<id> 形状时返回 false。
 func sessionID(path string) (string, bool) {
 	rest, ok := strings.CutPrefix(path, "/display/")
@@ -171,6 +201,7 @@ type Session struct {
 	done   chan struct{}
 	closed bool
 	stats  sessionStats
+	hub    *framestream.Hub
 }
 
 func newSession() *Session {
@@ -204,19 +235,92 @@ func (ss *Session) Publish(jpeg []byte) {
 	}
 }
 
+// AttachHub 挂载原始帧 Hub；重复挂载时关闭旧的 Hub。
+func (ss *Session) AttachHub(hub *framestream.Hub) {
+	if ss == nil {
+		return
+	}
+	ss.mu.Lock()
+	if ss.closed {
+		ss.mu.Unlock()
+		if hub != nil {
+			hub.Close()
+		}
+		return
+	}
+	old := ss.hub
+	ss.hub = hub
+	ss.mu.Unlock()
+	if old != nil && old != hub {
+		old.Close()
+	}
+}
+
+// PublishRaw 把一帧像素交给原始帧 Hub。
+//
+// Hub 取得帧的所有权；没有 Hub 或会话已关闭时立即调用 Release，避免帧池缓冲悬挂。
+func (ss *Session) PublishRaw(frame framestream.Frame) {
+	if ss == nil {
+		framestream.ReleaseFrame(frame)
+		return
+	}
+	ss.mu.Lock()
+	hub := ss.hub
+	closed := ss.closed
+	ss.mu.Unlock()
+	if closed || hub == nil {
+		framestream.ReleaseFrame(frame)
+		return
+	}
+	hub.Publish(frame)
+}
+
+// HubStats 返回原始帧 Hub 的统计；未挂载时返回 false。
+func (ss *Session) HubStats() (framestream.Stats, bool) {
+	if ss == nil {
+		return framestream.Stats{}, false
+	}
+	ss.mu.Lock()
+	hub := ss.hub
+	ss.mu.Unlock()
+	if hub == nil {
+		return framestream.Stats{}, false
+	}
+	return hub.Stats(), true
+}
+
+// serveRawWS 把 WebSocket 请求交给 Hub；未挂载时返回 false。
+func (ss *Session) serveRawWS(w http.ResponseWriter, r *http.Request) bool {
+	ss.mu.Lock()
+	hub := ss.hub
+	closed := ss.closed
+	ss.mu.Unlock()
+	if closed || hub == nil {
+		return false
+	}
+	hub.ServeWS(w, r)
+	return true
+}
+
 // Close 结束所有订阅者（HTTP 响应随之结束），并丢弃缓存的帧；可重复调用。
 func (ss *Session) Close() {
 	if ss == nil {
 		return
 	}
 	ss.mu.Lock()
-	defer ss.mu.Unlock()
 	if ss.closed {
+		ss.mu.Unlock()
 		return
 	}
 	ss.closed = true
 	ss.latest = nil
+	hub := ss.hub
+	ss.hub = nil
 	close(ss.done)
+	ss.mu.Unlock()
+	if hub != nil {
+		hub.Close()
+	}
 }
 
 // serve 是订阅者的处理循环：先补一帧当前画面（画面静止时不会有新帧），
