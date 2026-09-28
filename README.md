@@ -93,6 +93,7 @@ go test -tags e2e -count=1 -timeout 300m ./internal/e2e/ -v
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：模块划分、数据流、JDK / SDK / AVD / emulator 的关键约束与超时策略。
 - [docs/DEVICE_WINDOW_WEBVIEW.md](docs/DEVICE_WINDOW_WEBVIEW.md)：自定义 UI 的 WebView 设备窗口（架构、数据面、验收记录）。
+- [docs/FRAME_RATE_OPTIMIZATION_PLAN.md](docs/FRAME_RATE_OPTIMIZATION_PLAN.md)：自定义 UI 画面的帧率优化设计（分阶段方案、决策树与验收口径）。
 
 ## 许可证
 
