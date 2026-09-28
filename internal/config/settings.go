@@ -25,7 +25,7 @@ func Defaults() domain.AppSettings {
 		ShowTaskDrawer:      true,
 		LogLevel:            "info",
 		KeepLogDays:         7,
-		DisplayQuality:      "balanced",
+		DisplayQuality:      "smooth",
 		MirrorSourceID:      "google-cn",
 		JDKMirrorSourceID:   "nju",
 	}

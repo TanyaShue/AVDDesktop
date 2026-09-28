@@ -598,10 +598,10 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
               <div className="field__control">
                 <select
                   className="select"
-                  value={settings?.displayQuality ?? "balanced"}
+                  value={settings?.displayQuality ?? "smooth"}
                   onChange={(e) => void patch({ displayQuality: e.target.value })}
                 >
-                  <option value="smooth">流畅优先（约 360p）</option>
+                  <option value="smooth">流畅优先（约 360p，推荐）</option>
                   <option value="balanced">平衡（自适应，推荐）</option>
                   <option value="sharp">清晰优先（540p）</option>
                   <option value="ultra">超清（720p）</option>
@@ -717,4 +717,5 @@ function MirrorSummary({
     </div>
   );
 }
+
 

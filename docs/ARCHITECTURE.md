@@ -114,7 +114,7 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
   `device.html` 入口，于是同一份 embed 资源能同时承载主窗口与设备窗口。
 - `getScreenshot(PNG)` 读 IHDR 探测原生分辨率，随后请求
   `streamScreenshot(RGBA8888, ImageTransport.MMAP)`：宽高都显式请求，由模拟器侧缩放；
-  默认自适应模式按窗口逻辑宽度 × 主显示器缩放选择流宽（性能上限 480），设置页另有 360/540/720 档位。
+  默认流畅档使用 360 宽；平衡档按窗口逻辑宽度 × 主显示器缩放自适应（性能上限 480），另有 540/720 档位。
 - `internal/displayhost` 把共享内存里的帧复制成稳定帧（规避 MMAP 撕裂），通过
   `internal/framestream` 的 Hub 发布到本机 WebSocket；WebView 用 WebGL2 纹理 + rAF
   只呈现最新帧，慢客户端在 Hub 侧丢帧，不反压 gRPC 流。
@@ -151,6 +151,7 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
 - 单元测试全部 hermetic：临时目录自造样本，不依赖本机 SDK/JDK。
 - `internal/e2e`（`-tags e2e`）才使用真实网络与 `AVDDESKTOP_E2E_HOME` 指定的真实目录，
   覆盖 JDK/SDK 环境准备、创建 AVD、启动 emulator 三条链路。JDK/SDK 镜像检测均有 hermetic 单测。
+
 
 
 

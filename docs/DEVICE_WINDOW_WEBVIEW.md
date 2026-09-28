@@ -45,8 +45,8 @@ Wails 按「原始请求路径」判断是否注入运行时脚本（`/` 命中�
 ### 画面传输
 
 - 请求尺寸显式给出宽与高，模拟器按 `ImageFormat.width/height` 缩放，返回尺寸不会超过请求值；
-  默认自适应模式按窗口逻辑宽度 × 主显示器缩放选择流宽，夹在 [360, 480]；设置页可选
-  360（流畅）/ 540（清晰）/ 720（超清）。
+  默认「流畅」档使用 360 宽；「平衡」档按窗口逻辑宽度 × 主显示器缩放自适应，夹在 [360, 480]；
+  另有 540（清晰）/ 720（超清）档。
 - 帧先复制出共享内存（MMAP 是单缓冲、可能撕裂），再交给 `internal/framestream` 的 Hub。
   Hub 用引用计数 + 每订阅者 1 槽 mailbox 发布原始 RGBA 帧：慢客户端只丢帧，不反压 gRPC 流。
 - WebView 通过 WebSocket 收到 32 字节帧头 + RGBA 负载，`FrameCanvas` 只在 rAF 中把最新一帧上传到
@@ -134,6 +134,7 @@ go test -tags e2e -count=1 -timeout 20m -run '^TestE2E_DeviceWindow$' -v ./inter
 `docs/MMAP_NATIVE_PRESENTER_PLAN.md` 的阶段 2/3（原生 Presenter + 独立原生工具栏）已被本方案取代；
 `internal/presenter` 已删除，`docs/MMAP_NATIVE_PRESENTER_ACCEPTANCE.md` 仅作为历史记录保留。
 MMAP 传输、共享内存封装、gRPC 客户端与辅助进程生命周期等阶段 1 成果全部沿用。
+
 
 
 

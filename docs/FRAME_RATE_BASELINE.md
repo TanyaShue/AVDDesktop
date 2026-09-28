@@ -121,3 +121,50 @@ Phase 0 已实测：`-gpu host` 下模拟器采集侧稳定 60fps、0 seq gap；
 因此本路线中 Phase 3 的两个备选（原生窗口嵌入、scrcpy 式 guest H.264）**不启动**，
 代码与文档均不引入相关依赖。若未来某类设备在 host GPU 下仍无法达到 55fps，
 再以新的 spike 重新评估。
+
+## 7. Phase 4 最终验收（2026-09-28）
+
+### 7.1 默认档位
+
+目标优先级是“尽可能流畅”，因此默认画质从 balanced(480 自适应) 调整为 **smooth(360)**；
+设置页仍提供 balanced（自适应，上限 480）、sharp（540）、ultra（720）。
+默认档在 100%–175% 缩放下都能把 2.5MB/帧级带宽压到约 0.7 倍，优先保证 60fps。
+
+### 7.2 统一验收命令与结果
+
+```powershell
+npm --prefix frontend run build     # 通过
+go test ./...                       # 全部包通过
+wails build                         # 生成 build/bin/AVDDesktop.exe
+$env:AVDDESKTOP_E2E_HOME = (Resolve-Path 'build\bin').Path
+$env:AVDDESKTOP_NATIVE_BINARY = (Resolve-Path 'build\bin\AVDDesktop.exe').Path
+go test -tags e2e -count=1 -timeout 20m -run '^TestE2E_DeviceWindow$' -v ./internal/e2e
+# PASS（17.33s，MyDevice，CustomUI，GPU host）
+```
+
+### 7.3 最终端到端采样（默认 smooth 360）
+
+环境：MyDevice 1440×3120，`-gpu host`，Settings 连续滚动，helper `--stats`。
+
+| 指标 | 结果 |
+|---|---:|
+| recvFps | 57–60 |
+| rawSubscribers | 1 |
+| rawPublishFps | 57–59 |
+| MJPEG publishFps / encodeMs | 0 / 0（主路径无 JPEG） |
+| clientPresentFps | 55–60（多数采样 58–60） |
+| clientFrameIntervalP95 | 30–32ms（验证环境抖动，见备注） |
+| clientUploadMsP95 | 0.8–0.9ms |
+| clientDropped | 4–9 / 13s |
+| rawDropForClient | 6–7 / 13s |
+| seqGapFrames | 0 |
+
+对比：balanced(480) 早期采样 57–59fps、约 2 次/秒 Hub 丢帧；sharp(540) 55–58fps、
+约 4–6 次/秒 Hub 丢帧。当前验证机同时运行 MuMu，且 WebView 窗口可能不在前台，
+`frameIntervalP95` 会明显高于 16.7ms；平均 presentFps 与丢帧数是本阶段主指标。
+
+### 7.4 遗留与后续
+
+- 窗口 resize / 跨 DPI 移动后不会动态重建流，重新打开窗口生效；
+- 未启用 RGB888/WebCodecs/零拷贝，1080p+ 高刷新场景仍建议使用 360/480 档；
+- macOS / Linux 未做真机验收。
