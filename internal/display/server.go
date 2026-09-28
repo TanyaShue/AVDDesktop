@@ -166,6 +166,7 @@ type Session struct {
 	subs   map[chan struct{}]struct{}
 	done   chan struct{}
 	closed bool
+	stats  sessionStats
 }
 
 func newSession() *Session {
@@ -188,11 +189,13 @@ func (ss *Session) Publish(jpeg []byte) {
 		return
 	}
 	ss.latest = jpeg
+	ss.stats.recordPublish(time.Now(), len(jpeg))
 	// 通知订阅者；容量 1 的唤醒信号可以合并，慢订阅者只是少收到几次唤醒。
 	for wake := range ss.subs {
 		select {
 		case wake <- struct{}{}:
 		default:
+			ss.stats.recordDropForClient()
 		}
 	}
 }
@@ -264,6 +267,26 @@ func (ss *Session) frame() []byte {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 	return ss.latest
+}
+
+// HasSubscribers 返回会话当前是否至少有一个订阅者。
+func (ss *Session) HasSubscribers() bool {
+	if ss == nil {
+		return false
+	}
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return len(ss.subs) > 0
+}
+
+// Stats 返回会话统计快照，可与 Publish 并发调用。
+func (ss *Session) Stats() SessionStats {
+	if ss == nil {
+		return SessionStats{}
+	}
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.stats.snapshot(time.Now(), len(ss.subs))
 }
 
 func (ss *Session) subscribe() chan struct{} {

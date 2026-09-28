@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -262,5 +263,87 @@ func TestServer_CloseReleasesListener(t *testing.T) {
 	case <-ss.done:
 	case <-time.After(time.Second):
 		t.Fatal("会话未随服务关闭而结束")
+	}
+}
+
+func TestSession_HasSubscribers(t *testing.T) {
+	ss := newSession()
+	if ss.HasSubscribers() {
+		t.Fatal("新会话不应有订阅者")
+	}
+	if stats := ss.Stats(); stats.PublishFPS != 0 || stats.BytesPerSec != 0 {
+		t.Fatalf("无流量时速率应为 0，got fps=%v bytes/s=%v", stats.PublishFPS, stats.BytesPerSec)
+	}
+
+	wake := ss.subscribe()
+	if !ss.HasSubscribers() {
+		ss.unsubscribe(wake)
+		t.Fatal("订阅后应显示有订阅者")
+	}
+	ss.unsubscribe(wake)
+	if ss.HasSubscribers() {
+		t.Fatal("取消订阅后不应再有订阅者")
+	}
+}
+
+func TestSession_DropForClientAccumulatesForSlowSubscriber(t *testing.T) {
+	ss := newSession()
+	wake := ss.subscribe()
+	defer ss.unsubscribe(wake)
+
+	frame := []byte{0xFF, 0xD8, 0x01, 0x02, 0xFF, 0xD9}
+	const publishes = 4
+	for i := 0; i < publishes; i++ {
+		ss.Publish(frame)
+	}
+
+	stats := ss.Stats()
+	if stats.Subscribers != 1 {
+		t.Fatalf("订阅者数 = %d，want 1", stats.Subscribers)
+	}
+	if stats.PublishTotal != publishes {
+		t.Fatalf("PublishTotal = %d，want %d", stats.PublishTotal, publishes)
+	}
+	// 第一次发布填满唤醒队列，后续三次发布均与其合并。
+	if stats.DropForClient != publishes-1 {
+		t.Fatalf("DropForClient = %d，want %d", stats.DropForClient, publishes-1)
+	}
+	if stats.LastPublishUnixMs == 0 {
+		t.Fatal("LastPublishUnixMs 应记录最近一次发布")
+	}
+}
+
+func TestSession_StatsConcurrentReadsDoNotPanic(t *testing.T) {
+	ss := newSession()
+	wake := ss.subscribe()
+	defer ss.unsubscribe(wake)
+
+	const (
+		publishCount = 2000
+		readCount    = 5000
+	)
+	frame := []byte{0xFF, 0xD8, 0x03, 0x04, 0xFF, 0xD9}
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < publishCount; i++ {
+			ss.Publish(frame)
+		}
+	}()
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < readCount; j++ {
+				_ = ss.Stats()
+				_ = ss.HasSubscribers()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := ss.Stats().PublishTotal; got != publishCount {
+		t.Fatalf("并发读取后的 PublishTotal = %d，want %d", got, publishCount)
 	}
 }
