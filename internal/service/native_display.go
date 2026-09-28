@@ -107,6 +107,9 @@ func (s *DisplayService) OpenWindow(instanceID string) (*DisplaySession, error) 
 		StreamWidth: 0,
 		// 父进程（本进程）关闭 stdin 即请求辅助进程收尾，避免残留窗口与映射文件。
 		WatchParent: true,
+		// Phase 0 先默认采集服务端链路统计；基准模式由后续诊断入口按需开启。
+		Stats:     true,
+		Benchmark: "",
 	}
 	cmd := exec.Command(exe, displayhost.HelperArgs(cfg)...)
 	cmd.Dir = platform.Root()

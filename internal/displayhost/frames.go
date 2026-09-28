@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/jpeg"
 	"io"
+	"time"
 )
 
 // framePump 把 MMAP 共享内存里的 RGBA 帧编码成 JPEG，并发布到本机 MJPEG 会话。
@@ -15,16 +16,21 @@ import (
 // 设备窗口是 WebView：它消费的是 JPEG（MJPEG），因此这里沿用主程序兼容路径同一套
 // 「最新帧覆盖、永不阻塞生产者」语义——慢客户端只丢帧，不会拖慢 gRPC 流。
 type framePump struct {
-	source  *frameSource
-	sink    func(jpeg []byte)
-	quality int
-	logf    func(format string, args ...any)
-	quit    func(reason string)
+	source   *frameSource
+	sink     func(jpeg []byte)
+	quality  int
+	recvOnly bool
+	stats    *pipelineStats
+	logf     func(format string, args ...any)
+	quit     func(reason string)
 }
 
 // run 持续搬运画面，直到上下文结束或画面流断开。
 func (p *framePump) run(ctx context.Context) {
-	if p == nil || p.source == nil || p.sink == nil {
+	if p == nil || p.source == nil {
+		return
+	}
+	if !p.recvOnly && p.sink == nil {
 		return
 	}
 	for {
@@ -33,12 +39,24 @@ func (p *framePump) run(ctx context.Context) {
 			p.finish(ctx, err)
 			return
 		}
+		// recv-only 只保留接收/复制统计，不进入编码和发布路径。
+		if p.recvOnly {
+			continue
+		}
+
+		encodeStarted := time.Now()
 		encoded, err := encodeJPEG(frame, p.quality)
+		if p.stats != nil {
+			p.stats.recordEncode(time.Since(encodeStarted))
+		}
 		if err != nil {
 			p.log("画面编码失败：%v", err)
 			continue
 		}
 		p.sink(encoded)
+		if p.stats != nil {
+			p.stats.recordPublish()
+		}
 	}
 }
 

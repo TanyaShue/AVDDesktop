@@ -67,8 +67,9 @@ type DeviceWindow struct {
 	streamW int
 	streamH int
 
-	base context.Context
-	logf func(format string, args ...any)
+	stats *pipelineStats
+	base  context.Context
+	logf  func(format string, args ...any)
 
 	// onReady 在「窗口已创建」且「首帧已发布」后调用一次，用于向父进程握手。
 	onReady func()

@@ -53,6 +53,10 @@ type HelperConfig struct {
 	StreamWidth int `json:"streamWidth"`
 	// WatchParent 为真时，父进程关闭 stdin（正常退出、崩溃或被强杀）即视为退出请求。
 	WatchParent bool `json:"watchParent"`
+	// Stats 为真时每秒向 stdout 写一行 __AVDDESKTOP_STATS__ 前缀的 JSON 统计。
+	Stats bool `json:"stats"`
+	// Benchmark 为 "recv-only" 时只接收并统计画面，不编码、不发布。
+	Benchmark string `json:"benchmark"`
 }
 
 // streamWidthLimit 返回本次会话请求的画面宽度上限。
@@ -143,6 +147,9 @@ func RunHelper(args []string, assets fs.FS) error {
 	session := frames.Session(cfg.InstanceID)
 	logf("设备 %dx%d → 画面流 %dx%d，监听 %s", width, height, streamW, streamH, frames.Addr())
 
+	stats := newPipelineStats(pipelineMode(cfg.Benchmark), streamW, streamH)
+	go stats.run(ctx, cfg.Stats, os.Stdout)
+
 	window := &DeviceWindow{
 		cfg:     cfg,
 		client:  client,
@@ -151,6 +158,7 @@ func RunHelper(args []string, assets fs.FS) error {
 		nativeH: height,
 		streamW: streamW,
 		streamH: streamH,
+		stats:   stats,
 		base:    ctx,
 		logf:    logf,
 	}
@@ -171,14 +179,17 @@ func RunHelper(args []string, assets fs.FS) error {
 			meta:   stream,
 			width:  streamW,
 			height: streamH,
+			stats:  stats,
 		},
 		sink: func(jpeg []byte) {
 			session.Publish(jpeg)
 			window.MarkFirstFrame()
 		},
-		quality: jpegQuality,
-		logf:    logf,
-		quit:    window.RequestQuit,
+		quality:  jpegQuality,
+		recvOnly: cfg.Benchmark == statsModeRecvOnly,
+		stats:    stats,
+		logf:     logf,
+		quit:     window.RequestQuit,
 	}
 	go func() {
 		defer close(pumpDone)
@@ -223,6 +234,8 @@ func ParseHelperConfig(args []string) (HelperConfig, error) {
 	fs.IntVar(&cfg.DeviceHeight, "device-height", 0, "device native height")
 	fs.IntVar(&cfg.StreamWidth, "stream-width", 0, "max stream width (0 = default)")
 	fs.BoolVar(&cfg.WatchParent, "watch-parent", false, "quit when the parent closes stdin")
+	fs.BoolVar(&cfg.Stats, "stats", false, "print pipeline stats to stdout once per second")
+	fs.StringVar(&cfg.Benchmark, "benchmark", "", "benchmark mode: recv-only")
 	if err := fs.Parse(stripHelperFlag(args)); err != nil {
 		return HelperConfig{}, err
 	}
@@ -242,6 +255,10 @@ func ParseHelperConfig(args []string) (HelperConfig, error) {
 	}
 	if cfg.StreamWidth < 0 {
 		return HelperConfig{}, fmt.Errorf("画面流宽度不能为负数")
+	}
+	cfg.Benchmark = strings.TrimSpace(cfg.Benchmark)
+	if cfg.Benchmark != "" && cfg.Benchmark != statsModeRecvOnly {
+		return HelperConfig{}, fmt.Errorf("不支持的 benchmark 模式: %q", cfg.Benchmark)
 	}
 	return cfg, nil
 }
@@ -276,5 +293,7 @@ func HelperArgs(cfg HelperConfig) []string {
 		"--device-height", strconv.Itoa(cfg.DeviceHeight),
 		"--stream-width", strconv.Itoa(cfg.StreamWidth),
 		"--watch-parent=" + strconv.FormatBool(cfg.WatchParent),
+		"--stats=" + strconv.FormatBool(cfg.Stats),
+		"--benchmark=" + cfg.Benchmark,
 	}
 }

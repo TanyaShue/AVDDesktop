@@ -71,6 +71,7 @@ type frameSource struct {
 	meta   <-chan emulatorgrpc.FrameMeta
 	width  int
 	height int
+	stats  *pipelineStats
 }
 
 // Next 等待下一帧并复制像素。
@@ -99,8 +100,12 @@ func (s *frameSource) Next(ctx context.Context) (Frame, error) {
 		if len(raw) < need {
 			return Frame{}, fmt.Errorf("共享内存过小：need=%d size=%d", need, len(raw))
 		}
+		copyStarted := time.Now()
 		pix := make([]byte, need)
 		copy(pix, raw[:need])
+		if s.stats != nil {
+			s.stats.recordFrame(meta.Seq, time.Since(copyStarted))
+		}
 		return Frame{
 			Pix:    pix,
 			Width:  w,
