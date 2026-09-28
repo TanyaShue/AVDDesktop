@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"AVDDesktop/internal/domain"
@@ -32,7 +34,7 @@ const (
 	defaultStreamWidth = 540
 
 	// jpegQuality 是发布给设备窗口的 MJPEG 编码质量。
-	jpegQuality = 80
+	jpegQuality = 75
 )
 
 // keyCodes 是设备窗口可以注入的按键（adb keyevent 码）。
@@ -59,6 +61,21 @@ type Frame struct {
 	Width  int
 	Height int
 	Seq    uint32
+
+	// buffer 记录像素缓冲的所有权和代次，用于安全归还和防御重复释放。
+	buffer     *frameBuffer
+	generation uint64
+}
+
+// frameBuffer 是 frameSource 池中的固定容量像素缓冲。
+//
+// generation 每次取出时递增，held 表示该缓冲当前是否仍由某帧独占。二者配合可以
+// 拒绝旧 Frame 被延迟重复 Release 时误归还正在使用的新帧缓冲。
+type frameBuffer struct {
+	data       []byte
+	owner      *frameSource
+	generation atomic.Uint64
+	held       atomic.Bool
 }
 
 // frameSource 把共享内存中的最新 RGBA 帧复制成调用方可独立持有的帧。
@@ -72,6 +89,10 @@ type frameSource struct {
 	width  int
 	height int
 	stats  *pipelineStats
+
+	poolOnce  sync.Once
+	poolBytes int
+	pool      sync.Pool
 }
 
 // Next 等待下一帧并复制像素。
@@ -101,18 +122,58 @@ func (s *frameSource) Next(ctx context.Context) (Frame, error) {
 			return Frame{}, fmt.Errorf("共享内存过小：need=%d size=%d", need, len(raw))
 		}
 		copyStarted := time.Now()
-		pix := make([]byte, need)
+		buffer := s.acquireBuffer(need)
+		pix := buffer.data[:need]
 		copy(pix, raw[:need])
 		if s.stats != nil {
 			s.stats.recordFrame(meta.Seq, time.Since(copyStarted))
 		}
 		return Frame{
-			Pix:    pix,
-			Width:  w,
-			Height: h,
-			Seq:    meta.Seq,
+			Pix:        pix,
+			Width:      w,
+			Height:     h,
+			Seq:        meta.Seq,
+			buffer:     buffer,
+			generation: buffer.generation.Load(),
 		}, nil
 	}
+}
+
+// Release 把帧像素缓冲归还给帧源池。
+//
+// 重复调用安全：缓冲只有在所有权匹配、代次一致且仍处于 held 状态时才会归还一次。
+func (s *frameSource) Release(frame Frame) {
+	if s == nil || frame.buffer == nil || frame.buffer.owner != s {
+		return
+	}
+	buffer := frame.buffer
+	if frame.generation == 0 || buffer.generation.Load() != frame.generation {
+		return
+	}
+	if buffer.held.CompareAndSwap(true, false) {
+		s.pool.Put(buffer)
+	}
+}
+
+// acquireBuffer 从固定容量池取出缓冲；异常的大帧使用一次性缓冲，避免污染池容量。
+func (s *frameSource) acquireBuffer(need int) *frameBuffer {
+	s.poolOnce.Do(func() {
+		if size, ok := checkedFrameBytes(s.width, s.height); ok {
+			s.poolBytes = size
+		}
+		size := s.poolBytes
+		s.pool.New = func() any {
+			return &frameBuffer{data: make([]byte, size), owner: s}
+		}
+	})
+
+	if s.poolBytes <= 0 || need > s.poolBytes {
+		return &frameBuffer{data: make([]byte, need)}
+	}
+	buffer := s.pool.Get().(*frameBuffer)
+	buffer.generation.Add(1)
+	buffer.held.Store(true)
+	return buffer
 }
 
 func newRegion(instanceID string, width, height int) (*sharedmem.Region, error) {

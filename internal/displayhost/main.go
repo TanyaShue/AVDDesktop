@@ -187,11 +187,12 @@ func RunHelper(args []string, assets fs.FS) error {
 			session.Publish(jpeg)
 			window.MarkFirstFrame()
 		},
-		quality:  jpegQuality,
-		recvOnly: cfg.Benchmark == statsModeRecvOnly,
-		stats:    stats,
-		logf:     logf,
-		quit:     window.RequestQuit,
+		quality:        jpegQuality,
+		recvOnly:       cfg.Benchmark == statsModeRecvOnly,
+		hasSubscribers: session.HasSubscribers,
+		stats:          stats,
+		logf:           logf,
+		quit:           window.RequestQuit,
 	}
 	go func() {
 		defer close(pumpDone)

@@ -16,13 +16,14 @@ import (
 // 设备窗口是 WebView：它消费的是 JPEG（MJPEG），因此这里沿用主程序兼容路径同一套
 // 「最新帧覆盖、永不阻塞生产者」语义——慢客户端只丢帧，不会拖慢 gRPC 流。
 type framePump struct {
-	source   *frameSource
-	sink     func(jpeg []byte)
-	quality  int
-	recvOnly bool
-	stats    *pipelineStats
-	logf     func(format string, args ...any)
-	quit     func(reason string)
+	source         *frameSource
+	sink           func(jpeg []byte)
+	quality        int
+	recvOnly       bool
+	hasSubscribers func() bool
+	stats          *pipelineStats
+	logf           func(format string, args ...any)
+	quit           func(reason string)
 }
 
 // run 持续搬运画面，直到上下文结束或画面流断开。
@@ -41,6 +42,17 @@ func (p *framePump) run(ctx context.Context) {
 		}
 		// recv-only 只保留接收/复制统计，不进入编码和发布路径。
 		if p.recvOnly {
+			p.release(frame)
+			continue
+		}
+
+		// WebView 断开后不再做无意义的 JPEG 编码；仍持续复制统计输入帧，
+		// 这样帧池、seq/gap 和重新订阅后的首帧都保持正常。
+		if p.hasSubscribers != nil && !p.hasSubscribers() {
+			p.release(frame)
+			if p.stats != nil {
+				p.stats.recordDropBeforeEncode()
+			}
 			continue
 		}
 
@@ -49,6 +61,8 @@ func (p *framePump) run(ctx context.Context) {
 		if p.stats != nil {
 			p.stats.recordEncode(time.Since(encodeStarted))
 		}
+		// JPEG 已经独立于像素缓冲，编码完成后即可归还，不必等慢客户端写完。
+		p.release(frame)
 		if err != nil {
 			p.log("画面编码失败：%v", err)
 			continue
@@ -70,6 +84,12 @@ func (p *framePump) finish(ctx context.Context, err error) {
 	default:
 		p.log("读取画面失败：%v", err)
 		p.requestQuit("画面流中断")
+	}
+}
+
+func (p *framePump) release(frame Frame) {
+	if p != nil && p.source != nil {
+		p.source.Release(frame)
 	}
 }
 

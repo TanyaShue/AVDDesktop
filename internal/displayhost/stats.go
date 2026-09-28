@@ -117,6 +117,7 @@ type pipelineStats struct {
 
 	recvTotal         atomic.Uint64
 	publishTotal      atomic.Uint64
+	dropBeforeEncode  atomic.Uint64
 	seq               atomic.Uint32
 	seqInitialized    atomic.Bool
 	seqGapFrames      atomic.Uint64
@@ -201,6 +202,14 @@ func (s *pipelineStats) recordPublish() {
 	s.publishTotal.Add(1)
 }
 
+// recordDropBeforeEncode 记录一次因没有订阅者而在 JPEG 编码前丢弃的帧。
+func (s *pipelineStats) recordDropBeforeEncode() {
+	if s == nil {
+		return
+	}
+	s.dropBeforeEncode.Add(1)
+}
+
 // run 每秒计算最近一秒的接收/发布 FPS；report 为真时同时向 out 写统计行。
 func (s *pipelineStats) run(ctx context.Context, report bool, out io.Writer) {
 	if s == nil || ctx == nil {
@@ -283,7 +292,7 @@ func (s *pipelineStats) snapshot() PipelineStats {
 		EncodeMsP50:      s.encodeDurations.percentile(50),
 		EncodeMsP95:      s.encodeDurations.percentile(95),
 		Subscribers:      subscribers,
-		DropBeforeEncode: 0,
+		DropBeforeEncode: s.dropBeforeEncode.Load(),
 		DropForClient:    dropForClient,
 		LastSeqAtUnixMs:  s.lastSeqAtUnixMs.Load(),
 	}
