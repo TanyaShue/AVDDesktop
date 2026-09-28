@@ -138,6 +138,47 @@ func TestServer_HeartbeatRepeatsLatestFrameWhenStatic(t *testing.T) {
 	}
 }
 
+// 静止画面完成提交后必须停止心跳，避免浏览器持续解码和重绘同一帧。
+func TestServer_HeartbeatStopsAfterStaticFrameCommit(t *testing.T) {
+	srv := newTestServer(t)
+	ss := srv.Session("static-stopped")
+
+	frame := []byte{0xFF, 0xD8, 0x31, 0x32, 0xFF, 0xD9}
+	ss.Publish(frame)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL("static-stopped"), nil)
+	if err != nil {
+		t.Fatalf("创建订阅请求失败: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("订阅画面失败: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	reader := &streamReader{t: t, br: bufio.NewReader(resp.Body)}
+	// 读到立即帧和全部有限心跳；最后一个 part 返回时服务端应已停止心跳。
+	for i := 0; i < frameHeartbeatBurst+1; i++ {
+		if got := reader.readFrame(); !bytes.Equal(got, frame) {
+			t.Fatalf("第 %d 个 part = %v，want %v", i+1, got, frame)
+		}
+	}
+
+	// 若心跳未停止，这里会在 500ms 左右读到下一个 part；设置超时避免测试挂死。
+	readDone := make(chan error, 1)
+	go func() {
+		_, err := reader.br.ReadByte()
+		readDone <- err
+	}()
+	select {
+	case err := <-readDone:
+		t.Fatalf("心跳结束后仍收到 part: %v", err)
+	case <-time.After(700 * time.Millisecond):
+	}
+}
+
 func TestServer_UnknownSessionIsNotFound(t *testing.T) {
 	srv := newTestServer(t)
 

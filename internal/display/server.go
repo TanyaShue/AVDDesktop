@@ -31,6 +31,10 @@ const boundary = "frame"
 // 当前帧，没有心跳时静止画面永远不显示（真机 + Chromium 实测 500ms 可正常显示）。
 const frameHeartbeat = 500 * time.Millisecond
 
+// frameHeartbeatBurst 是每次写出新帧后补发的心跳次数。心跳只为提醒 Chromium 提交
+// 当前 part；提交完成后静止画面无需永久重发。
+const frameHeartbeatBurst = 3
+
 // frameSeparator 是每部分与分隔符之间的固定收尾。
 var frameSeparator = []byte("\r\n")
 
@@ -231,18 +235,45 @@ func (ss *Session) serve(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	// 心跳：Chromium 只在收到「下一个 part」时才提交当前帧，因此新帧写出后需要补发
+	// 少量心跳，否则画面静止时设备窗口永远空白。心跳耗尽后进入空闲等待，只有新帧
+	// 到达才重新开始心跳。
+	heartbeatsLeft := 0
+	var heartbeat *time.Timer
+	var heartbeatC <-chan time.Time
+	defer func() {
+		if heartbeat != nil {
+			heartbeat.Stop()
+		}
+	}()
+
+	// restartHeartbeat 在每次成功写出新帧后重新开始有限心跳。
+	restartHeartbeat := func() {
+		heartbeatsLeft = frameHeartbeatBurst
+		if heartbeat == nil {
+			heartbeat = time.NewTimer(frameHeartbeat)
+		} else {
+			// 计时器可能已触发但尚未被 select 消费，先停止并排空，避免旧信号
+			// 让新帧后的第一次心跳提前到达。
+			if !heartbeat.Stop() {
+				select {
+				case <-heartbeat.C:
+				default:
+				}
+			}
+			heartbeat.Reset(frameHeartbeat)
+		}
+		heartbeatC = heartbeat.C
+	}
+
 	if frame := ss.frame(); len(frame) > 0 {
 		if !writeFrame(w, frame) {
 			return
 		}
 		flusher.Flush()
+		restartHeartbeat()
 	}
 
-	// 心跳：Chromium 只在收到「下一个 part」时才提交当前帧，因此即使没有新帧也必须
-	// 周期性重发最近一帧，否则画面静止时设备窗口永远空白（实测 500ms 可正常显示）。
-	// 有新帧时立刻写，帧率不受影响（只是同一帧可能被重复写出）。
-	heartbeat := time.NewTicker(frameHeartbeat)
-	defer heartbeat.Stop()
 	for {
 		select {
 		case <-ss.done:
@@ -250,16 +281,35 @@ func (ss *Session) serve(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-wake:
-		case <-heartbeat.C:
+			// 新帧必须立即写出，并重置心跳提交计数。
+			frame := ss.frame()
+			if len(frame) == 0 {
+				continue
+			}
+			if !writeFrame(w, frame) {
+				return
+			}
+			flusher.Flush()
+			restartHeartbeat()
+		case <-heartbeatC:
+			heartbeatC = nil
+			if heartbeatsLeft <= 0 {
+				continue
+			}
+			frame := ss.frame()
+			if len(frame) == 0 {
+				continue
+			}
+			if !writeFrame(w, frame) {
+				return
+			}
+			flusher.Flush()
+			heartbeatsLeft--
+			if heartbeatsLeft > 0 {
+				heartbeat.Reset(frameHeartbeat)
+				heartbeatC = heartbeat.C
+			}
 		}
-		frame := ss.frame()
-		if len(frame) == 0 {
-			continue
-		}
-		if !writeFrame(w, frame) {
-			return
-		}
-		flusher.Flush()
 	}
 }
 
