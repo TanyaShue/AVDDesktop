@@ -19,6 +19,21 @@ import (
 	"AVDDesktop/internal/proc"
 )
 
+// helperWebViewEnv 给设备窗口辅助进程补 WebView2 合成参数。
+//
+// Wails 默认不会禁用 GPU；这里只做保守的显式开启，并保留用户通过
+// AVDDESKTOP_WEBVIEW_ARGS 或进程级 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 覆盖的能力。
+func helperWebViewEnv(base []string) []string {
+	if value := strings.TrimSpace(os.Getenv("AVDDESKTOP_WEBVIEW_ARGS")); value != "" {
+		return platform.WithEnv(base, "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", value)
+	}
+	if value := strings.TrimSpace(os.Getenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")); value != "" {
+		return base
+	}
+	return platform.WithEnv(base, "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+		"--enable-gpu-rasterization --enable-zero-copy")
+}
+
 // nativeExecutablePath 返回用于启动设备窗口的可执行文件。
 // 开发/端到端测试可通过 AVDDESKTOP_NATIVE_BINARY 覆盖；正常运行时使用当前主程序。
 var nativeExecutablePath = func() (string, error) {
@@ -113,7 +128,7 @@ func (s *DisplayService) OpenWindow(instanceID string) (*DisplaySession, error) 
 	}
 	cmd := exec.Command(exe, displayhost.HelperArgs(cfg)...)
 	cmd.Dir = platform.Root()
-	cmd.Env = comp.Env
+	cmd.Env = helperWebViewEnv(comp.Env)
 	proc.Prepare(cmd)
 
 	stdin, err := cmd.StdinPipe()

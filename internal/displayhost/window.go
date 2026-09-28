@@ -187,6 +187,9 @@ func (d *DeviceWindow) Run(assets fs.FS) error {
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,
 			DisableWindowIcon:    false,
+			// 显式声明不禁用 GPU；具体合成参数由 helper 的
+			// WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 环境变量补充。
+			WebviewGpuIsDisabled: false,
 		},
 	})
 }
