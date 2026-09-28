@@ -15,11 +15,12 @@
    │ ready marker（含会话信息 JSON）← stdout
    ▼
 [辅助进程 = 设备窗口（独立 Wails 应用，Frameless）]
-   ├─ gRPC: streamScreenshot(RGBA8888, width=540, MMAP)   模拟器侧缩放
+   ├─ gRPC: streamScreenshot(RGBA8888, MMAP)   模拟器侧缩放
    ├─ sharedmem.Region → 复制稳定帧（规避 MMAP 撕裂）
-   ├─ JPEG 编码 → internal/display 的 MJPEG 会话（127.0.0.1:随机端口）
+   ├─ framestream.Hub → WebSocket 二进制帧（127.0.0.1:随机端口，token 认证）
+   ├─ MJPEG 会话（fallback，仅 WebGL2 不可用时使用）
    └─ WebView 窗口（device.html）
-        ├─ 画面：<img src="…/display/{id}">（multipart/x-mixed-replace）
+        ├─ 画面：FrameCanvas（WebGL2 纹理 + rAF），MJPEG <img> 回落
         ├─ 输入：指针 → 绑定 DeviceWindow.SendTouch → gRPC sendTouch
         └─ 工具栏/快捷键 → 绑定 DeviceWindow.SendKey → adb keyevent
 ```
@@ -43,11 +44,13 @@ Wails 按「原始请求路径」判断是否注入运行时脚本（`/` 命中�
 
 ### 画面传输
 
-- 请求尺寸显式给出宽与高（默认 540），模拟器按 `ImageFormat.width/height` 缩放，返回尺寸不会超过请求值，
-  因此共享内存可按请求上界一次性分配，设备旋转返回更小的帧也不会越界。
-- 帧先复制出共享内存再编码（MMAP 是单缓冲、可能撕裂），然后发布到「最新帧覆盖」的 MJPEG 会话：
-  慢客户端只丢帧，不会反压 gRPC 流。
-- JPEG 编码在辅助进程内完成，主进程完全不接触像素；WebView 只负责显示。
+- 请求尺寸显式给出宽与高，模拟器按 `ImageFormat.width/height` 缩放，返回尺寸不会超过请求值；
+  默认自适应模式按窗口逻辑宽度 × 主显示器缩放选择流宽，夹在 [360, 480]；设置页可选
+  360（流畅）/ 540（清晰）/ 720（超清）。
+- 帧先复制出共享内存（MMAP 是单缓冲、可能撕裂），再交给 `internal/framestream` 的 Hub。
+  Hub 用引用计数 + 每订阅者 1 槽 mailbox 发布原始 RGBA 帧：慢客户端只丢帧，不反压 gRPC 流。
+- WebView 通过 WebSocket 收到 32 字节帧头 + RGBA 负载，`FrameCanvas` 只在 rAF 中把最新一帧上传到
+  WebGL2 纹理；没有新帧不重绘。MJPEG 只在 WebGL2 不可用时启用，此时才做 JPEG 编码。
 
 ### 输入与工具栏
 
@@ -114,19 +117,23 @@ go test -tags e2e -count=1 -timeout 20m -run '^TestE2E_DeviceWindow$' -v ./inter
 | 截图 | 点击工具栏截图后生成 `<Root>/screenshots/MyDevice-20260924-144127-000.png`（720×1280，与设备画面一致） |
 | 资源回收 | `Close` 后无辅助进程残留，`%TEMP%` 下无 `device-window-*` 映射文件残留 |
 
+> Phase 2 起主路径已替换为 WebSocket 原始帧 + WebGL2；上表的 MJPEG 验收记录保留为回落路径历史。
+> 帧率优化过程、画质档位与最终对比数据见 [FRAME_RATE_BASELINE.md](FRAME_RATE_BASELINE.md) 与
+> [FRAME_RATE_OPTIMIZATION_PLAN.md](FRAME_RATE_OPTIMIZATION_PLAN.md)。
+
 ## 已知限制与后续方向
 
-- 画面链路是 CPU 路径：MMAP 复制 + `image/jpeg` 编码 + WebView 解码。若需要更高帧率/更低延迟，可在
-  不改动结构的前提下把帧出口从 MJPEG 换成 WebSocket（二进制 JPEG 或 RGB888 + canvas），
-  接口边界已经收敛在 `internal/display` 的会话发布点上。
-- 分辨率固定 540 宽；窗口尺寸变化时不会自适应画质。
-- 未实现设备旋转（服务端返回更小帧时当前实现仍然安全，但窗口方向不会跟随）。
+- 主路径是原始 RGBA over WebSocket：540 宽以上、高刷新率或高 DPI 大窗口仍可能受浏览器主线程/
+  合成器限制；已提供 360/480/540/720 档位，自适应默认上限 480（`docs/FRAME_RATE_BASELINE.md`）。
+- 窗口 resize / 跨 DPI 移动不会动态重建流（重新打开窗口生效）；设备旋转自适应尚未实现。
 - macOS / Linux 走同一套代码路径（Wails 三平台都有 WebView），但尚未做真机验收。
-- gRPC 仍未启用 token 认证；MJPEG/帧服务只监听 127.0.0.1 随机端口。
+- gRPC 仍未启用 token 认证；原始帧 WebSocket 与 MJPEG 都只监听 127.0.0.1，WS 额外校验一次性 token。
 
 ## 与历史方案的关系
 
 `docs/MMAP_NATIVE_PRESENTER_PLAN.md` 的阶段 2/3（原生 Presenter + 独立原生工具栏）已被本方案取代；
 `internal/presenter` 已删除，`docs/MMAP_NATIVE_PRESENTER_ACCEPTANCE.md` 仅作为历史记录保留。
 MMAP 传输、共享内存封装、gRPC 客户端与辅助进程生命周期等阶段 1 成果全部沿用。
+
+
 

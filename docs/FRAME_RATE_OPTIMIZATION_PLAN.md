@@ -1,6 +1,6 @@
 # 自定义 UI 画面帧率优化方案
 
-> 状态：设计稿（未实施，待评审）
+> 状态：已实施（Phase 0–2、Phase 4；Phase 3 经实测不需要，见 FRAME_RATE_BASELINE.md）
 > 基线：`master` @ `e9c51e5`，Windows 11 + WebView2，自定义 UI 独立设备窗口路径
 > 关联：[ARCHITECTURE.md](ARCHITECTURE.md)、[DEVICE_WINDOW_WEBVIEW.md](DEVICE_WINDOW_WEBVIEW.md)
 
@@ -603,4 +603,5 @@ go test -tags e2e -count=1 -timeout 20m -run '^TestE2E_DeviceWindow$' -v ./inter
 5. **音频/多屏**是否确认不在本期范围？
 
 在上述决策确认前，建议只执行 Phase 0（纯观测、低风险）；Phase 0 完成后用数据决定 Phase 1/2/3 的投入比例。
+
 

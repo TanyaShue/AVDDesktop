@@ -19,17 +19,19 @@ internal/avd        AVD 配置读写（.ini/config.ini）、创建（avdmanager�
 internal/adb        `adb devices -l` 解析与轮询、`adb shell` 调用
 internal/emulatorgrpc 模拟器 gRPC 控制通道（截图 / MMAP 画面流 / 触摸注入）
 internal/sharedmem   file-backed 共享内存（emulator MMAP 帧缓冲）
-internal/displayhost 独立设备窗口辅助进程（MMAP → JPEG → WebView 窗口与方法绑定）
-internal/display     本机 MJPEG 画面服务（辅助进程与主窗口浮层共用）
+internal/framestream 原始帧 Hub 与 WebSocket 传输（引用计数、最新帧覆盖、慢客户端丢帧）
+internal/displayhost 独立设备窗口辅助进程（MMAP → 原始帧/JPEG → WebView 窗口与方法绑定）
+internal/display     本机画面服务（原始帧 WebSocket 主路径 + MJPEG 回落，辅助进程与主窗口浮层共用）
 internal/job        统一长任务管理器（进度 + 日志 → 事件流）
 internal/service    Wails 绑定层：参数校验 → 领域逻辑 → 注册 Job → 返回 jobID
 internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/AVD）
 ```
 
 数据流：`React UI → wailsjs 绑定方法 → service → jdk/sdk/avd/adb → 官方 CLI`。
-自定义 UI 走独立设备窗口：`emulator renderer → streamScreenshot(MMAP) → internal/sharedmem → internal/displayhost（JPEG 编码 + 本机 MJPEG 服务）→ WebView 设备窗口`；
-主进程只负责启动/回收该辅助进程，不接触像素。同一条 MJPEG 链路也被应用内浮层复用：
-`React UI（<img>）→ 本机 MJPEG（internal/display）← gRPC 画面流（internal/emulatorgrpc）← emulator`。
+自定义 UI 走独立设备窗口：`emulator renderer → streamScreenshot(MMAP) → internal/sharedmem → internal/displayhost → internal/framestream（原始帧 WebSocket）→ WebView（WebGL2 + rAF）`；
+主进程只负责启动/回收该辅助进程，不接触像素。WebGL2 不可用时回落 MJPEG：
+`WebView（<img>）→ 本机 MJPEG（internal/display）← JPEG（internal/displayhost）← MMAP`；
+主窗口浮层继续复用这条 MJPEG 链路。
 耗时操作不在绑定方法里同步执行：`service` 只做校验并登记 Job，绑定方法立即返回 `jobID`；
 进度与日志通过 `job:created/progress/log/done/failed` 事件流推送到前端，统一显示在底部任务与日志区域。
 
@@ -111,16 +113,21 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
   但**自己跑一个 Wails 窗口**（`internal/displayhost/window.go`），用 AssetServer 中间件把 `/` 重写到
   `device.html` 入口，于是同一份 embed 资源能同时承载主窗口与设备窗口。
 - `getScreenshot(PNG)` 读 IHDR 探测原生分辨率，随后请求
-  `streamScreenshot(RGBA8888, ImageTransport.MMAP, width=540)`：宽高都显式请求，由模拟器侧缩放，
-  返回尺寸不会超过请求值，共享内存按上界一次性分配，设备旋转也不会越界。
-- `internal/displayhost` 把共享内存里的帧复制成稳定帧（规避 MMAP 撕裂）后编码 JPEG，发布到
-  `internal/display` 的本机 MJPEG 会话；WebView 里的 `<img>` 直接消费，慢客户端自动丢帧。
+  `streamScreenshot(RGBA8888, ImageTransport.MMAP)`：宽高都显式请求，由模拟器侧缩放；
+  默认自适应模式按窗口逻辑宽度 × 主显示器缩放选择流宽（性能上限 480），设置页另有 360/540/720 档位。
+- `internal/displayhost` 把共享内存里的帧复制成稳定帧（规避 MMAP 撕裂），通过
+  `internal/framestream` 的 Hub 发布到本机 WebSocket；WebView 用 WebGL2 纹理 + rAF
+  只呈现最新帧，慢客户端在 Hub 侧丢帧，不反压 gRPC 流。
+- MJPEG（`internal/display` + `<img>`）保留为 WebGL2 不可用时的回落路径；主路径不再做 JPEG 编解码。
+- WebView2 辅助进程显式开启 GPU compositing；CustomUI 启动默认 `-gpu host`（可用
+  `AVDDESKTOP_EMULATOR_GPU` 覆盖），避免模拟器落到 SwiftShader。
 - 输入：设备窗口的指针事件映射为归一化坐标 → 绑定方法 → gRPC `sendTouch`（16ms 节流）；
   工具栏与键盘快捷键走 `adb shell input keyevent`（返回 4 / 主页 3 / 多任务 187 / 音量 24·25 / 方向键等）。
 - 截图走 `adb shell screencap` + `adb pull` 落到 `<Root>/screenshots`（不经二进制管道，避免被按行处理破坏）。
 - 生命周期：窗口关闭 = 辅助进程退出；主进程 `Close` 先关 stdin 请求优雅退出（保证删除共享内存映射文件），
   超时才强杀；父进程退出/崩溃时管道断开同样触发收尾。
-- 已知缺口：gRPC 默认无认证；JPEG 编解码为 CPU 路径（未使用 WebCodecs/GPU 零拷贝）；单屏。
+- 已知缺口：gRPC 默认无认证；WebSocket 只监听 127.0.0.1 并用一次性 token 认证；
+  窗口 resize / 跨 DPI 移动后不会动态重建流（重新打开窗口生效）；单屏。
 - 非目标：音频、多显示器、折叠屏、剪贴板与原生快照。
 
 ## 跨平台注意
@@ -144,4 +151,6 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
 - 单元测试全部 hermetic：临时目录自造样本，不依赖本机 SDK/JDK。
 - `internal/e2e`（`-tags e2e`）才使用真实网络与 `AVDDESKTOP_E2E_HOME` 指定的真实目录，
   覆盖 JDK/SDK 环境准备、创建 AVD、启动 emulator 三条链路。JDK/SDK 镜像检测均有 hermetic 单测。
+
+
 
