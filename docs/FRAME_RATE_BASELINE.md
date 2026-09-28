@@ -58,3 +58,34 @@ Phase 1 将以本文件为基线，逐项记录优化后的对比数据。
 - 测量时主机上还有 MuMu 模拟器在运行，占用 adb 5555/16384；本 AVD 因此改用
   console 5560 / adb 5561 / gRPC 8654，避免端口冲突。
 - `build/bin/logs/bench-emu-*.log` 保留了本次模拟器原始日志（未纳入 git）。
+
+## 5. Phase 1 结果（2026-09-28）
+
+### 5.1 启动侧
+
+- `BuildArgs` 在 CustomUI 下默认追加 `-gpu host`；可用 `AVDDESKTOP_EMULATOR_GPU` 覆盖
+  （`host` / `auto` / `swiftshader_indirect` / `angle_indirect` / `guest` / `off`）。
+- 新建 AVD 默认写入 `hw.gpu.enabled=yes`、`hw.gpu.mode=host`；已有 AVD 不改配置，由启动参数覆盖。
+- WebView2 辅助进程显式开启 GPU compositing（`--enable-gpu-rasterization --enable-zero-copy`，
+  可用 `AVDDESKTOP_WEBVIEW_ARGS` 覆盖）。
+- `TestE2E_DeviceWindow` 在真实 MyDevice 上通过（26.4s）：CustomUI 启动 → 窗口打开 → 8s 稳定
+  → Close 后辅助进程回收。
+
+### 5.2 端到端发布帧率（独立设备窗口 helper，`--stats`）
+
+环境：MyDevice 1440×3120，`-gpu host`，stream 540×1170，Settings 列表连续滚动 15s。
+
+| 指标 | 结果 |
+|---|---:|
+| recvFps | 59–61 |
+| publishFps | 60 |
+| subscribers | 1 |
+| seqGapFrames | 0 |
+| dropForClient | 0 |
+| copyMs p50 / p95 | 0.51 / 1.18–1.38 |
+| encodeMs p50 / p95 | 11.6–12.9 / 14.2–14.7 |
+| dropBeforeEncode | 46（WebView 订阅建立前的预热丢帧，符合预期） |
+
+结论：Phase 1 退出条件满足——采集侧 60fps、发布侧 60fps、无客户端丢帧、无 seq gap。
+剩余风险是 JPEG 编码 p50 已到 ~12ms、p95 ~14.7ms，距离 16.7ms 预算很近，因此 Phase 2
+的原始帧 + WebGL2 路径仍然必要（它会把编码/解码从主链路中移除）。
