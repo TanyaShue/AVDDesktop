@@ -12,7 +12,7 @@ import (
 func TestLoadRepairsInvalidValuesAndKeepsUpdateWorking(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	raw := `{"version":1,"theme":"blue","logLevel":"verbose","keepLogDays":-3,` +
-		`"jdkMirrorSourceId":"","mirrorSourceId":"nju"}`
+		`"displayQuality":"ultra-hd","jdkMirrorSourceId":"","mirrorSourceId":"nju"}`
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -35,6 +35,9 @@ func TestLoadRepairsInvalidValuesAndKeepsUpdateWorking(t *testing.T) {
 	}
 	if got.JDKMirrorSourceID != def.JDKMirrorSourceID {
 		t.Errorf("jdkMirrorSourceId = %q，空值应回退为默认 %q", got.JDKMirrorSourceID, def.JDKMirrorSourceID)
+	}
+	if got.DisplayQuality != def.DisplayQuality {
+		t.Errorf("displayQuality = %q，非法值应回退为默认 %q", got.DisplayQuality, def.DisplayQuality)
 	}
 	// 合法字段必须原样保留（不能因为修非法值把用户设置一起丢掉）。
 	if got.MirrorSourceID != "nju" {
@@ -59,6 +62,9 @@ func TestUpdateRejectsInvalidPatch(t *testing.T) {
 	}
 	if _, err := m.Update(map[string]any{"keepLogDays": 999}); err == nil {
 		t.Fatal("Update 应拒绝越界的日志保留天数")
+	}
+	if _, err := m.Update(map[string]any{"displayQuality": "ultra-hd"}); err == nil {
+		t.Fatal("Update 应拒绝非法画质档位")
 	}
 	if after := m.Get(); after != before {
 		t.Errorf("失败的 Update 不得改动内存设置：%+v → %+v", before, after)

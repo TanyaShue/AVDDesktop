@@ -63,6 +63,16 @@ export interface DeviceStats {
   dropBeforeEncode: number;
   dropForClient: number;
   lastSeqAtUnixMs: number;
+  /** Phase 2 原始帧 Hub 统计。 */
+  rawSubscribers?: number;
+  rawPublishFps?: number;
+  rawDropForClient?: number;
+  /** 前端 FrameCanvas 1Hz 上报的呈现统计。 */
+  clientPresentFps?: number;
+  clientFrameIntervalP95?: number;
+  clientUploadMsP95?: number;
+  clientDropped?: number;
+  clientReportCount?: number;
 }
 
 /** 读取会话信息（画面地址与设备分辨率）。 */
@@ -101,5 +111,6 @@ export const SetAlwaysOnTop = (on: boolean) => call<boolean>("SetAlwaysOnTop", o
 
 /** 关闭设备窗口（只关画面，不停模拟器）。 */
 export const Close = () => call<void>("Close");
+
 
 

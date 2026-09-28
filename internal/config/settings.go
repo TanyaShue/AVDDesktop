@@ -25,6 +25,7 @@ func Defaults() domain.AppSettings {
 		ShowTaskDrawer:      true,
 		LogLevel:            "info",
 		KeepLogDays:         7,
+		DisplayQuality:      "balanced",
 		MirrorSourceID:      "google-cn",
 		JDKMirrorSourceID:   "nju",
 	}
@@ -161,6 +162,9 @@ func fillDefaults(s domain.AppSettings) domain.AppSettings {
 	if s.KeepLogDays <= 0 {
 		s.KeepLogDays = def.KeepLogDays
 	}
+	if strings.TrimSpace(s.DisplayQuality) == "" {
+		s.DisplayQuality = def.DisplayQuality
+	}
 	if strings.TrimSpace(s.JDKMirrorSourceID) == "" {
 		s.JDKMirrorSourceID = def.JDKMirrorSourceID
 	}
@@ -188,6 +192,11 @@ func normalize(s domain.AppSettings) domain.AppSettings {
 	if s.KeepLogDays < 1 || s.KeepLogDays > 90 {
 		s.KeepLogDays = def.KeepLogDays
 	}
+	switch strings.ToLower(strings.TrimSpace(s.DisplayQuality)) {
+	case "smooth", "balanced", "sharp", "ultra":
+	default:
+		s.DisplayQuality = def.DisplayQuality
+	}
 	return s
 }
 
@@ -204,6 +213,11 @@ func validate(s domain.AppSettings) error {
 	}
 	if s.KeepLogDays < 1 || s.KeepLogDays > 90 {
 		return domain.Err(domain.CodeInvalidArgument, "日志保留天数必须在 1-90 之间")
+	}
+	switch strings.ToLower(strings.TrimSpace(s.DisplayQuality)) {
+	case "smooth", "balanced", "sharp", "ultra":
+	default:
+		return domain.Err(domain.CodeInvalidArgument, "设备画质必须是 smooth/balanced/sharp/ultra")
 	}
 	return nil
 }

@@ -34,6 +34,23 @@ func helperWebViewEnv(base []string) []string {
 		"--enable-gpu-rasterization --enable-zero-copy")
 }
 
+// displayStreamWidth 把画质档位映射为辅助进程的流宽度上限。
+//
+// balanced 返回 0，表示由辅助进程按窗口逻辑宽度与显示器缩放自适应（性能上限 480）；
+// 其余档位显式给出宽度，便于用户按清晰度/流畅度取舍。
+func displayStreamWidth(quality string) int {
+	switch strings.ToLower(strings.TrimSpace(quality)) {
+	case "smooth":
+		return 360
+	case "sharp":
+		return 540
+	case "ultra":
+		return 720
+	default:
+		return 0
+	}
+}
+
 // nativeExecutablePath 返回用于启动设备窗口的可执行文件。
 // 开发/端到端测试可通过 AVDDESKTOP_NATIVE_BINARY 覆盖；正常运行时使用当前主程序。
 var nativeExecutablePath = func() (string, error) {
@@ -118,8 +135,8 @@ func (s *DisplayService) OpenWindow(instanceID string) (*DisplaySession, error) 
 		// 原生分辨率由辅助进程用 PNG 截图探测，主进程不重复连接 gRPC。
 		DeviceWidth:  0,
 		DeviceHeight: 0,
-		// 画面宽度由辅助进程按默认上限决定（模拟器侧缩放）。
-		StreamWidth: 0,
+		// 画质档位映射为流宽度；balanced 传 0，由辅助进程按显示器缩放自适应。
+		StreamWidth: displayStreamWidth(s.rt.Settings().Get().DisplayQuality),
 		// 父进程（本进程）关闭 stdin 即请求辅助进程收尾，避免残留窗口与映射文件。
 		WatchParent: true,
 		// Phase 0 先默认采集服务端链路统计；基准模式由后续诊断入口按需开启。

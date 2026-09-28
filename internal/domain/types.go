@@ -384,6 +384,10 @@ type AppSettings struct {
 	LogLevel    string `json:"logLevel"`
 	KeepLogDays int    `json:"keepLogDays"`
 
+	// DisplayQuality 是自定义 UI 设备窗口的画质档位：smooth|balanced|sharp|ultra。
+	// balanced 使用自适应宽度（性能上限 480），其余档位显式使用 360/540/720。
+	DisplayQuality string `json:"displayQuality"`
+
 	// MirrorSourceID 是 Android SDK 组件默认下载源；空值时使用内置默认源。
 	MirrorSourceID string `json:"mirrorSourceId"`
 	// JDKMirrorSourceID 是 JDK 默认下载源；空值时使用内置默认源。

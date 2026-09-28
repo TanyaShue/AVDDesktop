@@ -79,6 +79,7 @@ export namespace domain {
 	    showTaskDrawer: boolean;
 	    logLevel: string;
 	    keepLogDays: number;
+	    displayQuality: string;
 	    mirrorSourceId: string;
 	    jdkMirrorSourceId: string;
 	
@@ -94,6 +95,7 @@ export namespace domain {
 	        this.showTaskDrawer = source["showTaskDrawer"];
 	        this.logLevel = source["logLevel"];
 	        this.keepLogDays = source["keepLogDays"];
+	        this.displayQuality = source["displayQuality"];
 	        this.mirrorSourceId = source["mirrorSourceId"];
 	        this.jdkMirrorSourceId = source["jdkMirrorSourceId"];
 	    }

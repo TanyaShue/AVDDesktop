@@ -594,6 +594,22 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
               </div>
             </div>
             <div className="field">
+              <div className="field__label">设备画面</div>
+              <div className="field__control">
+                <select
+                  className="select"
+                  value={settings?.displayQuality ?? "balanced"}
+                  onChange={(e) => void patch({ displayQuality: e.target.value })}
+                >
+                  <option value="smooth">流畅优先（约 360p）</option>
+                  <option value="balanced">平衡（自适应，推荐）</option>
+                  <option value="sharp">清晰优先（540p）</option>
+                  <option value="ultra">超清（720p）</option>
+                </select>
+                <div className="field__hint">自定义 UI 独立设备窗口的画质；窗口打开时生效</div>
+              </div>
+            </div>
+            <div className="field">
               <div className="field__label">日志级别</div>
               <div className="field__control">
                 <select
@@ -701,3 +717,4 @@ function MirrorSummary({
     </div>
   );
 }
+

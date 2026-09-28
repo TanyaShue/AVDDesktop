@@ -81,6 +81,22 @@ export function DeviceStatsOverlay({ visible }: DeviceStatsOverlayProps) {
           <dd>{metric(stats?.publishFps)}</dd>
         </div>
         <div className="dw__stats-item">
+          <dt>原始帧 FPS</dt>
+          <dd>{metric(stats?.rawPublishFps)}</dd>
+        </div>
+        <div className="dw__stats-item">
+          <dt>呈现 FPS</dt>
+          <dd>{metric(stats?.clientPresentFps)}</dd>
+        </div>
+        <div className="dw__stats-item">
+          <dt>帧间隔 p95</dt>
+          <dd>{metric(stats?.clientFrameIntervalP95)} ms</dd>
+        </div>
+        <div className="dw__stats-item">
+          <dt>上传 p95</dt>
+          <dd>{metric(stats?.clientUploadMsP95)} ms</dd>
+        </div>
+        <div className="dw__stats-item">
           <dt>Seq 缺口</dt>
           <dd>{metric(stats?.seqGapFrames)}</dd>
         </div>
@@ -93,8 +109,8 @@ export function DeviceStatsOverlay({ visible }: DeviceStatsOverlayProps) {
           <dd>{metricPair(stats?.encodeMsP50, stats?.encodeMsP95)}</dd>
         </div>
         <div className="dw__stats-item">
-          <dt>订阅者</dt>
-          <dd>{metric(stats?.subscribers)}</dd>
+          <dt>订阅者 MJPEG/原始</dt>
+          <dd>{metric(stats?.subscribers)} / {metric(stats?.rawSubscribers)}</dd>
         </div>
         <div className="dw__stats-item">
           <dt>画面尺寸</dt>
@@ -105,10 +121,11 @@ export function DeviceStatsOverlay({ visible }: DeviceStatsOverlayProps) {
           <dd>{metric(stats?.dropBeforeEncode)}</dd>
         </div>
         <div className="dw__stats-item">
-          <dt>客户端丢弃</dt>
-          <dd>{metric(stats?.dropForClient)}</dd>
+          <dt>Hub 丢帧 / 画布丢帧</dt>
+          <dd>{metric(stats?.rawDropForClient)} / {metric(stats?.clientDropped)}</dd>
         </div>
       </dl>
     </section>
   );
 }
+
