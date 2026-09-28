@@ -89,3 +89,35 @@ Phase 1 将以本文件为基线，逐项记录优化后的对比数据。
 结论：Phase 1 退出条件满足——采集侧 60fps、发布侧 60fps、无客户端丢帧、无 seq gap。
 剩余风险是 JPEG 编码 p50 已到 ~12ms、p95 ~14.7ms，距离 16.7ms 预算很近，因此 Phase 2
 的原始帧 + WebGL2 路径仍然必要（它会把编码/解码从主链路中移除）。
+
+## 6. Phase 2 结果与 Phase 3 决策（2026-09-28）
+
+### 6.1 目标架构落地
+
+- 主链路改为 `MMAP RGBA → frameHub → WebSocket 二进制帧 → WebGL2 纹理 → rAF`；
+  MJPEG `<img>` 仅作为 WebGL2 不可用时的回落。
+- Phase 2 实测（MyDevice 1440×3120，`-gpu host`，Settings 连续滚动）：
+  - `subscribers(MJPEG)=0`、`publishFps(MJPEG)=0`、`encodeMsP50/P95=0`：主路径不再做 JPEG；
+  - `rawSubscribers=1`、`rawPublishFps=59–60`、`seqGapFrames=0`；
+  - 前端 `uploadMsP95=0.7–1.8ms`，说明 WebGL 上传不是瓶颈。
+
+不同流宽度下的前端真实呈现（同一场景）：
+
+| 流尺寸 | presentFps | 客户端 dropped | Hub rawDropForClient | 备注 |
+|---|---:|---:|---:|---|
+| 360×780（100% 缩放） | 60–61 | 1（启动瞬态） | 1 | 最流畅，接近零丢帧 |
+| 480×1040 | 57–59 | 3–5 | 21–24 / 11s | 平衡点 |
+| 540×1170 | 54–58 | 0–5 | 44–63 / 11s | 清晰但带宽压力最大 |
+
+`frameIntervalP95` 三档都在 27–29ms：这与当前验证环境（MuMu 同时在运行、设备窗口可能被遮挡、
+系统合成器抖动）有关；本阶段以平均 `presentFps` 和丢帧数为主指标。
+
+因此：自适应模式新增 **480 宽性能上限**（`adaptivePerformanceCap`），
+Phase 4 将把 360（流畅）/ 480（平衡）/ 540（清晰）/ 720（超清）做成可设置档位。
+
+### 6.2 Phase 3 决策：不启动
+
+Phase 0 已实测：`-gpu host` 下模拟器采集侧稳定 60fps、0 seq gap；SwiftShader 才会掉到 22fps。
+因此本路线中 Phase 3 的两个备选（原生窗口嵌入、scrcpy 式 guest H.264）**不启动**，
+代码与文档均不引入相关依赖。若未来某类设备在 host GPU 下仍无法达到 55fps，
+再以新的 spike 重新评估。
