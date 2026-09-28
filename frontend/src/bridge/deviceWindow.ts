@@ -35,8 +35,33 @@ export interface DeviceSession {
   mode: string;
 }
 
+/** 独立设备窗口的实时性能统计（对应 Go 侧 displayhost.DeviceStats）。 */
+export interface DeviceStats {
+  uptimeMs: number;
+  mode: string;
+  streamWidth: number;
+  streamHeight: number;
+  recvFps: number;
+  publishFps: number;
+  recvTotal: number;
+  publishTotal: number;
+  seq: number;
+  seqGapFrames: number;
+  copyMsP50: number;
+  copyMsP95: number;
+  encodeMsP50: number;
+  encodeMsP95: number;
+  subscribers: number;
+  dropBeforeEncode: number;
+  dropForClient: number;
+  lastSeqAtUnixMs: number;
+}
+
 /** 读取会话信息（画面地址与设备分辨率）。 */
 export const Session = () => call<DeviceSession>("Session");
+
+/** 读取画面链路的实时性能统计。 */
+export const Stats = () => call<DeviceStats>("Stats");
 
 /** 注入触摸：x/y 为画面区域内的归一化坐标（[0,1]）。 */
 export const SendTouch = (x: number, y: number, release: boolean) =>

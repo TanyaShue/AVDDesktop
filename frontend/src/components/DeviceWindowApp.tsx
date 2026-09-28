@@ -9,6 +9,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import * as win from "../bridge/deviceWindow";
 import type { DeviceSession } from "../bridge/deviceWindow";
 import { Icon } from "./deviceWindowIcons";
+import { DeviceStatsOverlay } from "./DeviceStatsOverlay";
 
 /** 拖动时两次触摸上报的最小间隔：约 60Hz，避免把 gRPC 通道打满。 */
 const TOUCH_INTERVAL_MS = 16;
@@ -51,6 +52,7 @@ export function DeviceWindowApp() {
   const [reloadKey, setReloadKey] = useState(0);
   const [pinned, setPinned] = useState(false);
   const [maximised, setMaximised] = useState(false);
+  const [statsVisible, setStatsVisible] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const screenRef = useRef<HTMLImageElement | null>(null);
   const lastTouchAt = useRef(0);
@@ -151,6 +153,17 @@ export function DeviceWindowApp() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  // F8 切换性能诊断浮层；浮层隐藏时其轮询定时器会随 effect 一并清理。
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "F8") return;
+      e.preventDefault();
+      setStatsVisible((value) => !value);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   const togglePin = useCallback(() => {
     const next = !pinned;
     setPinned(next);
@@ -195,6 +208,15 @@ export function DeviceWindowApp() {
         </span>
 
         <div className="dw__winbtns">
+          <button
+            type="button"
+            className={`dw__winbtn dw__winbtn--stats${statsVisible ? " is-active" : ""}`}
+            title={statsVisible ? "隐藏性能诊断（F8）" : "显示性能诊断（F8）"}
+            aria-pressed={statsVisible}
+            onClick={() => setStatsVisible((value) => !value)}
+          >
+            FPS
+          </button>
           <button
             type="button"
             className={`dw__winbtn${pinned ? " is-active" : ""}`}
@@ -326,6 +348,8 @@ export function DeviceWindowApp() {
           <Icon name="screenshot" />
         </button>
       </footer>
+
+      <DeviceStatsOverlay visible={statsVisible} />
 
       {toast ? (
         <div className={`dw__toast dw__toast--${toast.level}`} role="status">
