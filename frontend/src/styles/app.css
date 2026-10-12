@@ -345,6 +345,15 @@ svg {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  /* 切换页面时轻微上浮淡入：ErrorBoundary 以 page 为 key，切页会重挂载并重放动画 */
+  animation: page-in var(--dur) var(--ease-out);
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
 }
 
 .pageheader {
@@ -1587,6 +1596,55 @@ body.modal-open .pagecontent {
   gap: var(--sp-3);
   padding: 72px var(--sp-6);
   text-align: center;
+}
+
+/* 卡片内部的空状态：不占满一屏，图标也小一号 */
+.empty--inline {
+  gap: 6px;
+  padding: var(--sp-6) var(--sp-4);
+}
+
+.empty--inline .empty__icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 2px;
+}
+
+/* ---- 骨架屏 ---- */
+
+.skeleton {
+  border-radius: var(--r-sm);
+  background: linear-gradient(
+    90deg,
+    var(--bg-hover) 25%,
+    var(--bg-pressed) 37%,
+    var(--bg-hover) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeleton 1.4s ease infinite;
+}
+
+.skeleton--line {
+  height: 13px;
+}
+
+.skeleton--title {
+  height: 20px;
+}
+
+.skeleton-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@keyframes skeleton {
+  from {
+    background-position: 100% 50%;
+  }
+  to {
+    background-position: 0 50%;
+  }
 }
 
 .empty__icon {

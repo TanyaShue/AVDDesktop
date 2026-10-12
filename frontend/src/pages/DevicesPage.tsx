@@ -6,6 +6,7 @@ import { EVENTS, errorText } from "../bridge/api";
 import type { AvdState, AvdSummary, EmulatorInstance } from "../bridge/types";
 import type { EnvCheck } from "../hooks/useEnvCheck";
 import { useWailsEvent } from "../hooks/useApp";
+import { formatRam, imageTagLabel } from "../lib/imageLabels";
 import { DeviceWindow } from "../components/DeviceWindow";
 import { Icon } from "../components/icons";
 import type { IconName } from "../components/icons";
@@ -320,7 +321,6 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
               const inst = active.get(device.name);
               // Wails 把 Go 的 AvdState 生成为 string，这里收敛回联合类型后再交给状态展示函数
               const state = inst?.state as AvdState | undefined;
-              const hw = hardwareLabel(device);
               // 缩略图角标只在设备处于活动状态时出现（已停止的设备不需要角标）。
               const showBadge =
                 state === "running" || state === "booting" || state === "starting";
@@ -342,11 +342,18 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                     <div className="device__name truncate" title={device.name}>
                       {device.name}
                     </div>
+                    {/* 规格标签（对齐参考截图）：版本 / 镜像类型 / 架构 / 核心 / 内存，
+                        分辨率属于"当前生效参数"，放到下面的 meta 行而不是挤进标签 */}
                     <div className="device__chips">
                       <span className="chip">Android {device.api || "?"}</span>
-                      {device.tag ? <span className="chip">{device.tag}</span> : null}
+                      {device.tag ? (
+                        <span className="chip" title={device.tag}>
+                          {imageTagLabel(device.tag)}
+                        </span>
+                      ) : null}
                       {device.abi ? <span className="chip">{device.abi}</span> : null}
-                      {hw ? <span className="chip" title="当前生效的硬件参数">{hw}</span> : null}
+                      {device.cpuCores ? <span className="chip">{device.cpuCores} 核</span> : null}
+                      {device.ramMb ? <span className="chip">{formatRam(device.ramMb)}</span> : null}
                       {inst?.customUI ? <span className="chip chip--info">自定义 UI</span> : null}
                       {device.broken ? <span className="chip chip--danger">配置异常</span> : null}
                     </div>
@@ -355,6 +362,14 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                         <span className="dot" style={{ background: stateColor(state) }} />
                         {stateLabel(state)}
                       </span>
+                      {device.lcdWidth && device.lcdHeight ? (
+                        <>
+                          <span className="device__meta-sep" />
+                          <span title="当前生效的分辨率">
+                            {device.lcdWidth} × {device.lcdHeight}
+                          </span>
+                        </>
+                      ) : null}
                       {inst ? (
                         <>
                           <span className="device__meta-sep" />
@@ -592,21 +607,6 @@ function MenuItem({
       {active ? <Icon name="check" size={14} className="menu__item__check" /> : null}
     </button>
   );
-}
-
-/** 设备硬件摘要（核心数 / 内存 / 分辨率）；config.ini 未提供时返回空串。 */
-function hardwareLabel(device: AvdSummary): string {
-  const parts: string[] = [];
-  if (device.cpuCores) parts.push(`${device.cpuCores} 核`);
-  if (device.ramMb) parts.push(formatRam(device.ramMb));
-  if (device.lcdWidth && device.lcdHeight) parts.push(`${device.lcdWidth}×${device.lcdHeight}`);
-  return parts.join(" · ");
-}
-
-/** 内存按 MB 存储，卡片上优先用 GB 显示（1024 MB = 1 GB，半 GB 保留一位小数）。 */
-function formatRam(mb: number): string {
-  if (mb >= 1024 && mb % 512 === 0) return `${(mb / 1024).toFixed(1).replace(/\.0$/, "")} GB`;
-  return `${mb} MB`;
 }
 
 /** 实例进程是否仍活着：stopped 表示已退出；error 状态只有在进程退出（有退出码）后才算结束。 */

@@ -5,6 +5,11 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { JobInfo, SystemImage } from "../bridge/types";
+import {
+  androidVersionLabel,
+  imageRootSupported,
+  imageTagLabel,
+} from "../lib/imageLabels";
 import { Icon } from "./icons";
 import { humanSize, jobStatusText, Modal, Progress } from "./ui";
 
@@ -382,36 +387,4 @@ function uniqueOptions(values: string[], labeler?: (value: string) => string): [
     if (value) map.set(value, labeler ? labeler(value) : value);
   });
   return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1], "zh-CN"));
-}
-
-export function androidVersionLabel(image: SystemImage): string {
-  return image.androidVersion?.trim() || `Android API ${image.api || "?"}`;
-}
-
-export function imageTagLabel(tag: string): string {
-  switch (tag.toLowerCase()) {
-    case "default":
-      return "默认";
-    case "google_apis":
-      return "Google APIs";
-    case "google_apis_playstore":
-      return "Google Play";
-    case "aosp_atd":
-      return "AOSP ATD";
-    case "google_atd":
-      return "Google APIs ATD";
-    case "android-desktop":
-      return "Android Desktop";
-    case "google_apis_ps16k":
-      return "Google APIs (16 KB)";
-    case "google_apis_playstore_ps16k":
-      return "Google Play (16 KB)";
-    default:
-      return tag || "未知";
-  }
-}
-
-export function imageRootSupported(image: SystemImage): boolean {
-  if (typeof image.rootSupported === "boolean") return image.rootSupported;
-  return !image.tag.toLowerCase().includes("playstore");
 }

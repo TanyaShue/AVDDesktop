@@ -11,8 +11,8 @@ import {
   androidVersionLabel,
   imageRootSupported,
   imageTagLabel,
-  SystemImageModal,
-} from "../components/SystemImageModal";
+} from "../lib/imageLabels";
+import { SystemImageModal } from "../components/SystemImageModal";
 import { Icon } from "../components/icons";
 import { formatMs } from "../components/ui";
 
@@ -439,7 +439,14 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
                 ) : null}
               </>
             ) : (
-              <div className="muted">正在检查环境…</div>
+              // 首次环境检查要跑 java / sdkmanager / adb，用骨架屏代替一行「正在检查…」，
+              // 避免卡片在这两三秒里看起来是空的
+              <div className="skeleton-stack" aria-busy="true" aria-label="正在检查环境">
+                <div className="skeleton skeleton--title" style={{ width: 96 }} />
+                <div className="skeleton skeleton--line" />
+                <div className="skeleton skeleton--line" style={{ width: "78%" }} />
+                <div className="skeleton skeleton--line" style={{ width: "62%" }} />
+              </div>
             )}
           </div>
         </div>
@@ -564,8 +571,15 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
                 </table>
               </div>
             ) : (
-              <div className="muted">
-                {report?.needInit ? "初始化 SDK 后将在这里显示已安装镜像。" : "尚未安装系统镜像。"}
+              <div className="empty empty--inline">
+                <div className="empty__icon">
+                  <Icon name="image" size={22} strokeWidth={1.6} />
+                </div>
+                <div className="empty__desc">
+                  {report?.needInit
+                    ? "初始化 SDK 后将在这里显示已安装镜像。"
+                    : "尚未安装系统镜像，点右上角「查看全部镜像」按版本与架构下载。"}
+                </div>
               </div>
             )}
           </div>

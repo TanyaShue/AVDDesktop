@@ -11,8 +11,8 @@ import {
   androidVersionLabel,
   imageRootSupported,
   imageTagLabel,
-  SystemImageModal,
-} from "../components/SystemImageModal";
+} from "../lib/imageLabels";
+import { SystemImageModal } from "../components/SystemImageModal";
 import { Modal } from "../components/ui";
 import { Icon } from "../components/icons";
 
