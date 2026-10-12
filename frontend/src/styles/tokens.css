@@ -137,7 +137,9 @@
   --nav-w: 92px;
   --pageheader-h: 72px;
   --page-pad: 32px;
-  --page-content-max: 1120px;
+  /* 内容列宽上限：<=1500px 的窗口铺满，更宽的窗口居中成文档列，
+     避免 2560 下设备行被拉成一条千余像素的空带、按钮离信息太远。 */
+  --page-content-max: 1440px;
   --drawer-collapsed-h: 48px;
   --drawer-expanded-h: 260px;
   --drawer-tasks-w: 380px;

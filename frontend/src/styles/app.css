@@ -356,12 +356,17 @@ svg {
   }
 }
 
+/* 两个页面共用同一条内容列：窗口够宽就铺满，超宽时整列居中。
+   页头与页内容用同一个 max-width 公式，保证左基准线在任何宽度下都对齐。 */
 .pageheader {
   flex: 0 0 auto;
   display: flex;
   align-items: flex-end;
   gap: var(--sp-4);
   padding: var(--sp-6) var(--page-pad) var(--sp-4);
+  width: 100%;
+  max-width: calc(var(--page-content-max) + 2 * var(--page-pad));
+  margin-inline: auto;
 }
 
 .pageheader__text {
@@ -390,13 +395,14 @@ svg {
   min-height: 0;
   overflow: auto;
   padding: 0 var(--page-pad) var(--sp-7);
+  width: 100%;
+  max-width: calc(var(--page-content-max) + 2 * var(--page-pad));
+  margin-inline: auto;
 }
 
-/* 设置页与设备页共用同一套页面内边距，保证两个页面的左基准线完全一致；
-   内容再限制最大宽度，避免超宽屏下表单被拉得过散。 */
+/* 设置页的内容列已经由 .pagecontent 限宽，这里只负责占满。 */
 .settings-content {
   width: 100%;
-  max-width: var(--page-content-max);
 }
 
 /* ---------------------------------------------------------------- 3. 控件 */
