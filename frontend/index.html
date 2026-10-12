@@ -5,6 +5,26 @@
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <meta name="color-scheme" content="light dark"/>
     <title>AVDDesktop</title>
+    <!--
+      首屏防闪白：主题来自后端设置（Settings.Get() 异步返回），在它到达之前先按上次
+      生效的主题着色，避免深色用户每次启动都先闪一帧白底。
+      键名 "avddesk.theme" 必须与 src/hooks/useApp.ts 的 useTheme 写入处保持一致。
+      这里不写死任何背景色（会和暗色冲突）：data-theme 一旦落在 <html> 上，
+      tokens.css 的 [data-theme="dark"] 就接管 --bg-page，body 背景随之变深。
+      也不加过渡抑制 class（app.css 由主控独占，缺对应样式会留下孤儿 class）。
+    -->
+    <script>
+        (function () {
+            try {
+                var t = localStorage.getItem("avddesk.theme");
+                if (t === "light" || t === "dark") {
+                    document.documentElement.dataset.theme = t;
+                }
+            } catch (e) {
+                /* 隐私模式等场景下 localStorage 可能抛异常：保持默认浅色 */
+            }
+        })();
+    </script>
 </head>
 <body>
 <div id="root"></div>

@@ -96,6 +96,9 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
     [instances],
   );
 
+  /** 是否有生效的搜索词：清空按钮、结果计数与空状态文案都以此为准。 */
+  const searching = query.trim().length > 0;
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = devices.filter(
@@ -189,13 +192,19 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
             <span>
               共 {devices.length} 个设备，{runningCount} 个运行中
             </span>
+            {/* 搜索生效时补充命中计数；aria-live 让读屏用户听到筛选结果变化 */}
+            {searching ? (
+              <span className="muted nums" aria-live="polite">
+                匹配 {filtered.length} / {devices.length}
+              </span>
+            ) : null}
           </div>
         </div>
       </div>
 
       <div className="pagecontent">
         {env.report && !env.report.ready ? (
-          <div className="banner banner--info" style={{ marginBottom: 12 }}>
+          <div className="banner banner--info mb-3">
             <div className="banner__icon">
               <Icon name="alert" size={18} />
             </div>
@@ -222,12 +231,29 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
             新建设备
           </button>
           <div className="toolbar__right">
-            <input
-              className="search"
-              placeholder="搜索设备…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
+            {/* 相对定位容器只为承载绝对定位的清空按钮（原生 input 无法内嵌按钮） */}
+            <div className="search-box">
+              <input
+                className={`search${searching ? " search--clearable" : ""}`}
+                type="text"
+                enterKeyHint="search"
+                role="searchbox"
+                aria-label="搜索设备"
+                placeholder="搜索设备…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              {searching ? (
+                <button
+                  className="icon-btn search-clear"
+                  title="清空搜索"
+                  aria-label="清空搜索"
+                  onClick={() => setQuery("")}
+                >
+                  <Icon name="close" size={14} />
+                </button>
+              ) : null}
+            </div>
             <Popover
               open={sortMenuOpen}
               onClose={closeSortMenu}
@@ -275,7 +301,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
             <div className="empty__desc">
               {devices.length === 0
                 ? "创建第一个设备后即可启动 Android 模拟器。需要先安装命令行工具、模拟器与至少一个系统镜像。"
-                : "换个关键词试试，或清空搜索条件。"}
+                : `没有设备匹配「${query.trim()}」。换个关键词，或点搜索框右侧的清空按钮重新显示全部设备。`}
             </div>
             {devices.length === 0 ? (
               <button className="btn btn--primary btn--lg" onClick={() => setShowWizard(true)}>
@@ -285,7 +311,11 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
             ) : null}
           </div>
         ) : (
-          <div className={view === "grid" ? "grid grid--devices" : "grid grid--compact"}>
+          <div
+            className={view === "grid" ? "grid grid--devices" : "grid grid--compact"}
+            role="list"
+            aria-label="设备列表"
+          >
             {filtered.map((device) => {
               const inst = active.get(device.name);
               // Wails 把 Go 的 AvdState 生成为 string，这里收敛回联合类型后再交给状态展示函数
@@ -295,7 +325,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
               const showBadge =
                 state === "running" || state === "booting" || state === "starting";
               return (
-                <div key={device.name} className="card card--hover device">
+                <div key={device.name} className="card card--hover device" role="listitem">
                   <div className="device__thumb" aria-hidden>
                     <span className="device__glyph">
                       <Icon name="devices" size={52} strokeWidth={1.3} />
@@ -333,9 +363,8 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                       ) : null}
                     </div>
                     {device.broken ? (
-                      <div className="muted muted--danger" style={{ marginTop: 6 }}>
-                        {device.broken}
-                      </div>
+                      // config.ini 的破损原因是一整段带路径的长文本：换行显示，避免撑破卡片
+                      <div className="muted muted--danger mt-1 break-all">{device.broken}</div>
                     ) : null}
                   </div>
 
@@ -345,6 +374,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                         <button
                           className="btn btn--circle btn--circle-stop"
                           title="停止"
+                          aria-label={`停止 ${device.name}`}
                           disabled={busyNames.has(device.name)}
                           onClick={() => void stopDevice(device)}
                         >
@@ -354,6 +384,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                         <button
                           className="btn btn--circle"
                           title="启动"
+                          aria-label={`启动 ${device.name}`}
                           disabled={busyNames.has(device.name)}
                           onClick={() => void startDevice(device)}
                         >
@@ -365,6 +396,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                         </button>
                       )}
                       <MoreMenu
+                        label={`更多操作 ${device.name}`}
                         open={openMenu === device.name}
                         onToggle={() =>
                           setOpenMenu((prev) => (prev === device.name ? null : device.name))
@@ -500,11 +532,14 @@ function Popover({
 
 /** 设备行右侧的「更多操作」：复用通用浮层，展开后是一组图标菜单项。 */
 function MoreMenu({
+  label,
   open,
   onToggle,
   onClose,
   children,
 }: {
+  /** 无障碍名称（含设备名），按钮本身只显示图标。 */
+  label: string;
   open: boolean;
   onToggle: () => void;
   onClose: () => void;
@@ -518,6 +553,7 @@ function MoreMenu({
         <button
           className="btn btn--round-soft"
           title="更多操作"
+          aria-label={label}
           aria-haspopup="menu"
           aria-expanded={open}
           onClick={onToggle}
@@ -531,7 +567,7 @@ function MoreMenu({
   );
 }
 
-/** 菜单项：左侧线性图标 + 文案，当前生效项在文案右侧补一个勾选图标。 */
+/** 菜单项：左侧线性图标 + 文案，当前生效项在文案右侧补一个勾选图标（靠 .menu__item__check 推到行尾）。 */
 function MenuItem({
   label,
   icon,
@@ -553,7 +589,7 @@ function MenuItem({
     >
       {icon ? <Icon name={icon} size={16} /> : null}
       <span>{label}</span>
-      {active ? <Icon name="check" size={14} /> : null}
+      {active ? <Icon name="check" size={14} className="menu__item__check" /> : null}
     </button>
   );
 }

@@ -64,8 +64,9 @@ export function TaskDrawer({
                 indeterminate={primary.status === "running" && primary.percent <= 0}
               />
             </div>
-            <span className="muted nums">
-              {Math.round(primary.percent)}%　{humanSpeed(primary.speedBps)}
+            <span className="muted nums drawer__active-percent">{Math.round(primary.percent)}%</span>
+            <span className="muted nums drawer__active-rate">
+              {humanSpeed(primary.speedBps)}
               {primary.etaSeconds > 0 ? `　剩余 ${formatEta(primary.etaSeconds)}` : ""}
             </span>
           </div>

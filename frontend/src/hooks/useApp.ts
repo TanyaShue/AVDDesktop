@@ -190,13 +190,23 @@ export function useToasts() {
 export function useTheme(theme: string) {
   useEffect(() => {
     const apply = () => {
-      const resolved =
+      const resolved: "light" | "dark" =
         theme === "system"
           ? window.matchMedia("(prefers-color-scheme: dark)").matches
             ? "dark"
             : "light"
-          : theme;
+          : theme === "dark"
+            ? "dark"
+            : "light";
       document.documentElement.dataset.theme = resolved;
+      // 缓存本次生效主题，供下次启动的首屏使用：index.html 的 <head> 里有一段同步
+      // 内联脚本，会在样式和应用加载前读取同一个键 "avddesk.theme" 预设 data-theme，
+      // 避免后端设置（Settings.Get() 异步返回）到达前先闪一帧白底；两处键名必须一致。
+      try {
+        window.localStorage.setItem("avddesk.theme", resolved);
+      } catch {
+        // 隐私模式 / 存储被禁用时忽略：主题仍按本次解析结果生效
+      }
     };
     apply();
     if (theme === "system") {

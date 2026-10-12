@@ -130,7 +130,7 @@ export function EnvironmentSetupModal({
       </div>
 
       {error ? (
-        <div className="banner banner--danger" style={{ marginTop: 12 }}>
+        <div className="banner banner--danger">
           <div className="banner__icon"><Icon name="alert" size={18} /></div>
           <div className="banner__body">
             <div className="banner__title">操作未开始</div>
@@ -165,19 +165,17 @@ export function EnvironmentSetupModal({
         </div>
       </div>
 
-      <div className="row row--wrap" style={{ marginTop: 12 }}>
+      <div className="env-setup__actions">
         <span className={sourceError ? "muted muted--danger" : "muted"}>
           {sourceError
             ? `读取镜像源失败：${sourceError}`
             : "镜像源不可达时下载会失败，可先检测并更换镜像源。"}
         </span>
         {onOpenMirrorSettings ? (
-          <div className="toolbar__right">
-            <button className="btn btn--secondary btn--sm" onClick={onOpenMirrorSettings} disabled={busy}>
-              <Icon name="globe" size={15} />
-              检测 / 更换镜像源
-            </button>
-          </div>
+          <button className="btn btn--secondary btn--sm" onClick={onOpenMirrorSettings} disabled={busy}>
+            <Icon name="globe" size={15} />
+            检测 / 更换镜像源
+          </button>
         ) : null}
       </div>
     </Modal>

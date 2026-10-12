@@ -15,9 +15,11 @@
   color-scheme: light;
 
   /* ---------------------------------------------------------------- 品牌色 */
-  --primary: #2b7fff;
-  --primary-hover: #1b6ef0;
-  --primary-active: #1560d8;
+  /* --primary 是「实心填充」色：白字必须过 AA 4.5:1（实测 #2170ea = 4.59:1）。
+     需要更亮的品牌蓝做描边/焦点环时用 --primary-border / --primary-soft。 */
+  --primary: #2170ea;
+  --primary-hover: #1a63d6;
+  --primary-active: #175dc8;
   --primary-soft: #ecf3ff;
   --primary-soft-hover: #dfebff;
   --primary-border: #bcd6ff;
@@ -26,8 +28,9 @@
   /* ---------------------------------------------------------------- 中性色 */
   --text-primary: #1d2129;
   --text-secondary: #4e5969;
-  --text-tertiary: #86909c;
-  --text-disabled: #c9cdd4;
+  /* 次级文字（.muted / 表头 / 提示）对白底 4.83:1、对页面底色 4.47:1 */
+  --text-tertiary: #6b7280;
+  --text-disabled: #b3b8c0;
   --text-inverse: #ffffff;
 
   --bg-page: #f5f6f8;
@@ -46,25 +49,31 @@
   --scrollbar-hover: rgba(29, 33, 41, 0.32);
 
   /* ---------------------------------------------------------------- 语义色 */
+  /* 说明：--* 是「图形/填充」色（圆点、进度条、边框），对比度按 3:1 图形标准；
+     --*-ink 是「浅色底上的文字」色，必须过 AA 4.5:1（chip / banner / 提示文字）。 */
   --success: #00b42a;
   --success-hover: #009a24;
   --success-soft: #eafceb;
   --success-border: #b6ecbd;
+  --success-ink: #007a1c;
 
   --warning: #ff7d00;
   --warning-soft: #fff6e6;
   --warning-border: #ffddab;
+  --warning-ink: #b35600;
 
   --danger: #f53f3f;
   --danger-hover: #e02e2e;
   --danger-soft: #ffeceb;
   --danger-border: #ffc9c5;
+  --danger-ink: #c42626;
 
-  --info: #2b7fff;
+  --info: #2170ea;
   --info-soft: #ecf3ff;
   --info-border: #bcd6ff;
+  --info-ink: #1668dc;
 
-  --neutral: #86909c;
+  --neutral: #6b7280;
   --neutral-soft: #f2f3f5;
 
   /* ---------------------------------------------------------------- 字体 */
@@ -143,9 +152,10 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --primary: #4d92ff;
-  --primary-hover: #66a2ff;
-  --primary-active: #7db1ff;
+  /* 深色下的实心填充：白字对 #3273d4 = 4.63:1（#4d92ff 只有 3.06:1，不能当按钮底） */
+  --primary: #3273d4;
+  --primary-hover: #3f86f5;
+  --primary-active: #2e6fd6;
   --primary-soft: #16243c;
   --primary-soft-hover: #1d2f4d;
   --primary-border: #2c4a78;
@@ -153,8 +163,9 @@
 
   --text-primary: #e8eaee;
   --text-secondary: #a9aeb8;
-  --text-tertiary: #767c88;
-  --text-disabled: #4c515b;
+  /* 次级文字对卡片底 5.15:1、对浅一档的底 4.84:1 */
+  --text-tertiary: #8b919b;
+  --text-disabled: #6a707b;
   --text-inverse: #ffffff;
 
   --bg-page: #16181b;
@@ -176,21 +187,25 @@
   --success-hover: #4bd661;
   --success-soft: #12291a;
   --success-border: #235c32;
+  --success-ink: #4bd661;
 
   --warning: #ff9a2e;
   --warning-soft: #2d2110;
   --warning-border: #5c431c;
+  --warning-ink: #ffb45c;
 
   --danger: #ff6b6b;
   --danger-hover: #ff8383;
   --danger-soft: #2e1717;
   --danger-border: #6b3232;
+  --danger-ink: #ff8a8a;
 
   --info: #4d92ff;
   --info-soft: #16243c;
   --info-border: #2c4a78;
+  --info-ink: #6ba4ff;
 
-  --neutral: #8a909b;
+  --neutral: #8b919b;
   --neutral-soft: #26282c;
 
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);

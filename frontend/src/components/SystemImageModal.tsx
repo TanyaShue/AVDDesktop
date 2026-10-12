@@ -125,8 +125,10 @@ export function SystemImageModal({
         {mode === "download" ? (
           <div className="image-modal__sources">
             <div className="image-modal__sources-head">
-              <Icon name="globe" size={14} />
-              <span className="image-modal__sources-title">下载源</span>
+              <span className="image-modal__sources-label">
+                <Icon name="globe" size={14} />
+                <span className="image-modal__sources-title">下载源</span>
+              </span>
               <span className="muted truncate">
                 当前使用「{activeSourceName || "默认镜像源"}」；镜像源的检测与更换在「设置」页的「下载镜像源」中完成。
               </span>
@@ -323,12 +325,8 @@ function ImageDownloadAction({
   }
 
   if (installed) {
-    return (
-      <span className="chip chip--sm chip--success">
-        <Icon name="check" size={12} />
-        已安装
-      </span>
-    );
+    // 「已安装」在左侧「状态」列已经有一个 chip，这里不再重复一遍，只留一个占位符
+    return <span className="muted">—</span>;
   }
 
   const failed = job?.status === "failed" || job?.status === "canceled";

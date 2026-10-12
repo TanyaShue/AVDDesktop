@@ -73,6 +73,12 @@ svg {
   border-radius: var(--r-sm);
 }
 
+/* 弹窗容器只是脚本聚焦的锚点（tabIndex=-1，不在 Tab 序列里），不画整框焦点环；
+   键盘交互过再打开弹窗时否则会被描一整圈蓝边。 */
+.modal:focus-visible {
+  outline: none;
+}
+
 ::selection {
   background: var(--primary-soft);
   color: var(--primary-active);
@@ -127,15 +133,11 @@ svg {
 
 /* 在 .muted 之后定义，保证同时使用时错误色生效（两者优先级相同）。 */
 .muted--danger {
-  color: var(--danger);
+  color: var(--danger-ink);
 }
 
 .muted--xs {
   font-size: var(--fs-xs);
-}
-
-.muted--2xs {
-  font-size: var(--fs-2xs);
 }
 
 /* 长路径 / 长命令换行，不撑破表格与卡片 */
@@ -154,10 +156,6 @@ svg {
 
 .mt-3 {
   margin-top: var(--sp-3);
-}
-
-.mt-4 {
-  margin-top: var(--sp-4);
 }
 
 .mb-3 {
@@ -233,7 +231,7 @@ svg {
   border-radius: var(--r-full);
   background: var(--primary-soft);
   border: 1px solid var(--primary-border);
-  color: var(--primary);
+  color: var(--info-ink);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
   cursor: pointer;
@@ -378,13 +376,6 @@ svg {
   flex-wrap: wrap;
 }
 
-.pageheader__actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
 .pagecontent {
   flex: 1;
   min-height: 0;
@@ -421,15 +412,34 @@ svg {
     color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 
+/* 禁用态用明确的「灰底 + 灰字」表达，而不是整体 opacity：
+   深色主题下半透明会把 1px 边框一起抹掉，禁用按钮看起来像"破洞"。 */
 .btn:disabled {
-  opacity: 0.5;
   cursor: not-allowed;
+}
+
+.btn--primary:disabled {
+  background: var(--bg-pressed);
+  color: var(--text-disabled);
+  box-shadow: none;
+}
+
+.btn--secondary:disabled {
+  background: var(--bg-subtle);
+  border-color: var(--border);
+  color: var(--text-disabled);
+}
+
+.btn--ghost:disabled,
+.btn--danger-ghost:disabled {
+  background: transparent;
+  color: var(--text-disabled);
 }
 
 .btn--primary {
   background: var(--primary);
   color: var(--primary-ink);
-  box-shadow: 0 1px 2px rgba(43, 127, 255, 0.28);
+  box-shadow: 0 1px 2px rgba(33, 112, 234, 0.28);
 }
 
 .btn--primary:hover:not(:disabled) {
@@ -462,20 +472,11 @@ svg {
 
 .btn--danger-ghost {
   background: transparent;
-  color: var(--danger);
+  color: var(--danger-ink);
 }
 
 .btn--danger-ghost:hover:not(:disabled) {
   background: var(--danger-soft);
-}
-
-.btn--danger {
-  background: var(--danger);
-  color: #fff;
-}
-
-.btn--danger:hover:not(:disabled) {
-  background: var(--danger-hover);
 }
 
 .btn--sm {
@@ -496,10 +497,6 @@ svg {
   width: var(--h-md);
   padding: 0;
   flex: 0 0 auto;
-}
-
-.btn--block {
-  width: 100%;
 }
 
 .btn--circle {
@@ -617,7 +614,7 @@ svg {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background-color: var(--bg-surface);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2386909c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6.5 9.5 12 15l5.5-5.5'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6.5 9.5 12 15l5.5-5.5'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
   color: var(--text-primary);
@@ -638,20 +635,25 @@ svg {
   outline: none;
 }
 
+/* 禁用态用 --bg-inset（比底色更暗/更浅一档）表达「不可用」：
+   深色下如果用 --bg-subtle 反而比弹窗底更亮，看起来像被高亮。 */
 .select:disabled {
-  color: var(--text-disabled);
-  background-color: var(--bg-subtle);
+  color: var(--text-tertiary);
+  background-color: var(--bg-inset);
+  border-color: var(--border-subtle);
+  cursor: not-allowed;
+}
+
+.input:disabled {
+  color: var(--text-tertiary);
+  background: var(--bg-inset);
+  border-color: var(--border-subtle);
   cursor: not-allowed;
 }
 
 .select option {
   color: var(--text-primary);
   background: var(--bg-surface);
-}
-
-.select--compact {
-  width: 128px;
-  flex: 0 0 128px;
 }
 
 /* ---- 搜索框（内嵌图标） ---- */
@@ -663,7 +665,7 @@ svg {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background-color: var(--bg-surface);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2386909c' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='6.4'/%3E%3Cpath d='M19.6 19.6 15.4 15.4'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='6.4'/%3E%3Cpath d='M19.6 19.6 15.4 15.4'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: 10px center;
   transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
@@ -681,6 +683,29 @@ svg {
   border-color: var(--primary);
   box-shadow: var(--shadow-focus);
   outline: none;
+}
+
+/* 搜索框 + 内嵌清空按钮：容器负责定位，输入框留出按钮的位置 */
+.search-box {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.search--clearable {
+  padding-right: 34px;
+}
+
+.search-clear {
+  position: absolute;
+  right: 2px;
+  top: 0;
+  color: var(--text-tertiary);
+}
+
+/* 若将来改用 type="search"，先关掉 Chromium 的原生清除按钮，避免与自绘按钮重叠 */
+input[type="search"]::-webkit-search-cancel-button {
+  display: none;
 }
 
 /* ---- 分段控件 ---- */
@@ -714,7 +739,7 @@ svg {
 
 .segmented button[aria-pressed="true"] {
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--info-ink);
 }
 
 /* ---- 标签 ---- */
@@ -735,22 +760,22 @@ svg {
 
 .chip--success {
   background: var(--success-soft);
-  color: var(--success);
+  color: var(--success-ink);
 }
 
 .chip--warning {
   background: var(--warning-soft);
-  color: var(--warning);
+  color: var(--warning-ink);
 }
 
 .chip--danger {
   background: var(--danger-soft);
-  color: var(--danger);
+  color: var(--danger-ink);
 }
 
 .chip--info {
   background: var(--info-soft);
-  color: var(--info);
+  color: var(--info-ink);
 }
 
 .chip--sm {
@@ -845,35 +870,14 @@ svg {
 
 /* ---- 状态图标块 ---- */
 
-.tool__icon {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--r-lg);
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  background: var(--neutral-soft);
-  color: var(--neutral);
+/* 输入类控件内嵌的装饰图标（放大镜 / 下拉箭头）用 data URI，无法继承 currentColor，
+   这里按主题各给一份，颜色与 --text-tertiary 对齐。 */
+[data-theme="dark"] .search {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238b919b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='6.4'/%3E%3Cpath d='M19.6 19.6 15.4 15.4'/%3E%3C/svg%3E");
 }
 
-.tool__icon--ok {
-  background: var(--success-soft);
-  color: var(--success);
-}
-
-.tool__icon--warn {
-  background: var(--warning-soft);
-  color: var(--warning);
-}
-
-.tool__icon--bad {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
-.tool__icon--info {
-  background: var(--info-soft);
-  color: var(--info);
+[data-theme="dark"] .select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238b919b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6.5 9.5 12 15l5.5-5.5'/%3E%3C/svg%3E");
 }
 
 /* ---------------------------------------------------------------- 4. 卡片 */
@@ -1108,7 +1112,7 @@ svg {
 }
 
 .menu__item--danger {
-  color: var(--danger);
+  color: var(--danger-ink);
 }
 
 .menu__item--danger:hover {
@@ -1373,7 +1377,7 @@ body.modal-open .pagecontent {
 }
 
 .field__hint--error {
-  color: var(--danger);
+  color: var(--danger-ink);
 }
 
 /* ---- 硬件参数（创建设备） ---- */
@@ -1433,7 +1437,7 @@ body.modal-open .pagecontent {
 .hw__error {
   margin-top: var(--sp-2);
   font-size: var(--fs-xs);
-  color: var(--danger);
+  color: var(--danger-ink);
 }
 
 /* ---------------------------------------------------------------- 10. 提示 */
@@ -1461,27 +1465,18 @@ body.modal-open .pagecontent {
   border-color: var(--danger-border);
 }
 
-.banner--success {
-  background: var(--success-soft);
-  border-color: var(--success-border);
-}
-
 .banner__icon {
   flex: 0 0 auto;
   margin-top: 1px;
-  color: var(--warning);
+  color: var(--warning-ink);
 }
 
 .banner--info .banner__icon {
-  color: var(--info);
+  color: var(--info-ink);
 }
 
 .banner--danger .banner__icon {
-  color: var(--danger);
-}
-
-.banner--success .banner__icon {
-  color: var(--success);
+  color: var(--danger-ink);
 }
 
 .banner__body {
@@ -1544,17 +1539,17 @@ body.modal-open .pagecontent {
 
 .toast__icon--ok {
   background: var(--success-soft);
-  color: var(--success);
+  color: var(--success-ink);
 }
 
 .toast__icon--warn {
   background: var(--warning-soft);
-  color: var(--warning);
+  color: var(--warning-ink);
 }
 
 .toast__icon--bad {
   background: var(--danger-soft);
-  color: var(--danger);
+  color: var(--danger-ink);
 }
 
 .toast__title {
@@ -1634,8 +1629,14 @@ body.modal-open .pagecontent {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--sp-4);
+  gap: var(--sp-3) var(--sp-4);
   margin-bottom: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+/* 窄窗口下让按钮组整体换行，而不是被裁掉 */
+.section__header > * {
+  min-width: 0;
 }
 
 .section__header .section__title {
@@ -1664,7 +1665,9 @@ body.modal-open .pagecontent {
   margin-left: auto;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--sp-2);
+  flex-wrap: wrap;
 }
 
 /* ---- 指标条 ---- */
@@ -1709,6 +1712,8 @@ body.modal-open .pagecontent {
   padding: 0 var(--sp-5);
   cursor: pointer;
   user-select: none;
+  /* 折叠态永远单行：内容再多也只做收缩 / 隐藏，不允许换行把 48px 的头部撑高 */
+  overflow: hidden;
   transition: background var(--dur) var(--ease);
 }
 
@@ -1741,30 +1746,51 @@ body.modal-open .pagecontent {
 }
 
 .drawer__active {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--sp-3);
   font-size: var(--fs-sm);
   color: var(--text-secondary);
-}
-
-/* 折叠态里的进度条：占住中段，但不把右侧的速率/剩余时间挤掉 */
-.drawer__active-bar {
-  flex: 1 1 auto;
-  min-width: 0;
-  max-width: 180px;
+  overflow: hidden;
 }
 
 .drawer__active-title {
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 280px;
+  max-width: 220px;
+}
+
+/* 折叠态里的进度条：占住中段，但不把右侧的速率/剩余时间挤掉 */
+.drawer__active-bar {
+  flex: 1 1 80px;
+  min-width: 60px;
+  max-width: 180px;
+}
+
+/* 百分比 / 速率文案：不允许换行（换行会把折叠态头部撑成两行） */
+.drawer__active-percent,
+.drawer__active-rate {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* 宽度不足时按「进度条 → 速率与剩余时间」的顺序逐级让位：百分比始终保留 */
+@media (max-width: 1200px) {
+  .drawer__active-bar {
+    display: none;
+  }
+}
+
+@media (max-width: 1080px) {
+  .drawer__active-rate {
+    display: none;
+  }
 }
 
 .drawer__latest {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
@@ -2065,7 +2091,7 @@ body.modal-open .pagecontent {
 
 .image-modal__state--error,
 .image-list-state--error {
-  color: var(--danger);
+  color: var(--danger-ink);
 }
 
 .table--installed .image-delete-head,
@@ -2197,7 +2223,7 @@ body.modal-open .pagecontent {
   border: 1px solid var(--danger-border);
   border-radius: var(--r-md);
   background: var(--danger-soft);
-  color: var(--danger);
+  color: var(--danger-ink);
   font-size: var(--fs-sm);
   display: flex;
   align-items: flex-start;
@@ -2254,9 +2280,17 @@ body.modal-open .pagecontent {
   box-shadow: var(--shadow-sm);
 }
 
+/* 选中环不能用 --primary-soft：深色下它和卡片底几乎同色（1.05:1），环等于不存在。
+   兜底给 --primary-border，支持 color-mix 时用半透明主色的更明显一圈。 */
 .mirror-card--selected {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px var(--primary-soft), var(--shadow-sm);
+  box-shadow: 0 0 0 3px var(--primary-border), var(--shadow-sm);
+}
+
+@supports (background: color-mix(in srgb, red 10%, blue)) {
+  .mirror-card--selected {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 38%, transparent), var(--shadow-sm);
+  }
 }
 
 .mirror-card__head {
@@ -2333,11 +2367,11 @@ body.modal-open .pagecontent {
 }
 
 .mirror-metric__value--ok {
-  color: var(--success);
+  color: var(--success-ink);
 }
 
 .mirror-metric__value--bad {
-  color: var(--danger);
+  color: var(--danger-ink);
 }
 
 .mirror-card__resources {
@@ -2363,7 +2397,7 @@ body.modal-open .pagecontent {
 
 .mirror-card__error {
   min-height: 18px;
-  color: var(--danger);
+  color: var(--danger-ink);
   font-size: var(--fs-xs);
   line-height: 18px;
   overflow: hidden;
@@ -2585,19 +2619,29 @@ body.modal-open .pagecontent {
 }
 
 /* ---------------------------------------------------------------- 14. 窄窗口适配 */
+/* 主窗口 MinWidth = 960（见 main.go），因此 960 一档是真正会被触发的下限；
+   760 / 620 / 480 三档保留给更小的宿主（例如超小分辨率或未来的窗口缩放）。 */
 
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   :root {
-    --nav-w: 76px;
+    --nav-w: 80px;
     --page-pad: var(--sp-5);
   }
 
   .device__thumb {
-    width: 160px;
+    width: 168px;
   }
 
   .device__name {
     font-size: var(--fs-xl);
+  }
+
+  .pageheader {
+    padding: var(--sp-5) var(--sp-5) var(--sp-3);
+  }
+
+  .pagecontent {
+    padding: 0 var(--sp-5) var(--sp-6);
   }
 }
 
@@ -2609,6 +2653,16 @@ body.modal-open .pagecontent {
 
   .mirror-grid {
     grid-template-columns: 1fr;
+  }
+
+  /* 工具条右侧整体换行，搜索框吃掉剩余宽度，避免分段控件被挤出可视区 */
+  .toolbar__right {
+    width: 100%;
+  }
+
+  .toolbar__right .search {
+    flex: 1 1 160px;
+    min-width: 0;
   }
 
   .mirror-card__metrics {
@@ -2665,8 +2719,10 @@ body.modal-open .pagecontent {
     gap: var(--sp-4);
   }
 
+  /* 堆叠布局下把缩略图封顶：否则 16:9 的满宽图会把一张卡片撑满整屏 */
   .device__thumb {
     width: 100%;
+    max-width: 240px;
   }
 
   .device__actions {
