@@ -1,10 +1,19 @@
 /* ============================================================================
  * 独立设备窗口（MuMu 风格）样式
  *
- * 只作用于 device.html 入口：深色、无边框，标题栏 / 画面区 / 工具栏三段式。
- * 高度常量必须与 Go 侧 displayhost/window.go 的 deviceTitleBarHeight /
- * deviceToolbarHeight 保持一致，否则初始窗口尺寸会与内容对不齐。
+ * 只作用于 device.html 入口：沉浸式深色表面，标题栏 / 画面区 / 工具栏三段式。
+ * 视觉一律引用 styles/tokens.css：颜色 / 间距 / 圆角 / 字体 / 动效都走令牌，
+ * 深色取值由组件根节点 <div class="dw" data-theme="dark"> 触发（tokens.css 的
+ * 深色块挂在 [data-theme="dark"] 上），本文件不再写死品牌色。
+ * 高度常量必须与 Go 侧 displayhost/window.go 的 deviceTitleBarHeight（40）/
+ * deviceToolbarHeight（48）保持一致，否则初始窗口尺寸会与内容对不齐。
  * ========================================================================== */
+
+/* 设备窗口是独立的深色文档：文档级也钉成深色，避免起窗 / 缩放瞬间露出浅色画布。
+   （本文件只在 device.tsx 里引入，主窗口不受影响。） */
+:root {
+  color-scheme: dark;
+}
 
 * {
   box-sizing: border-box;
@@ -18,10 +27,11 @@ body,
 }
 
 body {
-  font-family: var(--font-sans, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif);
-  font-size: 13px;
-  color: #e7e9ef;
-  background: #0b0d11;
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  color: var(--text-inverse);
+  /* 不写死色值：canvas 是随上面 color-scheme 解析的系统色，这里是深色底板 */
+  background: canvas;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   user-select: none;
@@ -33,15 +43,16 @@ body {
      一旦不一致，百分比链会让工具栏被挤出可视区。 */
   --dw-titlebar-h: 40px;
   --dw-toolbar-h: 48px;
-  --dw-surface: #12151c;
-  --dw-surface-2: #1a1f29;
-  --dw-border: rgba(255, 255, 255, 0.07);
-  --dw-text: #e7e9ef;
-  --dw-text-dim: #8b93a7;
-  --dw-accent: #4a8cff;
+
+  /* 本地别名：深色取值来自 tokens.css 的 [data-theme="dark"]，不新增色值 */
+  --dw-surface: var(--bg-surface);
+  --dw-surface-2: var(--bg-subtle);
+  --dw-border: var(--border-subtle);
+  --dw-text: var(--text-primary);
+  --dw-text-dim: var(--text-tertiary);
 
   height: 100vh;
-  background: #0b0d11;
+  background: var(--bg-page);
   position: relative;
   overflow: hidden;
 }
@@ -57,8 +68,8 @@ body {
   z-index: 3;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 6px 0 12px;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-1) 0 var(--sp-3);
   background: var(--dw-surface);
   border-bottom: 1px solid var(--dw-border);
   /* 无边框窗口的拖拽区；按钮单独声明 no-drag */
@@ -68,35 +79,34 @@ body {
 .dw__brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   min-width: 0;
   flex: 0 1 auto;
 }
 
+/* 品牌位：与主窗口标题栏图标同构（主色方块 + 白色线性图标） */
 .dw__logo {
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
-  background: linear-gradient(135deg, #4a8cff, #7b5cff);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  background: linear-gradient(140deg, var(--primary), var(--primary-hover));
+  color: var(--primary-ink);
+  display: grid;
+  place-items: center;
   flex: 0 0 auto;
+  box-shadow: var(--shadow-xs);
 }
 
 .dw__name {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
   max-width: 220px;
 }
 
 .dw__meta {
   margin-left: auto;
   color: var(--dw-text-dim);
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   font-variant-numeric: tabular-nums;
   flex: 0 0 auto;
 }
@@ -104,45 +114,47 @@ body {
 .dw__winbtns {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--sp-1);
   flex: 0 0 auto;
   --wails-draggable: no-drag;
 }
 
 .dw__winbtn {
-  width: 30px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: var(--h-sm);
+  height: var(--h-sm);
+  display: grid;
+  place-items: center;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--dw-text-dim);
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
   --wails-draggable: no-drag;
 }
 
 .dw__winbtn:hover {
-  background: var(--dw-surface-2);
+  background: var(--bg-hover);
   color: var(--dw-text);
 }
 
+.dw__winbtn:active {
+  background: var(--bg-pressed);
+}
+
 .dw__winbtn.is-active {
-  color: var(--dw-accent);
-  background: rgba(74, 140, 255, 0.14);
+  color: var(--primary);
+  background: var(--primary-soft);
 }
 
 .dw__winbtn--close:hover {
-  background: #e5484d;
-  color: #fff;
+  background: var(--danger);
+  color: var(--text-inverse);
 }
 
-.dw__winbtn--stats {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
+/* 性能诊断按钮（F8）：与其它窗口按钮同尺寸，悬停用主色提示它切换的是诊断浮层 */
+.dw__winbtn--stats:hover {
+  color: var(--primary);
 }
 
 /* ---------------------------------------------------------------- 画面区 */
@@ -153,7 +165,7 @@ body {
   bottom: var(--dw-toolbar-h);
   left: 0;
   right: 0;
-  background: radial-gradient(120% 120% at 50% 0%, #12161e 0%, #05070a 70%);
+  background: radial-gradient(120% 120% at 50% 0%, var(--bg-subtle) 0%, var(--bg-page) 70%);
   overflow: hidden;
 }
 
@@ -183,46 +195,60 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 24px;
+  gap: var(--sp-3);
+  padding: var(--sp-6);
   text-align: center;
-  background: rgba(5, 7, 10, 0.86);
+  /* 半透明页面底色：不引入新色值，又能压住背后的画面（旧 WebView2 用纯色兜底） */
+  background: var(--bg-page);
+  background: color-mix(in srgb, var(--bg-page) 88%, transparent);
+}
+
+.dw__overlay-icon {
+  color: var(--text-tertiary);
+}
+
+.dw__overlay-icon--danger {
+  color: var(--danger);
 }
 
 .dw__overlay-title {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
 }
 
 .dw__overlay-text {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   line-height: 18px;
-  color: var(--dw-text-dim);
+  color: var(--text-secondary);
   max-width: 320px;
   word-break: break-all;
 }
 
 .dw__action {
-  margin-top: 4px;
-  padding: 7px 16px;
+  margin-top: var(--sp-1);
+  height: var(--h-md);
+  padding: 0 var(--sp-4);
   border: 0;
-  border-radius: 8px;
-  background: var(--dw-accent);
-  color: #fff;
-  font-size: 12px;
+  border-radius: var(--r-md);
+  background: var(--primary);
+  color: var(--primary-ink);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
 }
 
 .dw__action:hover {
-  background: #3d7ce8;
+  background: var(--primary-hover);
 }
 
 .spinner {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.16);
-  border-top-color: var(--dw-accent);
+  width: var(--sp-5);
+  height: var(--sp-5);
+  border-radius: var(--r-full);
+  border: 2px solid var(--primary-border);
+  border-top-color: var(--primary);
   animation: dw-spin 900ms linear infinite;
 }
 
@@ -236,15 +262,17 @@ body {
 
 .dw__stats {
   position: fixed;
-  right: 12px;
-  bottom: calc(var(--dw-toolbar-h) + 12px);
+  right: var(--sp-3);
+  bottom: calc(var(--dw-toolbar-h) + var(--sp-3));
   z-index: 2;
-  width: min(330px, calc(100% - 24px));
-  padding: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  border-radius: 10px;
-  background: rgba(12, 15, 21, 0.88);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42);
+  width: min(330px, calc(100% - var(--sp-6)));
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  /* 旧 WebView2 不支持 color-mix：先给纯色，再用半透明覆盖 */
+  background: var(--bg-surface);
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  box-shadow: var(--shadow-lg);
   color: var(--dw-text);
   font-variant-numeric: tabular-nums;
   pointer-events: none;
@@ -254,46 +282,58 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: #cbd2e0;
-  font-size: 11px;
-  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+}
+
+.dw__stats-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
 }
 
 .dw__stats-live {
   color: var(--dw-text-dim);
-  font-size: 9px;
+  font-size: var(--fs-2xs);
   letter-spacing: 0.06em;
 }
 
 .dw__stats-live.is-live {
-  color: #61d095;
+  color: var(--success);
 }
 
 .dw__stats-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 8px;
-  margin: 8px 0 0;
+  gap: var(--sp-1) var(--sp-2);
+  margin: var(--sp-2) 0 0;
 }
 
+/* 指标小卡：比面板底色浅一档，与主窗口的卡片语言一致 */
 .dw__stats-item {
   min-width: 0;
-  padding: 5px 7px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.045);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-sm);
+  background: var(--bg-subtle);
 }
 
 .dw__stats-item dt {
+  /* 预留图标位：指标名左侧的 activity / cpu / memory / display 图标由
+     DeviceStatsOverlay.tsx 提供，这里先把行内布局对齐好 */
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
   color: var(--dw-text-dim);
-  font-size: 9px;
-  line-height: 11px;
+  font-size: var(--fs-2xs);
+  line-height: 14px;
 }
 
 .dw__stats-item dd {
   overflow: hidden;
   margin: 2px 0 0;
-  color: #e7e9ef;
-  font-size: 11px;
+  color: var(--text-primary);
+  font-size: var(--fs-2xs);
   line-height: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -311,8 +351,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 0 12px;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
   background: var(--dw-surface);
   border-top: 1px solid var(--dw-border);
 }
@@ -320,45 +360,47 @@ body {
 .dw__group {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 
 .dw__divider {
   width: 1px;
-  height: 20px;
-  background: var(--dw-border);
-  margin: 0 2px;
+  height: var(--sp-5);
+  background: var(--border);
+  margin: 0 var(--sp-1);
 }
 
 .dw__tool {
-  width: 34px;
-  height: 34px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid transparent;
-  border-radius: 9px;
+  width: var(--h-md);
+  height: var(--h-md);
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
   background: var(--dw-surface-2);
-  color: #cbd2e0;
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 
 .dw__tool:hover {
-  background: #232a36;
-  border-color: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
 }
 
 .dw__tool:active {
+  background: var(--bg-pressed);
   transform: translateY(1px);
 }
 
 .dw__tool:focus-visible,
 .dw__winbtn:focus-visible,
 .dw__action:focus-visible {
-  outline: 2px solid var(--dw-accent);
-  outline-offset: 1px;
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
 }
 
 /* ------------------------------------------------------------------ 提示 */
@@ -366,25 +408,41 @@ body {
 .dw__toast {
   position: fixed;
   left: 50%;
-  bottom: calc(var(--dw-toolbar-h) + 14px);
+  bottom: calc(var(--dw-toolbar-h) + var(--sp-3));
   z-index: 4;
   transform: translateX(-50%);
-  max-width: calc(100% - 32px);
-  padding: 8px 14px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(24, 28, 37, 0.96);
-  color: var(--dw-text);
-  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: calc(100% - var(--sp-7));
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border);
+  /* 旧 WebView2 不支持 color-mix：先给纯色，再用半透明覆盖 */
+  background: var(--bg-surface);
+  background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
+  color: var(--text-primary);
+  font-size: var(--fs-xs);
   line-height: 17px;
   word-break: break-all;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
-  animation: dw-toast-in 160ms ease-out;
+  box-shadow: var(--shadow-lg);
+  animation: dw-toast-in var(--dur) var(--ease-out);
+}
+
+.dw__toast-icon {
+  color: var(--info);
 }
 
 .dw__toast--danger {
-  border-color: rgba(229, 72, 77, 0.5);
-  color: #ffd7d8;
+  border-color: var(--danger-border);
+}
+
+.dw__toast--danger .dw__toast-icon {
+  color: var(--danger);
+}
+
+.dw__toast-text {
+  min-width: 0;
 }
 
 @keyframes dw-toast-in {
@@ -403,4 +461,3 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-

@@ -1,113 +1,208 @@
 /* ============================================================================
  * AVDDesktop 设计令牌
- * 视觉基线：assets/ 下的参考截图（浅色、留白、圆角卡片、蓝色主操作）
+ *
+ * 视觉基线：assets/ 下的参考截图（MuMu 风格——浅色、留白、圆角卡片、
+ * 单一蓝色主操作、线性图标、深浅双主题）。
+ *
+ * 约定：
+ *   - 组件样式只引用这里定义的变量，不再出现魔法色值 / 魔法尺寸；
+ *   - 尺寸走 4px 网格（--sp-*），控件高度统一走 --h-*，圆角统一走 --r-*；
+ *   - 图标一律使用 components/icons.tsx 的线性 SVG，不使用 emoji；
+ *   - 深色主题必须与浅色主题一一对应，不允许只改一半。
  * ========================================================================== */
 
 :root {
-  /* 品牌 / 强调 */
-  --primary: #2f7cf6;
-  --primary-hover: #1e6be8;
-  --primary-soft: #eaf2fe;
-  --primary-border: #bbd5fc;
+  color-scheme: light;
 
-  /* 文本 */
+  /* ---------------------------------------------------------------- 品牌色 */
+  --primary: #2b7fff;
+  --primary-hover: #1b6ef0;
+  --primary-active: #1560d8;
+  --primary-soft: #ecf3ff;
+  --primary-soft-hover: #dfebff;
+  --primary-border: #bcd6ff;
+  --primary-ink: #ffffff;
+
+  /* ---------------------------------------------------------------- 中性色 */
   --text-primary: #1d2129;
   --text-secondary: #4e5969;
   --text-tertiary: #86909c;
   --text-disabled: #c9cdd4;
   --text-inverse: #ffffff;
 
-  /* 背景 / 边框 */
   --bg-page: #f5f6f8;
   --bg-surface: #ffffff;
   --bg-subtle: #f7f8fa;
   --bg-hover: #f2f3f5;
   --bg-pressed: #e5e6eb;
-  --border-subtle: #eeeff1;
-  --border: #e5e6eb;
+  --bg-inset: #f0f1f3;
 
-  /* 语义 */
+  --border-subtle: #eef0f2;
+  --border: #e5e6eb;
+  --border-strong: #d7d9de;
+
+  --overlay: rgba(23, 28, 38, 0.45);
+  --scrollbar: rgba(29, 33, 41, 0.18);
+  --scrollbar-hover: rgba(29, 33, 41, 0.32);
+
+  /* ---------------------------------------------------------------- 语义色 */
   --success: #00b42a;
-  --success-soft: #e8ffea;
+  --success-hover: #009a24;
+  --success-soft: #eafceb;
+  --success-border: #b6ecbd;
+
   --warning: #ff7d00;
-  --warning-soft: #fff7e8;
+  --warning-soft: #fff6e6;
+  --warning-border: #ffddab;
+
   --danger: #f53f3f;
-  --danger-soft: #ffece8;
-  --info: #2f7cf6;
-  --info-soft: #eaf2fe;
+  --danger-hover: #e02e2e;
+  --danger-soft: #ffeceb;
+  --danger-border: #ffc9c5;
+
+  --info: #2b7fff;
+  --info-soft: #ecf3ff;
+  --info-border: #bcd6ff;
+
   --neutral: #86909c;
   --neutral-soft: #f2f3f5;
 
-  /* 字体 */
-  --font-sans: -apple-system, "Segoe UI Variable Text", "Segoe UI", "PingFang SC",
+  /* ---------------------------------------------------------------- 字体 */
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", -apple-system, "PingFang SC",
     "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
-  --font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+  --font-mono: "Cascadia Mono", "JetBrains Mono", "Consolas", "Courier New", monospace;
 
-  /* 间距 */
+  --fs-2xs: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 18px;
+  --fs-2xl: 22px;
+  --fs-3xl: 26px;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  --lh-tight: 1.25;
+  --lh-normal: 1.45;
+  --lh-loose: 1.7;
+
+  /* ---------------------------------------------------------------- 间距 */
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
   --sp-4: 16px;
   --sp-5: 20px;
   --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 40px;
+  --sp-9: 48px;
 
-  /* 圆角 */
+  /* ---------------------------------------------------------------- 圆角 */
+  --r-xs: 4px;
   --r-sm: 6px;
   --r-md: 8px;
   --r-lg: 12px;
   --r-xl: 16px;
+  --r-2xl: 20px;
   --r-full: 999px;
 
-  /* 阴影 */
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-pop: 0 6px 20px rgba(0, 0, 0, 0.1);
-  --shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.16);
+  /* ---------------------------------------------------------------- 控件高度 */
+  --h-sm: 28px;
+  --h-md: 34px;
+  --h-lg: 40px;
+  --h-xl: 44px;
 
-  /* 布局尺寸 */
-  --titlebar-h: 56px;
-  --nav-w: 80px;
-  --pageheader-h: 64px;
-  --page-content-max: 1040px;
-  --drawer-collapsed-h: 44px;
-  --drawer-expanded-h: 240px;
+  /* ---------------------------------------------------------------- 阴影 */
+  --shadow-xs: 0 1px 2px rgba(23, 28, 38, 0.06);
+  --shadow-sm: 0 2px 8px rgba(23, 28, 38, 0.08);
+  --shadow-md: 0 6px 20px rgba(23, 28, 38, 0.1);
+  --shadow-lg: 0 16px 48px rgba(23, 28, 38, 0.18);
+  --shadow-focus: 0 0 0 3px rgba(43, 127, 255, 0.22);
 
-  /* 动效 */
+  /* ---------------------------------------------------------------- 布局 */
+  --titlebar-h: 60px;
+  --nav-w: 92px;
+  --pageheader-h: 72px;
+  --page-pad: 32px;
+  --page-content-max: 1120px;
+  --drawer-collapsed-h: 48px;
+  --drawer-expanded-h: 260px;
+  --drawer-tasks-w: 380px;
+
+  /* ---------------------------------------------------------------- 动效 */
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --dur: 160ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 110ms;
+  --dur: 170ms;
 }
 
 [data-theme="dark"] {
-  --primary: #4c90ff;
-  --primary-hover: #6ba4ff;
-  --primary-soft: #12233d;
-  --primary-border: #2a4a7a;
+  color-scheme: dark;
 
-  --text-primary: #e5e6eb;
+  --primary: #4d92ff;
+  --primary-hover: #66a2ff;
+  --primary-active: #7db1ff;
+  --primary-soft: #16243c;
+  --primary-soft-hover: #1d2f4d;
+  --primary-border: #2c4a78;
+  --primary-ink: #ffffff;
+
+  --text-primary: #e8eaee;
   --text-secondary: #a9aeb8;
-  --text-tertiary: #6b7280;
-  --text-disabled: #4a4d55;
+  --text-tertiary: #767c88;
+  --text-disabled: #4c515b;
+  --text-inverse: #ffffff;
 
-  --bg-page: #17181a;
-  --bg-surface: #1f2022;
-  --bg-subtle: #242527;
-  --bg-hover: #2a2b2e;
-  --bg-pressed: #33353a;
-  --border-subtle: #2a2b2e;
-  --border: #33353a;
+  --bg-page: #16181b;
+  --bg-surface: #1e2023;
+  --bg-subtle: #232528;
+  --bg-hover: #2a2d31;
+  --bg-pressed: #34383d;
+  --bg-inset: #1a1c1f;
 
-  --success-soft: #10281a;
-  --warning-soft: #2b1f0e;
-  --danger-soft: #2c1513;
-  --info-soft: #12233d;
-  --neutral-soft: #242527;
+  --border-subtle: #292c30;
+  --border: #34383d;
+  --border-strong: #454a51;
 
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-pop: 0 6px 20px rgba(0, 0, 0, 0.45);
-  --shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.55);
+  --overlay: rgba(5, 7, 10, 0.6);
+  --scrollbar: rgba(232, 234, 238, 0.16);
+  --scrollbar-hover: rgba(232, 234, 238, 0.3);
+
+  --success: #37c94f;
+  --success-hover: #4bd661;
+  --success-soft: #12291a;
+  --success-border: #235c32;
+
+  --warning: #ff9a2e;
+  --warning-soft: #2d2110;
+  --warning-border: #5c431c;
+
+  --danger: #ff6b6b;
+  --danger-hover: #ff8383;
+  --danger-soft: #2e1717;
+  --danger-border: #6b3232;
+
+  --info: #4d92ff;
+  --info-soft: #16243c;
+  --info-border: #2c4a78;
+
+  --neutral: #8a909b;
+  --neutral-soft: #26282c;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.42);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.6);
+  --shadow-focus: 0 0 0 3px rgba(77, 146, 255, 0.28);
 }
 
 @media (prefers-reduced-motion: reduce) {
   :root {
+    --dur-fast: 0ms;
     --dur: 0ms;
   }
 }

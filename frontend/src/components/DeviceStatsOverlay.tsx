@@ -4,6 +4,7 @@
 // 不接触 MJPEG 画面链路，也不会在画面帧到达时触发 React 更新。
 import { useEffect, useState } from "react";
 import * as win from "../bridge/deviceWindow";
+import { Icon } from "./icons";
 
 interface DeviceStatsOverlayProps {
   visible: boolean;
@@ -63,7 +64,10 @@ export function DeviceStatsOverlay({ visible }: DeviceStatsOverlayProps) {
   return (
     <section className="dw__stats" aria-label="性能诊断">
       <div className="dw__stats-head">
-        <span>性能诊断</span>
+        <span className="dw__stats-title">
+          <Icon name="activity" size={12} />
+          性能诊断
+        </span>
         <span className={`dw__stats-live${stats ? " is-live" : ""}`}>{stats ? "LIVE" : "--"}</span>
       </div>
 

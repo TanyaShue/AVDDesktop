@@ -2,6 +2,7 @@
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 import type { JobInfo, Toast } from "../bridge/types";
+import { Icon, type IconName } from "./icons";
 
 /** 当前挂载的弹窗数量（见 Modal 的滚动锁）。 */
 let modalOpenCount = 0;
@@ -53,7 +54,7 @@ export function Modal({
         <div className="modal__head">
           <div className="modal__title">{title}</div>
           <button className="modal__close" onClick={onClose} aria-label="关闭">
-            ✕
+            <Icon name="close" size={16} />
           </button>
         </div>
         <div className={`modal__body${bodyClassName ? ` ${bodyClassName}` : ""}`}>{children}</div>
@@ -69,10 +70,10 @@ export function Toasts({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id:
     <div className="toasts">
       {toasts.map((t) => (
         <div key={t.id} className="toast" onClick={() => onDismiss(t.id)} role="status">
-          <span className={`tool__icon tool__icon--${iconTone(t.level)}`} style={{ width: 28, height: 28, fontSize: 14 }}>
-            {iconChar(t.level)}
+          <span className={`toast__icon${toastTone(t.level)}`}>
+            <Icon name={toastIcon(t.level)} size={15} />
           </span>
-          <div style={{ minWidth: 0 }}>
+          <div className="toast__body">
             <div className="toast__title">{t.title}</div>
             {t.text ? <div className="toast__text">{t.text}</div> : null}
           </div>
@@ -82,27 +83,29 @@ export function Toasts({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id:
   );
 }
 
-function iconChar(level: Toast["level"]) {
+/** Toast 图标：语义与色调一一对应（成功对勾 / 警告三角 / 失败叉 / 信息圆）。 */
+function toastIcon(level: Toast["level"]): IconName {
   switch (level) {
     case "success":
-      return "✓";
+      return "check";
     case "warning":
-      return "!";
+      return "alert";
     case "danger":
-      return "✕";
+      return "cross";
     default:
-      return "i";
+      return "info";
   }
 }
 
-function iconTone(level: Toast["level"]) {
+/** Toast 色调后缀：info 使用 .toast__icon 的默认色，不加后缀。 */
+function toastTone(level: Toast["level"]) {
   switch (level) {
     case "success":
-      return "ok";
+      return " toast__icon--ok";
     case "warning":
-      return "warn";
+      return " toast__icon--warn";
     case "danger":
-      return "bad";
+      return " toast__icon--bad";
     default:
       return "";
   }

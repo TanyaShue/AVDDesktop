@@ -10,23 +10,24 @@ import * as win from "../bridge/deviceWindow";
 import type { DeviceSession } from "../bridge/deviceWindow";
 import { FrameCanvas, supportsWebGL2 } from "../device/FrameCanvas";
 import type { FrameCanvasStats } from "../device/FrameCanvas";
-import { Icon } from "./deviceWindowIcons";
+import { Icon } from "./icons";
+import type { IconName } from "./icons";
 import { DeviceStatsOverlay } from "./DeviceStatsOverlay";
 
 /** 拖动时两次触摸上报的最小间隔：约 60Hz，避免把 gRPC 通道打满。 */
 const TOUCH_INTERVAL_MS = 16;
 
 /** 工具栏按键（映射到 adb keyevent）。 */
-const TOOL_KEYS = [
-  { key: "back", label: "返回", icon: "back" as const },
-  { key: "home", label: "主页", icon: "home" as const },
-  { key: "appswitch", label: "多任务", icon: "recent" as const },
+const TOOL_KEYS: { key: string; label: string; icon: IconName }[] = [
+  { key: "back", label: "返回", icon: "back" },
+  { key: "home", label: "主页", icon: "home" },
+  { key: "appswitch", label: "多任务", icon: "recent" },
 ];
 
 /** 音量键：设备音量由系统 UI 呈现，这里只做按键注入。 */
-const VOLUME_KEYS = [
-  { key: "volumedown", label: "音量 -", icon: "volumeDown" as const },
-  { key: "volumeup", label: "音量 +", icon: "volumeUp" as const },
+const VOLUME_KEYS: { key: string; label: string; icon: IconName }[] = [
+  { key: "volumedown", label: "音量 -", icon: "volumeDown" },
+  { key: "volumeup", label: "音量 +", icon: "volumeUp" },
 ];
 
 /** 键盘快捷键：模拟器窗口直接转发常用键，省去用鼠标点导航条。 */
@@ -232,12 +233,14 @@ export function DeviceWindowApp() {
     ? ({ "--device-ar": String(aspect) } as CSSProperties)
     : undefined;
 
+  // 设备窗口是独立的深色文档：根节点声明 data-theme="dark"，
+  // device-window.css 里的颜色令牌（tokens.css 的深色块）才会解析成深色取值。
   return (
-    <div className="dw">
+    <div className="dw" data-theme="dark">
       <header className="dw__titlebar">
         <span className="dw__brand" title={session?.avdName ?? ""}>
           <span className="dw__logo" aria-hidden>
-            A
+            <Icon name="devices" size={16} />
           </span>
           <span className="dw__name truncate">{session?.avdName ?? "设备窗口"}</span>
         </span>
@@ -254,7 +257,7 @@ export function DeviceWindowApp() {
             aria-pressed={statsVisible}
             onClick={() => setStatsVisible((value) => !value)}
           >
-            FPS
+            <Icon name="stats" size={16} />
           </button>
           <button
             type="button"
@@ -262,7 +265,7 @@ export function DeviceWindowApp() {
             title={pinned ? "取消置顶" : "窗口置顶"}
             onClick={togglePin}
           >
-            <Icon name="pin" />
+            <Icon name="pin" size={16} />
           </button>
           <button
             type="button"
@@ -270,7 +273,7 @@ export function DeviceWindowApp() {
             title="最小化"
             onClick={() => void win.Minimise().catch(() => undefined)}
           >
-            <Icon name="minimise" />
+            <Icon name="minimise" size={16} />
           </button>
           <button
             type="button"
@@ -278,7 +281,7 @@ export function DeviceWindowApp() {
             title={maximised ? "还原" : "最大化"}
             onClick={toggleMaximise}
           >
-            <Icon name={maximised ? "restore" : "maximise"} />
+            <Icon name={maximised ? "restore" : "maximise"} size={16} />
           </button>
           <button
             type="button"
@@ -286,7 +289,7 @@ export function DeviceWindowApp() {
             title="关闭设备窗口（不会停止模拟器）"
             onClick={() => void win.Close().catch(() => undefined)}
           >
-            <Icon name="close" />
+            <Icon name="close" size={16} />
           </button>
         </div>
       </header>
@@ -340,6 +343,7 @@ export function DeviceWindowApp() {
 
         {error ? (
           <div className="dw__overlay">
+            <Icon className="dw__overlay-icon dw__overlay-icon--danger" name="alert" size={28} strokeWidth={1.5} />
             <div className="dw__overlay-title">无法打开设备窗口</div>
             <div className="dw__overlay-text">{error}</div>
           </div>
@@ -347,6 +351,7 @@ export function DeviceWindowApp() {
 
         {frameBroken ? (
           <div className="dw__overlay">
+            <Icon className="dw__overlay-icon" name="windowOff" size={28} strokeWidth={1.5} />
             <div className="dw__overlay-title">画面已中断</div>
             <div className="dw__overlay-text">模拟器可能已停止；重新连接会重新订阅画面流。</div>
             <button
@@ -375,7 +380,7 @@ export function DeviceWindowApp() {
               title={item.label}
               onClick={() => sendKey(item.key, item.label)}
             >
-              <Icon name={item.icon} />
+              <Icon name={item.icon} size={18} />
             </button>
           ))}
         </div>
@@ -391,7 +396,7 @@ export function DeviceWindowApp() {
               title={item.label}
               onClick={() => sendKey(item.key, item.label)}
             >
-              <Icon name={item.icon} />
+              <Icon name={item.icon} size={18} />
             </button>
           ))}
         </div>
@@ -399,7 +404,7 @@ export function DeviceWindowApp() {
         <span className="dw__divider" />
 
         <button type="button" className="dw__tool" title="截图" onClick={takeScreenshot}>
-          <Icon name="screenshot" />
+          <Icon name="screenshot" size={18} />
         </button>
       </footer>
 
@@ -407,7 +412,12 @@ export function DeviceWindowApp() {
 
       {toast ? (
         <div className={`dw__toast dw__toast--${toast.level}`} role="status">
-          {toast.text}
+          <Icon
+            className="dw__toast-icon"
+            name={toast.level === "danger" ? "alert" : "info"}
+            size={16}
+          />
+          <span className="dw__toast-text">{toast.text}</span>
         </div>
       ) : null}
     </div>

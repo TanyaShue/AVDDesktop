@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="540" height="960" viewBox="0 0 540 960">
+  <!-- 预览用的假「设备画面」：只在 dev server 里被 device-preview.html 当作 MJPEG 帧加载。 -->
+  <defs>
+    <linearGradient id="wall" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16233d"/>
+      <stop offset="0.55" stop-color="#2b4778"/>
+      <stop offset="1" stop-color="#4a6fae"/>
+    </linearGradient>
+    <linearGradient id="clock" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.2"/>
+    </linearGradient>
+  </defs>
+  <rect width="540" height="960" fill="url(#wall)"/>
+  <circle cx="120" cy="240" r="200" fill="#6f9be0" opacity="0.18"/>
+  <circle cx="440" cy="760" r="240" fill="#8fb6f0" opacity="0.14"/>
+  <text x="270" y="120" font-family="Segoe UI, sans-serif" font-size="86" font-weight="600" fill="url(#clock)" text-anchor="middle">9:41</text>
+  <text x="270" y="176" font-family="Segoe UI, sans-serif" font-size="30" fill="#ffffff" opacity="0.7" text-anchor="middle">AVDDesktop 预览画面</text>
+  <g fill="#ffffff" opacity="0.92">
+    <rect x="70" y="300" width="110" height="110" rx="30"/>
+    <rect x="215" y="300" width="110" height="110" rx="30" opacity="0.8"/>
+    <rect x="360" y="300" width="110" height="110" rx="30" opacity="0.6"/>
+    <rect x="70" y="450" width="110" height="110" rx="30" opacity="0.6"/>
+    <rect x="215" y="450" width="110" height="110" rx="30" opacity="0.8"/>
+    <rect x="360" y="450" width="110" height="110" rx="30" opacity="0.5"/>
+    <rect x="70" y="600" width="110" height="110" rx="30" opacity="0.5"/>
+    <rect x="215" y="600" width="110" height="110" rx="30" opacity="0.7"/>
+    <rect x="360" y="600" width="110" height="110" rx="30" opacity="0.92"/>
+  </g>
+  <rect x="60" y="800" width="420" height="120" rx="40" fill="#0d1526" opacity="0.55"/>
+  <g fill="#ffffff" opacity="0.65">
+    <rect x="105" y="852" width="36" height="36" rx="12"/>
+    <rect x="252" y="852" width="36" height="36" rx="12"/>
+    <rect x="399" y="852" width="36" height="36" rx="12"/>
+  </g>
+</svg>

@@ -8,18 +8,20 @@ import * as api from "../bridge/api";
 import { EVENTS, errorText } from "../bridge/api";
 import type { DisplaySession } from "../bridge/types";
 import { useWailsEvent } from "../hooks/useApp";
+import { Icon } from "./icons";
+import type { IconName } from "./icons";
 
 /** 拖动时两次触摸上报的最小间隔：约 60Hz，避免把 gRPC 通道打满。 */
 const TOUCH_INTERVAL_MS = 16;
 
 /** 导航键（后端映射到 adb keyevent：back=4 / home=3 / appswitch=187）。 */
-const NAV_KEYS = [
-  { key: "back", label: "返回" },
-  { key: "home", label: "主页" },
-  { key: "appswitch", label: "多任务" },
-] as const;
+type NavKey = "back" | "home" | "appswitch";
 
-type NavKey = (typeof NAV_KEYS)[number]["key"];
+const NAV_KEYS: { key: NavKey; label: string; icon: IconName }[] = [
+  { key: "back", label: "返回", icon: "back" },
+  { key: "home", label: "主页", icon: "home" },
+  { key: "appswitch", label: "多任务", icon: "recent" },
+];
 
 /**
  * 进行中的 Open 请求（按实例去重）。
@@ -169,10 +171,12 @@ export function DeviceWindow({ instanceId, avdName, onClose, onToast }: Props) {
           </div>
         ) : error ? (
           <div className="devicewindow__state">
-            <div className="devicewindow__state-icon">⚠️</div>
+            {/* 失败态用线性图标：Windows 上 emoji 的字体与基线不可控 */}
+            <Icon className="devicewindow__state-icon" name="alert" size={32} strokeWidth={1.5} />
             <div className="devicewindow__state-title">无法打开设备画面</div>
             <div className="devicewindow__state-text">{error}</div>
             <button className="btn btn--primary" onClick={() => void connect()}>
+              <Icon name="refresh" size={16} />
               重试
             </button>
           </div>
@@ -193,11 +197,13 @@ export function DeviceWindow({ instanceId, avdName, onClose, onToast }: Props) {
             disabled={!session}
             onClick={() => sendKey(item.key)}
           >
+            <Icon name={item.icon} size={16} />
             {item.label}
           </button>
         ))}
         <span className="devicewindow__toolbar-gap" />
         <button className="btn btn--danger-ghost" onClick={close}>
+          <Icon name="close" size={16} />
           关闭
         </button>
       </div>

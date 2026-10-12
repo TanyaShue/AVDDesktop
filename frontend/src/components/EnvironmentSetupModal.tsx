@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import * as api from "../bridge/api";
 import { errorText } from "../bridge/api";
 import type { MirrorSource } from "../bridge/types";
+import { Icon } from "./icons";
 import { Modal } from "./ui";
 
 interface Props {
@@ -92,17 +93,31 @@ export function EnvironmentSetupModal({
               取消
             </button>
             <button className="btn btn--secondary" onClick={() => void repair()} disabled={busy}>
-              {repairing ? <span className="spinner" /> : "一键修复"}
+              {repairing ? (
+                <span className="spinner" />
+              ) : (
+                <>
+                  <Icon name="wrench" size={15} />
+                  一键修复
+                </>
+              )}
             </button>
             <button className="btn btn--primary" onClick={() => void start()} disabled={busy}>
-              {starting ? <span className="spinner" /> : "准备 / 补装"}
+              {starting ? (
+                <span className="spinner" />
+              ) : (
+                <>
+                  <Icon name="download" size={15} />
+                  准备 / 补装
+                </>
+              )}
             </button>
           </div>
         </div>
       }
     >
       <div className="banner banner--info">
-        <div className="banner__icon">⬇️</div>
+        <div className="banner__icon"><Icon name="info" size={18} /></div>
         <div className="banner__body">
           <div className="banner__title">将使用下列镜像源补齐软件自带环境</div>
           <div className="banner__text">
@@ -116,7 +131,7 @@ export function EnvironmentSetupModal({
 
       {error ? (
         <div className="banner banner--danger" style={{ marginTop: 12 }}>
-          <div className="banner__icon">⛔</div>
+          <div className="banner__icon"><Icon name="alert" size={18} /></div>
           <div className="banner__body">
             <div className="banner__title">操作未开始</div>
             <div className="banner__text">{error}</div>
@@ -127,6 +142,7 @@ export function EnvironmentSetupModal({
       <div className="env-setup__sources">
         <div className="mirror-summary__item">
           <div className="mirror-summary__head">
+            <Icon name="globe" size={14} className="muted" />
             <span className="mirror-summary__title">Android SDK 镜像源</span>
             {sdkSource?.region ? <span className="chip chip--sm">{sdkSource.region}</span> : null}
           </div>
@@ -137,6 +153,7 @@ export function EnvironmentSetupModal({
         </div>
         <div className="mirror-summary__item">
           <div className="mirror-summary__head">
+            <Icon name="globe" size={14} className="muted" />
             <span className="mirror-summary__title">JDK 镜像源</span>
             {jdkSource?.region ? <span className="chip chip--sm">{jdkSource.region}</span> : null}
             {jdkReady ? <span className="chip chip--sm chip--info">JDK 已安装</span> : null}
@@ -148,16 +165,19 @@ export function EnvironmentSetupModal({
         </div>
       </div>
 
-      <div className="row row--wrap" style={{ marginTop: 12, justifyContent: "space-between" }}>
+      <div className="row row--wrap" style={{ marginTop: 12 }}>
         <span className={sourceError ? "muted muted--danger" : "muted"}>
           {sourceError
             ? `读取镜像源失败：${sourceError}`
             : "镜像源不可达时下载会失败，可先检测并更换镜像源。"}
         </span>
         {onOpenMirrorSettings ? (
-          <button className="btn btn--secondary btn--sm" onClick={onOpenMirrorSettings} disabled={busy}>
-            检测 / 更换镜像源
-          </button>
+          <div className="toolbar__right">
+            <button className="btn btn--secondary btn--sm" onClick={onOpenMirrorSettings} disabled={busy}>
+              <Icon name="globe" size={15} />
+              检测 / 更换镜像源
+            </button>
+          </div>
         ) : null}
       </div>
     </Modal>

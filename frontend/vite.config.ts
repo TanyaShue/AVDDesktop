@@ -15,5 +15,13 @@ export default defineConfig({
         device: 'device.html'
       }
     }
+  },
+  server: {
+    watch: {
+      // 编辑器/工具写文件时会先建 `.<name>.<pid>.<uuid>.tmpdir/` 再原子替换。
+      // Windows 上这些临时目录随写随删，chokidar 监听它们会偶发 EBUSY 并直接
+      // 让 vite dev server 崩溃，这里显式忽略临时目录。
+      ignored: ['**/*.tmpdir', '**/*.tmpdir/**', '**/.*.tmp/**']
+    }
   }
 })

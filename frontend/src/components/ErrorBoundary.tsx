@@ -4,6 +4,7 @@
 // （连标题栏和导航都不见了，用户无法自救，也看不到任何错误信息）。
 // 这里把异常收敛成一张可读的错误卡片：保留导航、暴露错误文本、提供重试入口。
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Icon } from "./icons";
 
 interface Props {
   children: ReactNode;
@@ -46,8 +47,8 @@ export class ErrorBoundary extends Component<Props, State> {
       <div className="errorfallback">
         <div className="card errorfallback__card">
           <div className="banner banner--danger">
-            <span className="banner__icon" aria-hidden>
-              ✕
+            <span className="banner__icon">
+              <Icon name="cross" size={18} />
             </span>
             <div className="banner__body">
               <div className="banner__title">{this.props.scope ?? "页面"}渲染出错，已阻止白屏</div>
@@ -57,14 +58,17 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
           </div>
           <pre className="errorfallback__pre mono">{String(error.stack || error.message)}</pre>
-          <div className="row" style={{ gap: 8, marginTop: 12 }}>
+          <div className="row mt-3">
             <button className="btn btn--primary" onClick={this.reset}>
+              <Icon name="refresh" size={15} />
               重试
             </button>
             <button className="btn btn--secondary" onClick={this.copy}>
+              <Icon name="copy" size={15} />
               复制错误
             </button>
             <button className="btn btn--secondary" onClick={() => window.location.reload()}>
+              <Icon name="external" size={15} />
               重新加载
             </button>
           </div>

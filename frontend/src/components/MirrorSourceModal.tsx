@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import * as api from "../bridge/api";
 import { errorText } from "../bridge/api";
 import type { MirrorCheck, MirrorResource } from "../bridge/types";
+import { Icon } from "./icons";
 import { formatMs, humanSize, humanSpeed, Modal } from "./ui";
 
 /** 保存成功后的结果（父级据此刷新展示与依赖镜像源的列表）。 */
@@ -121,7 +122,14 @@ export function MirrorSourceModal({
               取消
             </button>
             <button className="btn btn--primary" onClick={() => void apply()} disabled={!canApply}>
-              {applying ? <span className="spinner" /> : sdkChanged || jdkChanged ? "保存镜像源" : "保存"}
+              {applying ? (
+                <span className="spinner" />
+              ) : (
+                <>
+                  <Icon name="check" size={15} />
+                  {sdkChanged || jdkChanged ? "保存镜像源" : "保存"}
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -129,7 +137,7 @@ export function MirrorSourceModal({
     >
       <div className="mirror-modal">
         <div className="banner banner--info mirror-modal__notice">
-          <div className="banner__icon">⇄</div>
+          <div className="banner__icon"><Icon name="globe" size={18} /></div>
           <div className="banner__body">
             <div className="banner__title">Android SDK 与 JDK 分别检测并选择下载镜像</div>
             <div className="banner__text">
@@ -147,7 +155,14 @@ export function MirrorSourceModal({
           </div>
           <div className="toolbar__right">
             <button className="btn btn--secondary btn--sm" disabled={loading} onClick={() => void runChecks()}>
-              {loading ? <span className="spinner" /> : "重新检测"}
+              {loading ? (
+                <span className="spinner" />
+              ) : (
+                <>
+                  <Icon name="refresh" size={15} />
+                  重新检测
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -222,8 +237,18 @@ function Selection({
     <span className="mirror-modal__selection-item">
       <span className="muted">{label}</span>
       {check ? <strong>{check.sourceName}</strong> : <strong>请选择</strong>}
-      {check && !check.compatible ? <span className="chip chip--sm chip--warning">不可用</span> : null}
-      {changed ? <span className="chip chip--sm chip--info">待保存</span> : null}
+      {check && !check.compatible ? (
+        <span className="chip chip--sm chip--warning">
+          <Icon name="alert" size={13} />
+          不可用
+        </span>
+      ) : null}
+      {changed ? (
+        <span className="chip chip--sm chip--info">
+          <Icon name="clock" size={13} />
+          待保存
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -275,8 +300,8 @@ function MirrorGrid({
             <span className={`mirror-radio${selectedId === check.sourceId ? " mirror-radio--checked" : ""}`} />
             <div className="mirror-card__name">
               <div className="mirror-card__title-row">
+                <Icon name="globe" size={14} />
                 <span className="mirror-card__title">{check.sourceName}</span>
-                {check.recommended ? <span className="chip chip--sm chip--success">推荐</span> : null}
                 {check.sourceId === currentSourceId ? <span className="chip chip--sm chip--info">当前</span> : null}
               </div>
               <div className="mirror-card__region">{check.region || "未知区域"}</div>
@@ -332,7 +357,7 @@ function ResourceChip({ resource }: { resource: MirrorResource }) {
       className={`chip chip--sm ${resource.available ? "chip--success" : resource.required ? "chip--danger" : "chip--warning"}`}
       title={title}
     >
-      <span className="dot" />
+      <Icon name={resource.available ? "check" : "cross"} size={12} />
       {resourceShortName(resource.id)}
       {resource.required ? " *" : ""}
     </span>
@@ -340,10 +365,36 @@ function ResourceChip({ resource }: { resource: MirrorResource }) {
 }
 
 function MirrorStatus({ check }: { check: MirrorCheck }) {
-  if (!check.reachable) return <span className="chip chip--sm chip--danger">无法连接</span>;
-  if (check.recommended) return <span className="chip chip--sm chip--success">推荐</span>;
-  if (check.compatible) return <span className="chip chip--sm chip--info">可用</span>;
-  return <span className="chip chip--sm chip--warning">资源不完整</span>;
+  if (!check.reachable) {
+    return (
+      <span className="chip chip--sm chip--danger">
+        <Icon name="cross" size={13} />
+        无法连接
+      </span>
+    );
+  }
+  if (check.recommended) {
+    return (
+      <span className="chip chip--sm chip--success">
+        <Icon name="check" size={13} />
+        推荐
+      </span>
+    );
+  }
+  if (check.compatible) {
+    return (
+      <span className="chip chip--sm chip--info">
+        <Icon name="check" size={13} />
+        可用
+      </span>
+    );
+  }
+  return (
+    <span className="chip chip--sm chip--warning">
+      <Icon name="alert" size={13} />
+      资源不完整
+    </span>
+  );
 }
 
 function resourceShortName(id: string): string {

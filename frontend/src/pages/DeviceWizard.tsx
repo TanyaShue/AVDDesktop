@@ -14,6 +14,7 @@ import {
   SystemImageModal,
 } from "../components/SystemImageModal";
 import { Modal } from "../components/ui";
+import { Icon } from "../components/icons";
 
 interface Props {
   onClose: () => void;
@@ -315,9 +316,11 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
         footer={
           <div className="modal__foot-right">
             <button className="btn btn--secondary" onClick={onClose}>
+              <Icon name="close" size={16} />
               取消
             </button>
             <button className="btn btn--primary" disabled={!canSubmit} onClick={() => void submit()}>
+              {submitting ? <Icon name="clock" size={16} /> : <Icon name="check" size={17} />}
               {submitting ? "创建中…" : "创建"}
             </button>
           </div>
@@ -344,7 +347,7 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
           </div>
         </div>
 
-        <div className="field">
+        <div className="field field--start">
           <div className="field__label">System Image</div>
           <div className="field__control">
             <select
@@ -394,6 +397,7 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
             disabled={loadingAll}
             onClick={openAllImages}
           >
+            {loadingAll ? <span className="spinner" /> : <Icon name="image" size={16} />}
             {loadingAll ? "读取中…" : "加载全部镜像"}
           </button>
         </div>
@@ -503,6 +507,7 @@ export function DeviceWizard({ onClose, onCreated, onToast }: Props) {
                 </span>
                 {hardwareFilled > 0 ? (
                   <button className="btn btn--ghost" onClick={() => setHardwareForm(EMPTY_HARDWARE_FORM)}>
+                    <Icon name="refresh" size={15} />
                     恢复默认
                   </button>
                 ) : null}

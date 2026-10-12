@@ -7,6 +7,7 @@ import * as api from "../bridge/api";
 import type { JobInfo, LogLine } from "../bridge/types";
 import type { ConsoleLine } from "../hooks/useApp";
 import { humanSize, humanSpeed, jobStatusText, Progress } from "./ui";
+import { Icon } from "./icons";
 
 export function TaskDrawer({
   jobs,
@@ -46,17 +47,18 @@ export function TaskDrawer({
         role="button"
         aria-expanded={expanded}
       >
-        <span className="drawer__title">{expanded ? "▾" : "▴"} 任务</span>
+        <span className="drawer__title">
+          <Icon name="terminal" size={16} />
+          任务
+        </span>
         <span className="drawer__count">
           {active.length > 0 ? `${active.length} 个进行中` : `${jobs.length} 条记录`}
         </span>
 
         {primary ? (
           <div className="drawer__active">
-            <span className="truncate" style={{ maxWidth: 220 }}>
-              {primary.title}
-            </span>
-            <div style={{ flex: 1, maxWidth: 180 }}>
+            <span className="drawer__active-title truncate">{primary.title}</span>
+            <div className="drawer__active-bar">
               <Progress
                 percent={primary.percent}
                 indeterminate={primary.status === "running" && primary.percent <= 0}
@@ -78,6 +80,7 @@ export function TaskDrawer({
             onClick={() => onToggle(!expanded)}
           >
             {expanded ? "收起" : "展开"}
+            <Icon name={expanded ? "chevronDown" : "chevronUp"} size={14} />
           </button>
         </div>
       </div>
@@ -92,13 +95,17 @@ export function TaskDrawer({
                   className="btn btn--danger-ghost btn--sm"
                   onClick={() => void api.Jobs.CancelAll()}
                 >
+                  <Icon name="stop" size={13} />
                   停止全部
                 </button>
               ) : null}
             </div>
             <div className="drawer__list">
               {jobs.length === 0 ? (
-                <div className="muted drawer__empty">暂无任务</div>
+                <div className="muted drawer__empty row">
+                  <Icon name="clock" size={16} />
+                  暂无任务
+                </div>
               ) : (
                 jobs.map((job) => (
                   <div key={job.id} className="drawer__item">
@@ -113,16 +120,15 @@ export function TaskDrawer({
                           title={`停止任务：${job.title}`}
                           onClick={() => void api.Jobs.Cancel(job.id)}
                         >
+                          <Icon name="stop" size={12} />
                           停止
                         </button>
                       ) : null}
                     </div>
                     {detail(job) ? (
-                      <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
-                        {detail(job)}
-                      </div>
+                      <div className="muted muted--xs mt-1">{detail(job)}</div>
                     ) : null}
-                    <div style={{ marginTop: 6 }}>
+                    <div className="mt-2">
                       <Progress
                         percent={job.percent}
                         indeterminate={job.status === "running" && job.percent <= 0}
@@ -136,7 +142,7 @@ export function TaskDrawer({
           </div>
           <div className="drawer__console" ref={consoleRef}>
             {lines.length === 0 ? (
-              <span style={{ opacity: 0.6 }}>（暂无日志）</span>
+              <span className="muted">（暂无日志）</span>
             ) : (
               lines.map((line) => (
                 <div key={line.key} className={lineClass(line)}>

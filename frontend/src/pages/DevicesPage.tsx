@@ -7,6 +7,8 @@ import type { AvdState, AvdSummary, EmulatorInstance } from "../bridge/types";
 import type { EnvCheck } from "../hooks/useEnvCheck";
 import { useWailsEvent } from "../hooks/useApp";
 import { DeviceWindow } from "../components/DeviceWindow";
+import { Icon } from "../components/icons";
+import type { IconName } from "../components/icons";
 import { DeviceWizard } from "./DeviceWizard";
 
 interface Props {
@@ -22,6 +24,8 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
   const [query, setQuery] = useState("");
   const [view, setView] = useState<"grid" | "list">("grid");
   const [sortBy, setSortBy] = useState<"name" | "api">("name");
+  /** 排序方式浮层是否展开（与设备的「更多操作」互不干扰）。 */
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [busyNames, setBusyNames] = useState<ReadonlySet<string>>(() => new Set());
   /** 当前展开「更多操作」的设备名：同一时间只允许一个菜单展开。 */
@@ -30,6 +34,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
   const [openWindow, setOpenWindow] = useState<{ instanceId: string; avdName: string } | null>(null);
 
   const closeMenu = useCallback(() => setOpenMenu(null), []);
+  const closeSortMenu = useCallback(() => setSortMenuOpen(false), []);
 
   /** 设备窗口只存在于设备页：切走页面时兜底关闭画面，避免后端帧循环空转（只关画面，不停模拟器）。 */
   const openWindowRef = useRef(openWindow);
@@ -191,7 +196,9 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
       <div className="pagecontent">
         {env.report && !env.report.ready ? (
           <div className="banner banner--info" style={{ marginBottom: 12 }}>
-            <div className="banner__icon">⚠️</div>
+            <div className="banner__icon">
+              <Icon name="alert" size={18} />
+            </div>
             <div className="banner__body">
               <div className="banner__title">环境尚未就绪</div>
               <div className="banner__text">
@@ -202,6 +209,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
             </div>
             {env.report.needInit ? (
               <button className="btn btn--primary" onClick={() => void env.prepare()}>
+                <Icon name="download" size={15} />
                 立即准备
               </button>
             ) : null}
@@ -210,7 +218,8 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
 
         <div className="toolbar">
           <button className="btn btn--primary btn--lg" onClick={() => setShowWizard(true)}>
-            ＋ 新建设备
+            <Icon name="plus" size={17} />
+            新建设备
           </button>
           <div className="toolbar__right">
             <input
@@ -219,21 +228,39 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
-            <select
-              className="select select--compact"
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-              aria-label="排序方式"
+            <Popover
+              open={sortMenuOpen}
+              onClose={closeSortMenu}
+              trigger={
+                <button
+                  className="icon-btn icon-btn--bordered"
+                  title="排序方式"
+                  aria-label="排序方式"
+                  aria-haspopup="menu"
+                  aria-expanded={sortMenuOpen}
+                  onClick={() => setSortMenuOpen((prev) => !prev)}
+                >
+                  <Icon name="sort" size={16} />
+                </button>
+              }
             >
-              <option value="name">按名称</option>
-              <option value="api">按 Android 版本</option>
-            </select>
+              <MenuItem
+                label="按名称"
+                active={sortBy === "name"}
+                onClick={() => setSortBy("name")}
+              />
+              <MenuItem
+                label="按 Android 版本"
+                active={sortBy === "api"}
+                onClick={() => setSortBy("api")}
+              />
+            </Popover>
             <div className="segmented">
               <button aria-pressed={view === "grid"} onClick={() => setView("grid")} title="网格视图">
-                ▦
+                <Icon name="grid" size={16} />
               </button>
               <button aria-pressed={view === "list"} onClick={() => setView("list")} title="列表视图">
-                ☰
+                <Icon name="list" size={16} />
               </button>
             </div>
           </div>
@@ -241,7 +268,9 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
 
         {filtered.length === 0 ? (
           <div className="empty">
-            <div className="empty__icon">📱</div>
+            <div className="empty__icon">
+              <Icon name="devices" size={30} strokeWidth={1.5} />
+            </div>
             <div className="empty__title">{devices.length === 0 ? "还没有模拟器设备" : "没有匹配的设备"}</div>
             <div className="empty__desc">
               {devices.length === 0
@@ -250,21 +279,33 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
             </div>
             {devices.length === 0 ? (
               <button className="btn btn--primary btn--lg" onClick={() => setShowWizard(true)}>
-                ＋ 新建设备
+                <Icon name="plus" size={17} />
+                新建设备
               </button>
             ) : null}
           </div>
         ) : (
-          <div className={view === "grid" ? "grid grid--devices" : "grid"} style={{ gridTemplateColumns: view === "list" ? "1fr" : undefined }}>
+          <div className={view === "grid" ? "grid grid--devices" : "grid grid--compact"}>
             {filtered.map((device) => {
               const inst = active.get(device.name);
               // Wails 把 Go 的 AvdState 生成为 string，这里收敛回联合类型后再交给状态展示函数
               const state = inst?.state as AvdState | undefined;
               const hw = hardwareLabel(device);
+              // 缩略图角标只在设备处于活动状态时出现（已停止的设备不需要角标）。
+              const showBadge =
+                state === "running" || state === "booting" || state === "starting";
               return (
                 <div key={device.name} className="card card--hover device">
                   <div className="device__thumb" aria-hidden>
-                    {inst?.state === "running" ? inst.avdName.slice(0, 2).toUpperCase() : "AVD"}
+                    <span className="device__glyph">
+                      <Icon name="devices" size={52} strokeWidth={1.3} />
+                    </span>
+                    {showBadge ? (
+                      <span className="device__badge">
+                        <span className="dot" style={{ background: stateColor(state) }} />
+                        {stateLabel(state)}
+                      </span>
+                    ) : null}
                   </div>
 
                   <div className="device__body">
@@ -292,7 +333,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                       ) : null}
                     </div>
                     {device.broken ? (
-                      <div className="muted" style={{ color: "var(--danger)", marginTop: 6 }}>
+                      <div className="muted muted--danger" style={{ marginTop: 6 }}>
                         {device.broken}
                       </div>
                     ) : null}
@@ -307,7 +348,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                           disabled={busyNames.has(device.name)}
                           onClick={() => void stopDevice(device)}
                         >
-                          ■
+                          <Icon name="stop" size={16} />
                         </button>
                       ) : (
                         <button
@@ -316,7 +357,11 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                           disabled={busyNames.has(device.name)}
                           onClick={() => void startDevice(device)}
                         >
-                          {busyNames.has(device.name) ? <span className="spinner" /> : "▶"}
+                          {busyNames.has(device.name) ? (
+                            <span className="spinner" />
+                          ) : (
+                            <Icon name="play" size={18} />
+                          )}
                         </button>
                       )}
                       <MoreMenu
@@ -327,25 +372,30 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                         onClose={closeMenu}
                       >
                         <MenuItem
+                          icon="snowflake"
                           label="冷启动（不使用快照）"
                           onClick={() => void startDevice(device, { coldBoot: true })}
                         />
                         <MenuItem
+                          icon="windowOff"
                           label="无窗口启动"
                           onClick={() => void startDevice(device, { noWindow: true })}
                         />
                         {inst?.customUI ? (
                           <MenuItem
+                            icon="monitor"
                             label="打开设备窗口"
                             onClick={() => void openDeviceWindow(inst.id, device.name)}
                           />
                         ) : (
                           <MenuItem
+                            icon="monitor"
                             label="使用自定义 UI 启动"
                             onClick={() => void startDevice(device, { customUI: true })}
                           />
                         )}
                         <MenuItem
+                          icon="copy"
                           label="复制启动命令"
                           onClick={() =>
                             void api.Env.CopyToClipboard(
@@ -353,7 +403,13 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                             )
                           }
                         />
-                        <MenuItem label="删除设备" danger onClick={() => void deleteDevice(device)} />
+                        <div className="menu__sep" />
+                        <MenuItem
+                          icon="trash"
+                          label="删除设备"
+                          danger
+                          onClick={() => void deleteDevice(device)}
+                        />
                       </MoreMenu>
                     </div>
                   </div>
@@ -386,18 +442,21 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
 }
 
 /**
- * 「更多操作」下拉菜单：受控展开，点击菜单以外的任意位置（页面空白、其它卡片、工具栏、
- * 其它设备的更多按钮）或按 Esc 都会收起。原生 <details> 不会监听外部点击，因此这里改为受控实现。
+ * 通用浮层：受控展开，点击浮层以外的任意位置（页面空白、其它卡片、工具栏、其它按钮）或按
+ * Esc 都会收起。原生 <details> 不会监听外部点击，因此这里改为受控实现；
+ * 「更多操作」与工具栏的「排序方式」共用同一套收起逻辑。
  */
-function MoreMenu({
+function Popover({
   open,
-  onToggle,
   onClose,
+  trigger,
   children,
 }: {
   open: boolean;
-  onToggle: () => void;
   onClose: () => void;
+  /** 触发按钮：开/关切换由调用方在 onClick 里决定。 */
+  trigger: ReactNode;
+  /** 浮层内容，统一渲染进 .menu 容器。 */
   children: ReactNode;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -424,31 +483,13 @@ function MoreMenu({
 
   return (
     <div ref={rootRef} style={{ position: "relative" }}>
-      <button
-        className="btn btn--round-soft"
-        style={{ display: "grid", placeItems: "center" }}
-        title="更多操作"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={onToggle}
-      >
-        ⋯
-      </button>
+      {trigger}
       {open ? (
         <div
-          className="card"
+          className="menu"
           role="menu"
           // 选中任意条目后冒泡到这里收起菜单。
           onClick={onClose}
-          style={{
-            position: "absolute",
-            right: 0,
-            top: 44,
-            zIndex: 20,
-            padding: 6,
-            minWidth: 180,
-            boxShadow: "var(--shadow-pop)",
-          }}
         >
           {children}
         </div>
@@ -457,14 +498,62 @@ function MoreMenu({
   );
 }
 
-function MenuItem({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) {
+/** 设备行右侧的「更多操作」：复用通用浮层，展开后是一组图标菜单项。 */
+function MoreMenu({
+  open,
+  onToggle,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Popover
+      open={open}
+      onClose={onClose}
+      trigger={
+        <button
+          className="btn btn--round-soft"
+          title="更多操作"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={onToggle}
+        >
+          <Icon name="more" size={18} />
+        </button>
+      }
+    >
+      {children}
+    </Popover>
+  );
+}
+
+/** 菜单项：左侧线性图标 + 文案，当前生效项在文案右侧补一个勾选图标。 */
+function MenuItem({
+  label,
+  icon,
+  active,
+  onClick,
+  danger,
+}: {
+  label: string;
+  icon?: IconName;
+  active?: boolean;
+  onClick: () => void;
+  danger?: boolean;
+}) {
   return (
     <button
-      className={`btn ${danger ? "btn--danger-ghost" : "btn--ghost"}`}
-      style={{ width: "100%", justifyContent: "flex-start" }}
+      className={`menu__item${danger ? " menu__item--danger" : ""}`}
+      role="menuitem"
       onClick={onClick}
     >
-      {label}
+      {icon ? <Icon name={icon} size={16} /> : null}
+      <span>{label}</span>
+      {active ? <Icon name="check" size={14} /> : null}
     </button>
   );
 }
@@ -523,5 +612,3 @@ function stateLabel(state: AvdState | undefined): string {
       return "已停止";
   }
 }
-
-

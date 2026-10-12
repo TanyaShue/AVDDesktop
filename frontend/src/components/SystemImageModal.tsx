@@ -5,6 +5,7 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { JobInfo, SystemImage } from "../bridge/types";
+import { Icon } from "./icons";
 import { humanSize, jobStatusText, Modal, Progress } from "./ui";
 
 interface Props {
@@ -124,9 +125,10 @@ export function SystemImageModal({
         {mode === "download" ? (
           <div className="image-modal__sources">
             <div className="image-modal__sources-head">
+              <Icon name="globe" size={14} />
               <span className="image-modal__sources-title">下载源</span>
               <span className="muted truncate">
-                当前使用「{activeSourceName || "默认镜像源"}」；镜像源的检测与更换在「设置 → 下载镜像源」中完成。
+                当前使用「{activeSourceName || "默认镜像源"}」；镜像源的检测与更换在「设置」页的「下载镜像源」中完成。
               </span>
             </div>
           </div>
@@ -137,6 +139,7 @@ export function SystemImageModal({
             <div>读取镜像失败：{error}</div>
             {onReload ? (
               <button className="btn btn--secondary btn--sm" onClick={onReload}>
+                <Icon name="refresh" size={14} />
                 重试
               </button>
             ) : null}
@@ -320,7 +323,12 @@ function ImageDownloadAction({
   }
 
   if (installed) {
-    return <span className="chip chip--sm chip--success">已安装</span>;
+    return (
+      <span className="chip chip--sm chip--success">
+        <Icon name="check" size={12} />
+        已安装
+      </span>
+    );
   }
 
   const failed = job?.status === "failed" || job?.status === "canceled";
@@ -331,7 +339,14 @@ function ImageDownloadAction({
         disabled={busy}
         onClick={() => void onDownload?.(image)}
       >
-        {busy ? <span className="spinner" /> : failed ? "重试" : "下载"}
+        {busy ? (
+          <span className="spinner" />
+        ) : (
+          <>
+            <Icon name="download" size={14} />
+            {failed ? "重试" : "下载"}
+          </>
+        )}
       </button>
       {failed && job?.error?.message ? (
         <span className="muted truncate image-download__error" title={job.error.message}>

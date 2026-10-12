@@ -13,6 +13,7 @@ import {
   imageTagLabel,
   SystemImageModal,
 } from "../components/SystemImageModal";
+import { Icon } from "../components/icons";
 import { formatMs } from "../components/ui";
 
 interface Props {
@@ -291,9 +292,11 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
             <div className="row row--wrap">
               {/* 「准备 / 补装」与「一键修复」都在同一个弹窗里选择，这里只保留一个入口。 */}
               <button className="btn btn--secondary" onClick={() => setEnvironmentSetupOpen(true)}>
+                <Icon name="wrench" size={15} />
                 准备 / 修复环境
               </button>
               <button className="btn btn--secondary" disabled={env.loading} onClick={() => void env.reload()}>
+                <Icon name="refresh" size={15} />
                 {env.loading ? "检查中…" : "重新检查"}
               </button>
             </div>
@@ -301,11 +304,12 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
           <div className="card">
             {report ? (
               <>
-                <div className="row row--wrap" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                <div className="row row--wrap">
                   <span className={`chip ${report.ready ? "chip--success" : "chip--warning"}`}>
                     {report.ready ? "环境就绪" : report.needInit ? "尚未初始化" : "存在缺失组件"}
                   </span>
-                  <span className="muted nums" style={{ fontSize: 12 }}>
+                  {/* .toolbar__right 自带 margin-left:auto，把「用时」推到右端 */}
+                  <span className="muted nums toolbar__right" style={{ fontSize: 12 }}>
                     用时 {formatMs(report.elapsedMs)}
                   </span>
                 </div>
@@ -335,7 +339,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
                           </span>
                         </td>
                         <td className="nums">{c.version || "—"}</td>
-                        <td className="mono" style={{ fontSize: 12, wordBreak: "break-all" }}>
+                        <td className="mono" style={{ wordBreak: "break-all" }}>
                           {c.path || "—"}
                         </td>
                       </tr>
@@ -348,27 +352,36 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
                   JDK 只使用软件目录下的版本；系统 JAVA_HOME / PATH 中的 JDK 不参与检测与运行。
                 </div>
 
-                <div className="row row--wrap" style={{ gap: 16, marginTop: 12 }}>
-                  <span className="muted">
-                    已安装系统镜像：<span className="nums">{report.images}</span> 个
-                  </span>
-                  <span className="muted">
-                    已有设备：<span className="nums">{report.avds}</span> 个
-                  </span>
-                  <span className="muted">
-                    可用空间：<span className="nums">{report.disk.freeGB}</span> GB
-                    {report.disk.sufficient ? "" : "（不足）"}
-                  </span>
-                  {report.accel ? (
-                    <span className="muted">
-                      硬件加速：<span className="nums">{report.accel.available ? "可用" : "不可用"}</span>
+                {/* 环境概况四项：统一走指标条（标签在上、数值在下） */}
+                <div className="metrics" style={{ marginTop: 12 }}>
+                  <div className="metric">
+                    <span className="metric__label">已安装系统镜像</span>
+                    <span className="metric__value nums">{report.images} 个</span>
+                  </div>
+                  <div className="metric">
+                    <span className="metric__label">已有设备</span>
+                    <span className="metric__value nums">{report.avds} 个</span>
+                  </div>
+                  <div className="metric">
+                    <span className="metric__label">可用空间</span>
+                    <span className="metric__value nums">
+                      {report.disk.freeGB} GB
+                      {report.disk.sufficient ? "" : <span className="muted muted--danger">（不足）</span>}
                     </span>
+                  </div>
+                  {report.accel ? (
+                    <div className="metric">
+                      <span className="metric__label">硬件加速</span>
+                      <span className="metric__value nums">{report.accel.available ? "可用" : "不可用"}</span>
+                    </div>
                   ) : null}
                 </div>
 
                 {report.needInit ? (
                   <div className="banner banner--info" style={{ marginTop: 12 }}>
-                    <div className="banner__icon">⬇️</div>
+                    <div className="banner__icon">
+                      <Icon name="download" size={18} />
+                    </div>
                     <div className="banner__body">
                       <div className="banner__title">需要初始化软件自带环境</div>
                       <div className="banner__text">
@@ -376,6 +389,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
                       </div>
                     </div>
                     <button className="btn btn--primary" onClick={() => setEnvironmentSetupOpen(true)}>
+                      <Icon name="download" size={15} />
                       立即准备
                     </button>
                   </div>
@@ -389,7 +403,13 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
                         className={`banner ${issue.severity === "blocker" ? "banner--danger" : "banner--info"}`}
                         style={{ marginTop: 8 }}
                       >
-                        <div className="banner__icon">{issue.severity === "blocker" ? "⛔" : "ℹ️"}</div>
+                        <div className="banner__icon">
+                          {issue.severity === "blocker" ? (
+                            <Icon name="alert" size={18} />
+                          ) : (
+                            <Icon name="info" size={18} />
+                          )}
+                        </div>
                         <div className="banner__body">
                           <div className="banner__title">{issue.title}</div>
                           <div className="banner__text">{issue.detail}</div>
@@ -409,6 +429,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
                             className="btn btn--ghost"
                             onClick={() => void api.Env.CopyToClipboard(issue.fixCommand!)}
                           >
+                            <Icon name="copy" size={14} />
                             复制命令
                           </button>
                         ) : null}
@@ -434,6 +455,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
               </div>
             </div>
             <button className="btn btn--secondary" onClick={() => setMirrorSettingsOpen(true)}>
+              <Icon name="globe" size={15} />
               检测 / 更换镜像源
             </button>
           </div>
@@ -464,6 +486,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
               </div>
             </div>
             <button className="btn btn--secondary" disabled={loadingAll} onClick={openImagePicker}>
+              <Icon name="image" size={15} />
               {loadingAll ? "读取中…" : "查看全部镜像"}
             </button>
           </div>
@@ -528,7 +551,10 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
                             hasPendingImageJob(jobs, img.path, DELETE_TITLE_PREFIX) ? (
                               <span className="spinner" />
                             ) : (
-                              "删除"
+                              <>
+                                <Icon name="trash" size={13} />
+                                删除
+                              </>
                             )}
                           </button>
                         </td>
@@ -567,7 +593,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
                     title="复制路径"
                     onClick={() => void api.Env.CopyToClipboard(row.value!)}
                   >
-                    ⧉
+                    <Icon name="copy" size={16} />
                   </button>
                 ) : null}
               </div>
@@ -580,7 +606,10 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
           <div className="section__title">偏好</div>
           <div className="card">
             <div className="field">
-              <div className="field__label">主题</div>
+              <div className="field__label row">
+                <Icon name="display" size={14} />
+                主题
+              </div>
               <div className="field__control">
                 <select
                   className="select"
@@ -594,7 +623,10 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
               </div>
             </div>
             <div className="field">
-              <div className="field__label">设备画面</div>
+              <div className="field__label row">
+                <Icon name="monitor" size={14} />
+                设备画面
+              </div>
               <div className="field__control">
                 <select
                   className="select"
@@ -610,7 +642,10 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
               </div>
             </div>
             <div className="field">
-              <div className="field__label">日志级别</div>
+              <div className="field__label row">
+                <Icon name="terminal" size={14} />
+                日志级别
+              </div>
               <div className="field__control">
                 <select
                   className="select"
@@ -626,7 +661,10 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
               </div>
             </div>
             <div className="field">
-              <div className="field__label">删除设备前确认</div>
+              <div className="field__label row">
+                <Icon name="trash" size={14} />
+                删除设备前确认
+              </div>
               <div className="field__control">
                 <input
                   type="checkbox"
@@ -702,6 +740,7 @@ function MirrorSummary({
   return (
     <div className="mirror-summary__item">
       <div className="mirror-summary__head">
+        <Icon name="globe" size={14} className="muted" />
         <span className="mirror-summary__title">{title}</span>
         {source?.region ? <span className="chip chip--sm">{source.region}</span> : null}
         {source ? <span className="chip chip--sm chip--info">当前</span> : null}
