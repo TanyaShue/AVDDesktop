@@ -3,6 +3,7 @@
 // 只用于开发期视觉走查，不进入打包入口。
 import type { EnvReport } from "../bridge/types";
 import {
+  AVD_DETAILS,
   DEVICES,
   ENV_REPORT,
   INSTANCES,
@@ -32,6 +33,29 @@ export function emitPreviewEvent(name: string, payload: unknown): void {
 
 /** Wails 绑定方法统一返回 Promise（真实后端也是如此）。 */
 const ok = <T,>(value: T) => () => Promise.resolve(value);
+
+/**
+ * 取某个设备的设置详情。
+ *
+ * 假数据里没有的设备（例如 Broken_AVD）按「配置缺失」兜底：设置全为跟随档案，
+ * 这样设置面板在预览里也能覆盖「读得出但没配置」的分支。
+ */
+function detailFor(name: string) {
+  const found = AVD_DETAILS[name];
+  if (found) return found;
+  const device = DEVICES.find((d) => d.name === name);
+  return {
+    name,
+    path: device?.path ?? "",
+    api: device?.api ?? "",
+    tag: device?.tag ?? "",
+    abi: device?.abi ?? "",
+    settings: { keyboard: false, root: false },
+    rootSupported: true,
+    state: device?.state ?? "stopped",
+    broken: device?.broken,
+  } as (typeof AVD_DETAILS)[string];
+}
 
 /** 把 window.go.service.* 铺成假实现；未列出的方法一律返回 undefined。 */
 function makeServices(
@@ -69,6 +93,37 @@ function makeServices(
       Delete: ok("job-delete"),
       InstallImage: ok("job-install-image"),
       DeleteImage: ok("job-delete-image"),
+      // 设备设置：Detail 返回假详情；UpdateSettings 把改动合并回假详情，
+      // 这样面板的「保存 → 回读」链路在预览里也是通的（含 root / 键盘这类开关）。
+      Detail: (name: unknown) => Promise.resolve(detailFor(String(name))),
+      UpdateSettings: (req: unknown) => {
+        const update = req as {
+          name: string;
+          ramMb?: number;
+          cpuCores?: number;
+          lcdWidth?: number;
+          lcdHeight?: number;
+          lcdDensity?: number;
+          vmHeapMb?: number;
+          keyboard?: boolean;
+          root?: boolean;
+        };
+        const base = detailFor(update.name);
+        const settings = {
+          ...base.settings,
+          ...(update.ramMb ? { ramMb: update.ramMb } : {}),
+          ...(update.cpuCores ? { cpuCores: update.cpuCores } : {}),
+          ...(update.lcdWidth ? { lcdWidth: update.lcdWidth } : {}),
+          ...(update.lcdHeight ? { lcdHeight: update.lcdHeight } : {}),
+          ...(update.lcdDensity ? { lcdDensity: update.lcdDensity } : {}),
+          ...(update.vmHeapMb ? { vmHeapMb: update.vmHeapMb } : {}),
+          ...(typeof update.keyboard === "boolean" ? { keyboard: update.keyboard } : {}),
+          ...(typeof update.root === "boolean" ? { root: update.root } : {}),
+        };
+        const next = { ...base, settings };
+        AVD_DETAILS[update.name] = next;
+        return Promise.resolve(next);
+      },
     },
     EmulatorService: {
       ListRunning: ok(INSTANCES),

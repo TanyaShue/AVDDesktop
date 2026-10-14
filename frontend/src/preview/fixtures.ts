@@ -1,6 +1,7 @@
 // 预览用假数据：只服务于 `preview.html`（开发期视觉走查），不参与打包入口。
 import type {
   AppSettings,
+  AvdDetail,
   AvdSummary,
   EmulatorInstance,
   EnvReport,
@@ -33,6 +34,7 @@ export const DEVICES: Plain<AvdSummary>[] = [
     cpuCores: 4,
     lcdWidth: 1080,
     lcdHeight: 2400,
+    lcdDensity: 420,
   },
   {
     name: "Tablet_API_33",
@@ -46,6 +48,8 @@ export const DEVICES: Plain<AvdSummary>[] = [
     cpuCores: 2,
     lcdWidth: 2560,
     lcdHeight: 1600,
+    lcdDensity: 320,
+    rootEnabled: true,
   },
   {
     name: "Nexus_5X_API_30",
@@ -55,10 +59,12 @@ export const DEVICES: Plain<AvdSummary>[] = [
     abi: "arm64-v8a",
     deviceProfileId: "nexus_5x",
     state: "stopped",
-    ramMb: 1536,
+    // 刻意用一组非预设值（2.5 GB / 720×1560 / 440 dpi）：用于核对「自定义」三态
+    ramMb: 2560,
     cpuCores: 4,
-    lcdWidth: 1080,
-    lcdHeight: 1920,
+    lcdWidth: 720,
+    lcdHeight: 1560,
+    lcdDensity: 440,
   },
   {
     name: "Broken_AVD",
@@ -71,6 +77,84 @@ export const DEVICES: Plain<AvdSummary>[] = [
     broken: "config.ini 缺少 hw.lcd.width，设备配置已损坏",
   },
 ];
+
+/**
+ * 设备设置弹窗的假数据：按设备名给出 `AvdService.Detail` 的返回。
+ *
+ * 第一台是「运行中 + Play 镜像（不支持 root）」，第二台是「已停止 + 支持 root」，
+ * 正好覆盖设置面板的两条主要分支；Broken_AVD 用于核对损坏提示。
+ */
+export const AVD_DETAILS: Record<string, Plain<AvdDetail>> = {
+  Pixel_8_API_34: {
+    name: "Pixel_8_API_34",
+    path: "D:\\AVDDesktop\\avd\\Pixel_8_API_34.avd",
+    systemImagePath: "system-images\\android-34\\google_apis_playstore\\x86_64\\",
+    deviceProfileId: "pixel_8",
+    api: "34",
+    tag: "google_apis_playstore",
+    abi: "x86_64",
+    settings: {
+      ramMb: 4096,
+      cpuCores: 4,
+      lcdWidth: 1080,
+      lcdHeight: 2400,
+      lcdDensity: 420,
+      vmHeapMb: 256,
+      keyboard: false,
+      root: false,
+    },
+    rootSupported: false,
+    rootReason: "系统镜像是 Google Play 版本（user 构建），镜像本身不开放 root",
+    state: "running",
+    instanceId: "inst-1",
+    skinPath: "_no_skin",
+  },
+  Tablet_API_33: {
+    name: "Tablet_API_33",
+    path: "D:\\AVDDesktop\\avd\\Tablet_API_33.avd",
+    systemImagePath: "system-images\\android-33\\google_apis\\x86_64\\",
+    deviceProfileId: "pixel_tablet",
+    api: "33",
+    tag: "google_apis",
+    abi: "x86_64",
+    settings: {
+      ramMb: 2048,
+      cpuCores: 2,
+      lcdWidth: 2560,
+      lcdHeight: 1600,
+      lcdDensity: 320,
+      vmHeapMb: 192,
+      keyboard: true,
+      root: true,
+    },
+    rootSupported: true,
+    state: "stopped",
+    skinPath: "_no_skin",
+  },
+  Nexus_5X_API_30: {
+    name: "Nexus_5X_API_30",
+    path: "D:\\AVDDesktop\\avd\\Nexus_5X_API_30.avd",
+    systemImagePath: "system-images\\android-30\\google_apis_playstore\\arm64-v8a\\",
+    deviceProfileId: "nexus_5x",
+    api: "30",
+    tag: "google_apis_playstore",
+    abi: "arm64-v8a",
+    settings: {
+      ramMb: 2560,
+      cpuCores: 4,
+      lcdWidth: 720,
+      lcdHeight: 1560,
+      lcdDensity: 440,
+      vmHeapMb: 320,
+      keyboard: false,
+      root: false,
+    },
+    rootSupported: false,
+    rootReason: "系统镜像是 Google Play 版本（user 构建），镜像本身不开放 root",
+    state: "stopped",
+    skinPath: "skins/nexus_5x",
+  },
+};
 
 export const INSTANCES: Plain<EmulatorInstance>[] = [
   {

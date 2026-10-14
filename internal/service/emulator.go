@@ -44,6 +44,11 @@ func (s *EmulatorService) Start(req StartRequest) (*domain.EmulatorInstance, err
 			WithAction("install", "安装模拟器", "emulator")
 	}
 	opts := domain.LaunchOptions{ColdBoot: req.ColdBoot, NoWindow: req.NoWindow, CustomUI: req.CustomUI}
+	// 设备设置里的 root 开关决定是否附加 -writable-system（开机后由启动器 adb root / remount）。
+	if comp.Store != nil && comp.Store.RootEnabled(req.AvdName) {
+		opts.WritableSystem = true
+		s.rt.Log().Info("emulator", "%s 已开启 root：本次启动附加 -writable-system", req.AvdName)
+	}
 	if opts.CustomUI {
 		// 自定义 UI 必须无窗口：否则会出现"有 Qt 窗口 + gRPC 通道"这种无意义组合。
 		opts.NoWindow = true

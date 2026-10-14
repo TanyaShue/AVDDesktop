@@ -181,3 +181,36 @@ func (c *Client) EmuKill(ctx context.Context, serial string) error {
 	}
 	return err
 }
+
+// Root 让设备上的 adbd 以 root 身份重启（`adb root`）。
+//
+// 只对 userdebug / eng 构建有效：Google Play 等 user 构建会返回
+// "adbd cannot run as root in production builds"，此时 err 为 nil 但输出即失败原因，
+// 调用方需要同时检查输出（见 avd.applyRootPermissions）。
+func (c *Client) Root(ctx context.Context, serial string) (string, error) {
+	return c.daemonCommand(ctx, serial, "root")
+}
+
+// Remount 以可写方式重新挂载系统分区（`adb remount`，需要先 adb root）。
+func (c *Client) Remount(ctx context.Context, serial string) (string, error) {
+	return c.daemonCommand(ctx, serial, "remount")
+}
+
+// daemonCommand 执行 `adb -s <serial> <cmd>` 形式的 adbd 控制命令并返回其输出。
+func (c *Client) daemonCommand(ctx context.Context, serial, cmd string) (string, error) {
+	if !c.Available() {
+		return "", domain.Err(domain.CodeToolMissing, "未找到 adb（platform-tools 未安装）")
+	}
+	if strings.TrimSpace(serial) == "" {
+		return "", domain.Err(domain.CodeInvalidArgument, "缺少 adb 设备串号")
+	}
+	out, err := proc.Output(ctx, c.AdbPath, []string{"-s", serial, cmd}, proc.Options{
+		Env: c.Env, Timeout: 30 * time.Second,
+	})
+	if err != nil {
+		c.log.Warn("adb", "adb %s 失败（serial=%s）：%v", cmd, serial, err)
+		return out, err
+	}
+	c.log.Debug("adb", "adb %s 完成（serial=%s）", cmd, serial)
+	return out, nil
+}

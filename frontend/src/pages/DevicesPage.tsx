@@ -8,6 +8,7 @@ import type { EnvCheck } from "../hooks/useEnvCheck";
 import { useWailsEvent } from "../hooks/useApp";
 import { formatRam, imageTagLabel } from "../lib/imageLabels";
 import { DeviceWindow } from "../components/DeviceWindow";
+import { DeviceSettingsModal } from "../components/DeviceSettingsModal";
 import { Icon } from "../components/icons";
 import type { IconName } from "../components/icons";
 import { DeviceWizard } from "./DeviceWizard";
@@ -33,6 +34,8 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   /** 当前打开的设备窗口（应用内全屏浮层，同一时间只允许一个）。 */
   const [openWindow, setOpenWindow] = useState<{ instanceId: string; avdName: string } | null>(null);
+  /** 当前打开「设备设置」的设备（卡片齿轮按钮 / 更多操作菜单）。 */
+  const [settingsFor, setSettingsFor] = useState<AvdSummary | null>(null);
 
   const closeMenu = useCallback(() => setOpenMenu(null), []);
   const closeSortMenu = useCallback(() => setSortMenuOpen(false), []);
@@ -354,6 +357,11 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                       {device.abi ? <span className="chip">{device.abi}</span> : null}
                       {device.cpuCores ? <span className="chip">{device.cpuCores} 核</span> : null}
                       {device.ramMb ? <span className="chip">{formatRam(device.ramMb)}</span> : null}
+                      {device.rootEnabled ? (
+                        <span className="chip chip--warning" title="已开启 root：启动时附加 -writable-system">
+                          Root
+                        </span>
+                      ) : null}
                       {inst?.customUI ? <span className="chip chip--info">自定义 UI</span> : null}
                       {device.broken ? <span className="chip chip--danger">配置异常</span> : null}
                     </div>
@@ -365,8 +373,9 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                       {device.lcdWidth && device.lcdHeight ? (
                         <>
                           <span className="device__meta-sep" />
-                          <span title="当前生效的分辨率">
+                          <span title="当前生效的分辨率与像素密度">
                             {device.lcdWidth} × {device.lcdHeight}
+                            {device.lcdDensity ? ` · ${device.lcdDensity} dpi` : ""}
                           </span>
                         </>
                       ) : null}
@@ -410,6 +419,15 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                           )}
                         </button>
                       )}
+                      {/* 设备设置：每台设备独立的内存 / 分辨率 / root 等开关，放在最常用的位置 */}
+                      <button
+                        className="btn btn--round-soft"
+                        title="设备设置"
+                        aria-label={`设备设置 ${device.name}`}
+                        onClick={() => setSettingsFor(device)}
+                      >
+                        <Icon name="settings" size={17} />
+                      </button>
                       <MoreMenu
                         label={`更多操作 ${device.name}`}
                         open={openMenu === device.name}
@@ -418,6 +436,12 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                         }
                         onClose={closeMenu}
                       >
+                        <MenuItem
+                          icon="settings"
+                          label="设备设置"
+                          onClick={() => setSettingsFor(device)}
+                        />
+                        <div className="menu__sep" />
                         <MenuItem
                           icon="snowflake"
                           label="冷启动（不使用快照）"
@@ -471,6 +495,18 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
         <DeviceWizard
           onClose={() => setShowWizard(false)}
           onCreated={() => void load()}
+          onToast={onToast}
+        />
+      ) : null}
+
+      {/* 设备设置：每台设备的内存 / CPU / 分辨率 / DPI / root / 键盘开关 */}
+      {settingsFor ? (
+        <DeviceSettingsModal
+          device={settingsFor}
+          instance={active.get(settingsFor.name)}
+          onClose={() => setSettingsFor(null)}
+          onSaved={() => void load()}
+          onStop={() => void stopDevice(settingsFor)}
           onToast={onToast}
         />
       ) : null}

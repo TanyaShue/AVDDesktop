@@ -18,6 +18,11 @@ export type AvdHardware = domain.AvdHardware;
 export type AvdSummary = domain.AvdSummary;
 export type EmulatorInstance = domain.EmulatorInstance;
 
+/** 设备设置面板：可编辑设置、保存入参与详情。 */
+export type AvdSettings = domain.AvdSettings;
+export type AvdSettingsUpdate = domain.AvdSettingsUpdate;
+export type AvdDetail = domain.AvdDetail;
+
 export type JobInfo = domain.JobInfo;
 export type LogLine = domain.LogLine;
 export type AppSettings = domain.AppSettings;

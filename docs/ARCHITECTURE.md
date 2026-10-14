@@ -80,23 +80,39 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
 - 列表与配置来自 `.ini` / `config.ini` 的直接解析；创建走 `avdmanager create avd`（3 分钟超时，交互确认写入 `no`）。
 - 名称校验在本地完成（非法字符、重名、同名建议名）。
 - 硬件覆盖（可选）：创建向导只暴露三项常用参数（内存 / CPU 核心 / 分辨率，单位分别为 GB / 核 / px）；
-  其余硬件参数（VM 堆、屏幕密度、数据分区、SD 卡等）完全沿用设备档案，不在界面上堆叠低频选项。
+  其余硬件参数完全沿用设备档案，不在创建流程里堆叠低频选项（创建后再到「设备设置」里调整即可）。
   `avdmanager` 仍是 config.ini 的生成者，后端只在创建成功后对指定键做定点修正
   （`internal/avd/hardware.go`，原子写入，保留注释 / 顺序 / 未知键）。写入失败时回滚整个设备，
-  避免留下“参数与请求不符”的设备。区间校验在启动任务前完成，参考取值见上表。
+  避免留下“参数与请求不符”的设备。区间校验在启动任务前完成。
 - 自定义分辨率会同时更新 `hw.lcd.width/height`，并让皮肤尺寸不再覆盖（`skin.path` 指向真实皮肤
   或另一组数值尺寸时改为 `_no_skin`；`skin.name` 仅在已有该键时同步）。依据：模拟器实际使用
   `skin.path`，`skin.name` 只供工具展示。
 - 删除前校验目标路径确实位于 AVD 根目录内，避免误删。
+- **设备设置（每台设备独立）**：设备卡片的齿轮按钮 / 「更多操作 → 设备设置」打开设置面板，
+  数据源是 `AvdService.Detail`，保存走 `AvdService.UpdateSettings`（同步方法，不注册任务：
+  只写一份 `config.ini` 与一个状态文件，界面需要立刻拿到结果与错误）。
+  设备运行中直接拒绝（`FILE_IN_USE`）：`config.ini` 只在模拟器启动时读取，改完不会生效，
+  还可能与其退出时的配置回写互相覆盖。取键口径与创建向导一致，写入沿用同一套定点修正。
 
-| 参数 | config.ini 键 | 允许区间（防呆） |
+| 设置项 | 存储 | 允许区间（防呆） |
 |---|---|---|
-| 内存 | `hw.ramSize` | 512–16384 MB（界面按 GB 选择） |
+| 运行内存 | `hw.ramSize` | 512–16384 MB（界面按 GB 选择） |
 | CPU 核心 | `hw.cpu.ncore` | 1–16 |
+| 虚拟机堆上限 | `vm.heapSize` | 16–4096 MB |
 | 分辨率 | `hw.lcd.width` / `hw.lcd.height` | 240–7680 px（需成对给出） |
+| 像素密度 | `hw.lcd.density` | 72–720 dpi（未指定时按最短边推荐 160/240/320/420/480/560） |
+| 物理键盘 | `hw.keyboard` | yes / no |
+| Root 权限 | `<avd 目录>/.avddesktop.json` | 开关（软件自有标记，不写进 config.ini） |
 
-其余硬件键（`vm.heapSize`、`hw.lcd.density`、`disk.dataPartition.size`、`sdcard.size` 等）
-由 `avdmanager` 按设备档案生成，应用不覆盖。
+- root 的落地方式是「启动时附加 `-writable-system` + 开机后 `adb root` / `adb remount`」
+  （`internal/avd/launch.go` 的 `applyRootPermissions`，有界且尽力而为：adb root 会重启 adbd，
+  remount 按间隔重试到上限；user 构建只记录日志，不影响设备继续运行）。
+  Google Play 镜像是正式版（user）构建，镜像本身不开放 root：判据同时看 `PlayStore.enabled`、
+  `tag.id` 与 `image.sysdir.1`，不支持时界面上禁用开关并给出原因。
+- 自定义分辨率同样走 `resolutionSkinChanges`（`skin.path` 指向真实皮肤时改为 `_no_skin`），
+  与创建时的行为一致。
+- 其余低频硬件键（`disk.dataPartition.size`、`sdcard.size`、摄像头等）仍完全由设备档案决定，
+  应用不覆盖：改动数据分区会牵动 userdata 镜像，风险高于收益。
 
 ### Emulator
 

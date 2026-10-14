@@ -11,6 +11,11 @@
 - **AVD 管理**：列出 / 创建 / 删除设备，启动与停止模拟器并显示运行状态；创建时按系统镜像与设备档案生成，
   也可以覆盖内存（GB）、CPU 核心与分辨率三项常用参数（其余参数完全沿用档案默认值，
   设备卡片上直接显示当前生效的核心 / 内存 / 分辨率）
+- **设备设置（每台设备独立）**：设备卡片上的齿轮按钮（或「更多操作 → 设备设置」）可为单台设备调整
+  运行内存、CPU 核心、虚拟机堆上限、分辨率与像素密度、物理键盘输入与 **Root 开关**；
+  面板直接读取该设备 `config.ini` 的当前生效值，未改动的项不会被覆盖，保存后重启设备生效。
+  Root 通过「启动时附加 `-writable-system` + 开机后自动 `adb root` / `remount`」落地，
+  Google Play 镜像不开放 root，面板会禁用开关并说明原因；设备运行中不允许改配置（界面提供「停止设备」入口）
 - **自定义 UI 设备窗口**：设备卡片「更多操作 → 使用自定义 UI 启动」让模拟器以无窗口方式运行；
   画面经 MMAP 共享内存取出后，通过本机 WebSocket 以原始 RGBA 帧送到**独立 WebView 设备窗口**
   （MuMu 风格：自绘标题栏 + 画面区 + 工具栏）的 WebGL2 画布；WebGL2 不可用时自动回落 MJPEG。
@@ -33,7 +38,8 @@
 ```text
 <Root>/jdk       自带 JDK（Eclipse Temurin 21，JAVA_HOME）
 <Root>/sdk       自带 Android SDK（cmdline-tools/latest、platform-tools、emulator、system-images）
-<Root>/avd       自带 AVD（<name>.ini 与 <name>.avd/config.ini）
+<Root>/avd       自带 AVD（<name>.ini 与 <name>.avd/config.ini；每台设备的软件侧设置在同目录的
+                 .avddesktop.json，随设备目录一起删除）
 <Root>/config    设置文件 settings.json
 <Root>/logs      应用日志（按天 + 按大小滚动）
 <Root>/cache     下载临时文件

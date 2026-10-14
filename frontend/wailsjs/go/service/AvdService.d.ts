@@ -8,6 +8,8 @@ export function Delete(arg1:string):Promise<string>;
 
 export function DeleteImage(arg1:string):Promise<string>;
 
+export function Detail(arg1:string):Promise<domain.AvdDetail>;
+
 export function InstallImage(arg1:string):Promise<string>;
 
 export function List():Promise<Array<domain.AvdSummary>>;
@@ -15,5 +17,7 @@ export function List():Promise<Array<domain.AvdSummary>>;
 export function ListImages(arg1:boolean):Promise<Array<domain.SystemImage>>;
 
 export function ListProfiles(arg1:boolean):Promise<Array<domain.DeviceProfile>>;
+
+export function UpdateSettings(arg1:domain.AvdSettingsUpdate):Promise<domain.AvdDetail>;
 
 export function ValidateName(arg1:string):Promise<domain.NameValidation>;

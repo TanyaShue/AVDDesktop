@@ -129,6 +129,71 @@ func (s *AvdService) Create(spec domain.AvdSpec) (string, error) {
 	return j.ID(), nil
 }
 
+// Detail 返回设备详情（设备设置面板的数据源：只读信息 + 可编辑设置 + 运行状态）。
+func (s *AvdService) Detail(name string) (*domain.AvdDetail, error) {
+	comp := s.rt.Components()
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, domain.Err(domain.CodeInvalidArgument, "未指定设备名称")
+	}
+	detail, err := comp.Store.Detail(name)
+	if err != nil {
+		return nil, err
+	}
+	applyRunningState(comp, &detail)
+	return &detail, nil
+}
+
+// UpdateSettings 保存设备设置（运行内存 / CPU 核心 / 分辨率 / 像素密度 / 堆上限 / 键盘 / root）。
+//
+// 同步执行而不是注册任务：改动只是写一份 config.ini 与一个状态文件，界面需要立刻拿到结果与错误。
+// 运行中的设备直接拒绝：config.ini 只在启动时读取，改完不会生效，还可能与模拟器退出时的写回互相覆盖。
+func (s *AvdService) UpdateSettings(req domain.AvdSettingsUpdate) (*domain.AvdDetail, error) {
+	comp := s.rt.Components()
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		return nil, domain.Err(domain.CodeInvalidArgument, "未指定设备名称")
+	}
+	if !comp.Store.Exists(req.Name) {
+		return nil, domain.Err(domain.CodeAvdNotFound, "设备不存在: "+req.Name)
+	}
+	if inst, running := comp.Launcher.ByAvd(req.Name); running {
+		return nil, domain.ErrDetail(domain.CodeFileInUse,
+			"设备正在运行，无法修改配置", "serial="+inst.Serial).
+			WithHint("请先停止该设备：配置只在启动时读取，改完需要重新启动才生效")
+	}
+	if err := avd.ValidateSettings(req); err != nil {
+		return nil, err
+	}
+	// 只按设备加锁（不占用 SDK 级互斥）：设置写入是一份 config.ini + 一个状态文件，
+	// 与「正在下载镜像」这类长任务无冲突；与删除同一设备并发时，最坏结果是明确的写失败。
+	unlock, ok := s.rt.locks.TryLock("avd:" + req.Name)
+	if !ok {
+		return nil, domain.Err(domain.CodeJobBusy, "该设备正在执行其它写操作").
+			WithHint("请等待当前任务完成，或在底部任务区域取消它")
+	}
+	defer unlock()
+
+	detail, err := comp.Store.UpdateSettings(req)
+	if err != nil {
+		return nil, err
+	}
+	s.rt.Log().Info("avd", "设备 %s 的设置已更新：%s", req.Name, avd.DescribeSettings(detail.Settings))
+	s.rt.Emit("avd:changed", map[string]any{"action": "updated", "name": req.Name})
+	applyRunningState(comp, &detail)
+	return &detail, nil
+}
+
+// applyRunningState 把实例状态合并进设备详情（与 List 的口径一致）。
+func applyRunningState(comp *components, detail *domain.AvdDetail) {
+	inst, ok := comp.Launcher.ByAvd(detail.Name)
+	if !ok {
+		return
+	}
+	detail.State = inst.State
+	detail.InstanceID = inst.ID
+}
+
 // Delete 删除设备（仍在运行的实例会先停止），返回 jobID。
 func (s *AvdService) Delete(name string) (string, error) {
 	comp := s.rt.Components()

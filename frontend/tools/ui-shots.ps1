@@ -48,6 +48,12 @@ $states = @(
     @{ name = "devices-no-match";     query = "?q=zzz-none&noanim=1" },
     @{ name = "devices-toast";        query = "?toast=1&noanim=1" },
     @{ name = "wizard";               query = "?dialog=wizard&noanim=1" },
+    # 设备设置：dev 是设备在列表中的序号（列表按名称排序：Broken / Nexus / Pixel / Tablet）
+    @{ name = "devset";               query = "?dialog=devset&dev=3&noanim=1" },
+    @{ name = "devset-running";       query = "?dialog=devset&dev=2&noanim=1" },
+    @{ name = "devset-custom";        query = "?dialog=devset&dev=1&custom=1&noanim=1" },
+    @{ name = "devset-broken";        query = "?dialog=devset&dev=0&noanim=1" },
+    @{ name = "devset-dark";          query = "?dialog=devset&dev=3&theme=dark&noanim=1" },
     @{ name = "settings";             query = "?page=settings&noanim=1" },
     @{ name = "settings-dark";        query = "?page=settings&theme=dark&noanim=1" },
     @{ name = "env-setup";            query = "?page=settings&dialog=env&noanim=1" },

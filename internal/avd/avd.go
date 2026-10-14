@@ -207,10 +207,13 @@ func (s *Store) summary(name string) (domain.AvdSummary, error) {
 		DeviceProfileID: config["hw.device.name"],
 		State:           domain.AvdStopped,
 		// 硬件参数：供设备卡片直接展示当前生效值（缺省时为零值，界面不显示）。
-		RAMMB:     atoi(config["hw.ramSize"]),
-		CPUCores:  atoi(config["hw.cpu.ncore"]),
-		LCDWidth:  atoi(config["hw.lcd.width"]),
-		LCDHeight: atoi(config["hw.lcd.height"]),
+		RAMMB:      atoi(config["hw.ramSize"]),
+		CPUCores:   atoi(config["hw.cpu.ncore"]),
+		LCDWidth:   atoi(config["hw.lcd.width"]),
+		LCDHeight:  atoi(config["hw.lcd.height"]),
+		LCDDensity: atoi(config["hw.lcd.density"]),
+		// root 是软件自己维护的运行偏好（见 settings.go），供卡片上的 Root 标签使用。
+		RootEnabled: s.RootEnabled(name),
 	}
 	// 校验系统镜像是否仍然存在（仅在已知 SDK 根目录时校验）
 	sysDir := config["image.sysdir.1"]

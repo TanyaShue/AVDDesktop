@@ -14,6 +14,10 @@ export function DeleteImage(arg1) {
   return window['go']['service']['AvdService']['DeleteImage'](arg1);
 }
 
+export function Detail(arg1) {
+  return window['go']['service']['AvdService']['Detail'](arg1);
+}
+
 export function InstallImage(arg1) {
   return window['go']['service']['AvdService']['InstallImage'](arg1);
 }
@@ -28,6 +32,10 @@ export function ListImages(arg1) {
 
 export function ListProfiles(arg1) {
   return window['go']['service']['AvdService']['ListProfiles'](arg1);
+}
+
+export function UpdateSettings(arg1) {
+  return window['go']['service']['AvdService']['UpdateSettings'](arg1);
 }
 
 export function ValidateName(arg1) {

@@ -51,6 +51,9 @@ type adbClient interface {
 	WaitForBoot(ctx context.Context, serial string, timeout time.Duration) error
 	Devices(ctx context.Context) ([]domain.AdbDevice, error)
 	EmuKill(ctx context.Context, serial string) error
+	// Root / Remount 用于设备开启 root 后接管 adbd 与 /system 挂载（见 applyRootPermissions）。
+	Root(ctx context.Context, serial string) (string, error)
+	Remount(ctx context.Context, serial string) (string, error)
 }
 
 // Launcher 管理模拟器实例：端口分配、启动、状态机与停止。
@@ -68,6 +71,8 @@ type Launcher struct {
 
 	runningProbe  time.Duration
 	deviceLostFor time.Duration
+	// remountRetry 是 adb root 之后重试 remount 的间隔（0 表示默认 remountRetryInterval）。
+	remountRetry time.Duration
 
 	mu        sync.Mutex
 	instances map[string]*instance
@@ -88,6 +93,9 @@ type instance struct {
 	// grpcPort 是该实例占用的 gRPC 控制端口（0 表示未启用自定义 UI），进程退出时归还。
 	grpcPort int
 
+	// writableSystem 表示本次启动按「已开启 root」处理：开机完成后要执行 adb root / remount。
+	writableSystem bool
+
 	// stopRequested 表示用户已请求停止（受 Launcher.mu 保护）：之后的非 0 退出记为 stopped 而非 error。
 	stopRequested bool
 	// deviceLost 表示运行中已观测到设备从 adb 消失：通常来自手动关闭模拟器窗口。
@@ -102,12 +110,14 @@ func NewLauncher(tools platform.Tools, env []string, store *Store, adbClient adb
 	return &Launcher{tools: tools, env: env, store: store, adb: adbClient, sink: sink, log: logging.Or(log),
 		instances: map[string]*instance{}, ports: map[int]bool{}, grpcPorts: map[int]bool{},
 		procStart:    func(cmd *exec.Cmd) error { return cmd.Start() },
-		runningProbe: runningProbeInterval, deviceLostFor: deviceLostGrace}
+		runningProbe: runningProbeInterval, deviceLostFor: deviceLostGrace,
+		remountRetry: remountRetryInterval}
 }
 
 // BuildArgs 组装 emulator 命令行参数（纯函数，便于测试与"查看等效命令"）。
 //
-// 顺序固定：-avd <name> -port <port> [-no-snapshot-load] [-no-window] [-gpu <value>] [-grpc <grpcPort>]。
+// 顺序固定：-avd <name> -port <port> [-no-snapshot-load] [-no-window] [-writable-system]
+// [-gpu <value>] [-grpc <grpcPort>]。
 // 自定义 UI 必须无窗口（否则会出现"有 Qt 窗口 + gRPC 通道"的无意义组合）；grpcPort<=0 时不追加 -grpc。
 func BuildArgs(avdName string, opts domain.LaunchOptions, port, grpcPort int) []string {
 	args := []string{"-avd", avdName, "-port", strconv.Itoa(port)}
@@ -116,6 +126,10 @@ func BuildArgs(avdName string, opts domain.LaunchOptions, port, grpcPort int) []
 	}
 	if opts.NoWindow || opts.CustomUI {
 		args = append(args, "-no-window")
+	}
+	if opts.WritableSystem {
+		// 开启 root 的设备：让 /system 以可写方式挂载（配合开机后的 adb root / remount）。
+		args = append(args, "-writable-system")
 	}
 	if opts.GPU != "" && opts.GPU != "off" {
 		args = append(args, "-gpu", opts.GPU)
@@ -226,7 +240,7 @@ func (l *Launcher) Start(ctx context.Context, avdName string, opts domain.Launch
 		}
 	}
 	l.seq++
-	inst := &instance{exit: make(chan struct{}), grpcPort: grpcPort, info: domain.EmulatorInstance{
+	inst := &instance{exit: make(chan struct{}), grpcPort: grpcPort, writableSystem: opts.WritableSystem, info: domain.EmulatorInstance{
 		ID: fmt.Sprintf("emu-%d-%d", port, l.seq), AvdName: avdName, Serial: adb.SerialForPort(port),
 		Port: port, State: domain.AvdStarting, StartedAt: platform.NowMs(),
 		CustomUI: opts.CustomUI, GrpcPort: grpcPort,
@@ -307,6 +321,9 @@ func (l *Launcher) monitor(ctx context.Context, inst *instance) {
 		l.setState(inst, domain.AvdRunning, "")
 		l.log.Info("emulator", "%s（%s）已开机完成，耗时 %s", inst.info.AvdName, inst.info.Serial,
 			time.Since(started).Round(time.Second))
+		if inst.writableSystem {
+			l.applyRootPermissions(waitCtx, inst)
+		}
 		if l.adb != nil {
 			l.watchRunningDevice(waitCtx, inst)
 		}
@@ -558,6 +575,62 @@ func (l *Launcher) setState(inst *instance, state domain.AvdState, errMsg string
 	l.mu.Unlock()
 	if l.sink != nil {
 		l.sink(EventState, info)
+	}
+}
+
+// rootWaitTimeout 是「等待 root 生效」的总上限（adb root 会重启 adbd，需要重试）。
+const rootWaitTimeout = 90 * time.Second
+
+// remountRetryInterval 是 adb root 之后重试 remount 的间隔。
+const remountRetryInterval = 2 * time.Second
+
+// applyRootPermissions 让已开启 root 的实例真正拿到 root：adb root → adb remount。
+//
+// -writable-system 只让系统分区可写，还需要 adbd 以 root 运行并把 /system 重新挂载。
+// 全过程尽力而为且不阻塞设备使用：Google Play 等 user 构建会明确失败，只记录日志。
+func (l *Launcher) applyRootPermissions(ctx context.Context, inst *instance) {
+	if l.adb == nil {
+		return
+	}
+	serial := inst.info.Serial
+	rootCtx, cancel := context.WithTimeout(ctx, rootWaitTimeout)
+	defer cancel()
+	retry := l.remountRetry
+	if retry <= 0 {
+		retry = remountRetryInterval
+	}
+
+	out, err := l.adb.Root(rootCtx, serial)
+	if err != nil {
+		l.log.Warn("emulator", "%s 执行 adb root 失败（-writable-system 仍已附加）：%v", serial, err)
+		return
+	}
+	if msg := strings.TrimSpace(out); msg != "" {
+		l.log.Info("emulator", "%s adb root：%s", serial, msg)
+	}
+	if strings.Contains(strings.ToLower(out), "cannot run as root") {
+		l.log.Warn("emulator", "%s 的系统镜像是正式版（user）构建，无法取得 root：请改用 Google APIs 镜像", serial)
+		return
+	}
+
+	// adb root 会重启 adbd（设备短暂离线），因此 remount 需要重试到上限。
+	for {
+		remountOut, err := l.adb.Remount(rootCtx, serial)
+		if err == nil {
+			l.log.Info("emulator", "%s 已取得 root，系统分区可写：%s", serial, strings.TrimSpace(remountOut))
+			return
+		}
+		if rootCtx.Err() != nil {
+			l.log.Warn("emulator", "%s 等待 root 生效超时（adb remount 未成功）：%v", serial, err)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-inst.exit:
+			return
+		case <-time.After(retry):
+		}
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,12 +28,46 @@ type fakeADB struct {
 	err     error
 	// waitErr 由 WaitForDevice / WaitForBoot 返回：用于覆盖"开机等待失败"分支。
 	waitErr error
+
+	mu           sync.Mutex
+	rootOut      string
+	rootErr      error
+	rootCalls    int
+	remountCalls int
+	// remountErr 表示前 N 次 remount 失败（模拟 adb root 后 adbd 重启导致的短暂离线）。
+	remountErr int
 }
 
 func (f *fakeADB) WaitForDevice(context.Context, string, time.Duration) error { return f.waitErr }
 func (f *fakeADB) WaitForBoot(context.Context, string, time.Duration) error   { return f.waitErr }
 func (f *fakeADB) Devices(context.Context) ([]domain.AdbDevice, error)        { return f.devices, f.err }
 func (f *fakeADB) EmuKill(context.Context, string) error                      { return nil }
+
+// Root 记录调用次数并返回预设输出（默认成功）。
+func (f *fakeADB) Root(context.Context, string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rootCalls++
+	return f.rootOut, f.rootErr
+}
+
+// Remount 模拟 adb remount：前 remountErr 次失败，之后成功。
+func (f *fakeADB) Remount(context.Context, string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.remountCalls++
+	if f.remountCalls <= f.remountErr {
+		return "", domain.Err(domain.CodeProcessFailed, "device offline")
+	}
+	return "remount succeeded", nil
+}
+
+// rootStats 返回 root / remount 的调用次数（受 mu 保护）。
+func (f *fakeADB) rootStats() (int, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.rootCalls, f.remountCalls
+}
 
 // newTestLauncher 返回一个不接触真实工具链的启动器。
 func newTestLauncher() *Launcher {
@@ -69,6 +104,11 @@ func TestBuildArgs(t *testing.T) {
 		// 只有自定义 UI 才追加 -grpc：普通无窗口启动即使传了端口也不该开启 gRPC。
 		{"无窗口不追加 gRPC", domain.LaunchOptions{NoWindow: true}, 5568, 8558,
 			[]string{"-avd", "Dev1", "-port", "5568", "-no-window"}},
+		// 开启 root 的设备：-writable-system 出现在 -no-window 之后、-gpu 之前（顺序固定）。
+		{"root（-writable-system）", domain.LaunchOptions{WritableSystem: true}, 5576, 0,
+			[]string{"-avd", "Dev1", "-port", "5576", "-writable-system"}},
+		{"root+自定义 UI", domain.LaunchOptions{WritableSystem: true, CustomUI: true, GPU: "host"}, 5578, 8564,
+			[]string{"-avd", "Dev1", "-port", "5578", "-no-window", "-writable-system", "-gpu", "host", "-grpc", "8564"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

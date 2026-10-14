@@ -3,7 +3,8 @@
 // 用法：`npx vite` 后打开 `preview.html?page=settings&dialog=mirror&theme=dark&drawer=1`
 // 支持参数：
 //   page   devices | settings
-//   dialog wizard | env | mirror | images
+//   dialog wizard | env | mirror | images | devset（设备设置；配 dev=<序号> 选设备）
+//   dev    设备设置的设备序号（0 = 第一台，默认 1）
 //   drawer 1 展开底部任务面板
 //   view   compact（切换为紧凑列表视图）
 //   sort   1 展开排序浮层
@@ -95,6 +96,26 @@ function seedInputWhenReady(selector: string, value: string, maxFrames = 240): v
   requestAnimationFrame(tick);
 }
 
+/** 把设备设置里的每个下拉框都切到「自定义…」，用于核对自定义输入框的布局。 */
+function selectDevsetCustomWhenReady(maxFrames = 240): void {
+  let frames = 0;
+  const tick = () => {
+    const selects = Array.from(document.querySelectorAll<HTMLSelectElement>(".devset select"));
+    if (selects.length > 0) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+      selects.forEach((select) => {
+        if (select.value === "custom") return;
+        setter?.call(select, "custom");
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      return;
+    }
+    if (frames++ > maxFrames) return;
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 function applyPreviewState(): void {
   const page = params.get("page");
   if (page === "settings") clickWhenReady("设置", ".navrail__item");
@@ -104,6 +125,13 @@ function applyPreviewState(): void {
   if (dialog === "env") clickWhenReady("准备 / 修复环境");
   if (dialog === "mirror") clickWhenReady("检测 / 更换镜像源");
   if (dialog === "images") clickWhenReady("查看全部镜像");
+  // 设备设置：默认打开第二台设备（已停止 + 支持 root），`dev=0` 打开第一台（运行中 + Play 镜像）
+  if (dialog === "devset") {
+    const index = Number(params.get("dev") ?? "1");
+    clickNthWhenReady('[aria-label^="设备设置"]', Number.isFinite(index) ? index : 1);
+    // custom=1：把设置面板里的下拉框全部切到「自定义…」，核对自定义输入框布局
+    if (params.get("custom") === "1") selectDevsetCustomWhenReady();
+  }
 
   if (params.get("drawer") === "1") clickWhenReady("", ".drawer__head", 240);
   // 紧凑（列表）视图：分段控件的第二个按钮

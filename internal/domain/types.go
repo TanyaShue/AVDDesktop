@@ -237,10 +237,15 @@ type AvdSummary struct {
 	Broken          string   `json:"broken,omitempty"` // 非空表示该 AVD 配置有问题
 
 	// 以下字段来自 config.ini，用于在设备卡片上直接显示当前生效的硬件参数。
-	RAMMB     int `json:"ramMb,omitempty"`
-	CPUCores  int `json:"cpuCores,omitempty"`
-	LCDWidth  int `json:"lcdWidth,omitempty"`
-	LCDHeight int `json:"lcdHeight,omitempty"`
+	RAMMB      int `json:"ramMb,omitempty"`
+	CPUCores   int `json:"cpuCores,omitempty"`
+	LCDWidth   int `json:"lcdWidth,omitempty"`
+	LCDHeight  int `json:"lcdHeight,omitempty"`
+	LCDDensity int `json:"lcdDensity,omitempty"`
+
+	// RootEnabled 表示该设备已开启 root：启动时附加 -writable-system，并在开机后自动
+	// 执行 adb root / remount。该标记由软件自己维护（不写进 config.ini）。
+	RootEnabled bool `json:"rootEnabled,omitempty"`
 }
 
 // AvdHardware 是创建 AVD 时可覆盖的设备档案硬件参数。
@@ -265,6 +270,75 @@ type AvdSpec struct {
 	Hardware        *AvdHardware `json:"hardware,omitempty"`
 }
 
+// AvdSettings 是设备设置面板读取 / 修改的配置项。
+//
+// 数值来自 AVD 的 config.ini（模拟器只在启动时读取），对应关系：
+//
+//	RAMMB      ↔ hw.ramSize
+//	CPUCores   ↔ hw.cpu.ncore
+//	LCDWidth   ↔ hw.lcd.width（同时同步 skin.name / skin.path）
+//	LCDHeight  ↔ hw.lcd.height
+//	LCDDensity ↔ hw.lcd.density
+//	VMHeapMB   ↔ vm.heapSize
+//	Keyboard   ↔ hw.keyboard（yes/no）
+//	Root       ↔ 软件自有标记（启动时附加 -writable-system，并在开机后自动 adb root）
+//
+// 零值表示「该项在 config.ini 中未设置」，界面按「跟随设备档案」展示。
+type AvdSettings struct {
+	RAMMB      int  `json:"ramMb,omitempty"`
+	CPUCores   int  `json:"cpuCores,omitempty"`
+	LCDWidth   int  `json:"lcdWidth,omitempty"`
+	LCDHeight  int  `json:"lcdHeight,omitempty"`
+	LCDDensity int  `json:"lcdDensity,omitempty"`
+	VMHeapMB   int  `json:"vmHeapMb,omitempty"`
+	Keyboard   bool `json:"keyboard,omitempty"`
+	Root       bool `json:"root,omitempty"`
+}
+
+// AvdSettingsUpdate 是保存设备设置的输入。
+//
+// 数值字段为 0、布尔字段为 nil 表示「不修改该项」：界面即使只提交改动过的项，
+// 也不会覆盖其它配置。取值区间与创建时一致（见 internal/avd/settings.go）。
+type AvdSettingsUpdate struct {
+	Name       string `json:"name"`
+	RAMMB      int    `json:"ramMb,omitempty"`
+	CPUCores   int    `json:"cpuCores,omitempty"`
+	LCDWidth   int    `json:"lcdWidth,omitempty"`
+	LCDHeight  int    `json:"lcdHeight,omitempty"`
+	LCDDensity int    `json:"lcdDensity,omitempty"`
+	VMHeapMB   int    `json:"vmHeapMb,omitempty"`
+	Keyboard   *bool  `json:"keyboard,omitempty"`
+	Root       *bool  `json:"root,omitempty"`
+}
+
+// AvdDetail 是设备设置面板的数据源：只读信息 + 可编辑设置 + 运行状态。
+type AvdDetail struct {
+	Name            string `json:"name"`
+	Path            string `json:"path"`
+	SystemImagePath string `json:"systemImagePath,omitempty"`
+	DeviceProfileID string `json:"deviceProfileId,omitempty"`
+	API             string `json:"api"`
+	Tag             string `json:"tag"`
+	ABI             string `json:"abi"`
+
+	Settings AvdSettings `json:"settings"`
+
+	// RootSupported 表示该设备的系统镜像是否支持 root（Google Play 镜像不支持）。
+	RootSupported bool `json:"rootSupported"`
+	// RootReason 是不支持 root 时的原因说明（支持时为空）。
+	RootReason string `json:"rootReason,omitempty"`
+
+	// State / InstanceID 描述设备当前运行状态：运行中的设备不允许改配置。
+	State      AvdState `json:"state"`
+	InstanceID string   `json:"instanceId,omitempty"`
+
+	// SkinPath 是当前配置里的皮肤设置（空表示配置里没有皮肤键）。
+	// 供界面解释「为什么改了分辨率看起来没生效」：指向真实皮肤的 skin.path 会盖过 hw.lcd.*。
+	SkinPath string `json:"skinPath,omitempty"`
+	// Broken 非空表示该设备配置有问题（与设备列表页一致）。
+	Broken string `json:"broken,omitempty"`
+}
+
 // NameValidation 是 AVD 名称校验结果。
 type NameValidation struct {
 	Name    string `json:"name"`
@@ -279,6 +353,9 @@ type NameValidation struct {
 type LaunchOptions struct {
 	ColdBoot bool `json:"coldBoot"`
 	NoWindow bool `json:"noWindow"`
+	// WritableSystem 表示设备已开启 root：附加 -writable-system，并在开机完成后
+	// 自动执行 adb root / remount，使 /system 可写。
+	WritableSystem bool `json:"writableSystem,omitempty"`
 	// CustomUI 表示使用应用自建窗口显示设备画面：不启动 Qt 窗口，并开启模拟器 gRPC 图像通道。
 	CustomUI bool `json:"customUI"`
 	// GPU 指定模拟器图形后端：host / auto / swiftshader_indirect / angle_indirect / guest / off。

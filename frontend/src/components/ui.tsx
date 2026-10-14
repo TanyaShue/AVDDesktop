@@ -200,6 +200,54 @@ function toastTone(level: Toast["level"]) {
   }
 }
 
+/**
+ * 开关（用于设备设置里的 root、物理键盘这类布尔项）。
+ *
+ * 用原生 button + role="switch"：键盘 Space/Enter 直接可用，读屏会念出开关状态；
+ * 视觉上只有轨道与滑块，配色全部走设计令牌（浅色 / 深色一致）。
+ */
+export function Switch({
+  checked,
+  onChange,
+  disabled,
+  label,
+  description,
+  id,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+  /** 开关右侧的标题文案；留空时只渲染开关本身（由调用方自己排版标签）。 */
+  label?: string;
+  /** 标题下方的补充说明。 */
+  description?: string;
+  id?: string;
+}) {
+  const control = (
+    <button
+      type="button"
+      id={id}
+      className={`switch${checked ? " switch--on" : ""}`}
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+    >
+      <span className="switch__thumb" />
+    </button>
+  );
+  if (!label) return control;
+  return (
+    <div className="switch-row">
+      <div className="switch-row__text">
+        <div className="switch-row__label">{label}</div>
+        {description ? <div className="switch-row__desc">{description}</div> : null}
+      </div>
+      {control}
+    </div>
+  );
+}
+
 /** 耗时格式化（环境检查/任务耗时展示）。 */
 export function formatMs(ms: number): string {
   if (!ms || ms < 0) return "—";
