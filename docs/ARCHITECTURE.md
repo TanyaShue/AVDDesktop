@@ -111,6 +111,12 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
   `tag.id` 与 `image.sysdir.1`，不支持时界面上禁用开关并给出原因。
 - 自定义分辨率同样走 `resolutionSkinChanges`（`skin.path` 指向真实皮肤时改为 `_no_skin`），
   与创建时的行为一致。
+- **容量类键的两套写法**：新版 `avdmanager` 写出 `hw.ramSize=2G` / `vm.heapSize=228M`
+  （字节单位后缀），旧格式与本应用写入的是纯数字 MB（`hw.ramSize=2048`）——实测同一台机器上
+  两种并存。读取统一走 `internal/avd/size.go` 的 `parseSizeMB`（带后缀按字节单位换算、
+  纯数字按 MB），解析不了的值按「未设置」处理而不是猜；保存一律写回纯数字 MB，
+  因此保存一次就会把 `2G` 归一化成 `2048`。不要用「只取前导数字」的解析（会把 `2G` 读成 2，
+  界面显示成 `2 MB`，与真实内存差 1024 倍）。
 - 其余低频硬件键（`disk.dataPartition.size`、`sdcard.size`、摄像头等）仍完全由设备档案决定，
   应用不覆盖：改动数据分区会牵动 userdata 镜像，风险高于收益。
 

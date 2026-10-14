@@ -238,14 +238,17 @@ func settingsChanges(req domain.AvdSettingsUpdate) []iniChange {
 }
 
 // settingsFromConfig 从 config.ini 与软件状态里取出设置值。
+//
+// 容量类键（hw.ramSize / vm.heapSize）可能是 "2G" / "228M" 这种带单位的写法，
+// 统一按容量解析成 MB（见 size.go）；其余数值键是普通整数。
 func settingsFromConfig(config map[string]string, root bool) domain.AvdSettings {
 	settings := domain.AvdSettings{
-		RAMMB:      atoi(config["hw.ramSize"]),
+		RAMMB:      parseSizeMB(config["hw.ramSize"]),
 		CPUCores:   atoi(config["hw.cpu.ncore"]),
 		LCDWidth:   atoi(config["hw.lcd.width"]),
 		LCDHeight:  atoi(config["hw.lcd.height"]),
 		LCDDensity: atoi(config["hw.lcd.density"]),
-		VMHeapMB:   atoi(config["vm.heapSize"]),
+		VMHeapMB:   parseSizeMB(config["vm.heapSize"]),
 		Keyboard:   isYes(config["hw.keyboard"]),
 		Root:       root,
 	}

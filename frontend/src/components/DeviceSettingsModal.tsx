@@ -34,8 +34,14 @@ interface Props {
   onStop?: () => void;
 }
 
-/** 选项与后端区间保持一致（internal/avd/settings.go）；后端仍会再次校验。 */
-const RAM_PRESETS_GB = ["1", "1.5", "2", "3", "4", "6", "8", "12", "16"];
+/**
+ * 选项与后端区间保持一致（internal/avd/settings.go）；后端仍会再次校验。
+ *
+ * 内存以 MB 为准（与 config.ini 的 hw.ramSize 一致），下拉框只把标签显示成 GB：
+ * 表单里存 GB 会在非整 GB 的取值（例如 2500 MB）上引入「显示 2.44 GB、保存变 2499 MB」
+ * 的舍入漂移，所以这里保留精确的 MB。
+ */
+const RAM_PRESETS_MB = ["1024", "1536", "2048", "3072", "4096", "6144", "8192", "12288", "16384"];
 const CPU_PRESETS = ["1", "2", "4", "6", "8", "12", "16"];
 const RESOLUTION_PRESETS = ["720x1280", "1080x1920", "1080x2340", "1080x2400", "1440x2560", "1440x3120"];
 const DENSITY_PRESETS = ["160", "240", "320", "420", "480", "560"];
@@ -73,17 +79,6 @@ function presetChoiceOf(value: number): Choice {
   return value ? { mode: "preset", value: String(value) } : AUTO;
 }
 
-/**
- * 内存（后端是 MB）→ 三态。
- *
- * 表单里的内存单位是 GB（与创建向导一致），因此必须换算：直接把 1536 当成 GB 会让
- * 输入框显示成「1536 GB」。非预设的取值（例如 2.5 GB）会作为「当前值」选项出现在
- * 下拉框里，只有用户主动选「自定义…」才切到自由输入。
- */
-function ramChoiceOf(mb: number): Choice {
-  return mb ? { mode: "preset", value: String(mb / 1024) } : AUTO;
-}
-
 /** 解析正整数；空串与非法输入返回 0（0 表示该项未设置）。 */
 function toPositiveInt(value: string): number {
   const n = Number(value.trim());
@@ -107,9 +102,7 @@ interface Form {
 
 /** 表单里实际生效的内存（MB）；0 表示未设置。 */
 function ramMbOf(form: Form): number {
-  if (form.ram.mode === "auto") return 0;
-  const gb = Number(form.ram.value.trim());
-  return Number.isFinite(gb) && gb > 0 ? Math.round(gb * 1024) : 0;
+  return form.ram.mode === "auto" ? 0 : toPositiveInt(form.ram.value);
 }
 
 /** 表单里实际生效的 CPU 核心；0 表示未设置。 */
@@ -194,7 +187,7 @@ function formFromDetail(detail: AvdDetail): Form {
   const height = s.lcdHeight ?? 0;
   const preset = `${width}x${height}`;
   return {
-    ram: ramChoiceOf(s.ramMb ?? 0),
+    ram: presetChoiceOf(s.ramMb ?? 0),
     cpu: presetChoiceOf(s.cpuCores ?? 0),
     // 有分辨率时按「当前值」展示；用户主动选自定义才会出现宽高输入框
     resolution: width > 0 && height > 0 ? { mode: "preset", value: preset } : AUTO,
@@ -545,14 +538,14 @@ export function DeviceSettingsModal({ device, instance, onClose, onSaved, onToas
                 label="运行内存"
                 choice={form.ram}
                 onChange={(next) => patch({ ram: next })}
-                options={RAM_PRESETS_GB.map((gb) => ({ value: gb, label: `${gb} GB` }))}
+                // 值本身是 MB（与 hw.ramSize 一致），标签按 GB 显示更直观
+                options={RAM_PRESETS_MB.map((mb) => ({ value: mb, label: formatRam(Number(mb)) }))}
                 autoLabel={detail.settings.ramMb ? undefined : "跟随设备档案"}
-                placeholder="GB"
-                min={RAM_MIN_MB / 1024}
-                max={RAM_MAX_MB / 1024}
-                step={0.5}
-                inputMode="decimal"
-                describe={(value) => `${value} GB`}
+                placeholder="MB"
+                min={RAM_MIN_MB}
+                max={RAM_MAX_MB}
+                step={256}
+                describe={(value) => formatRam(Number(value))}
                 hint={
                   <>
                     当前 {detail.settings.ramMb ? formatRam(detail.settings.ramMb) : "跟随设备档案"}

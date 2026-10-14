@@ -207,7 +207,8 @@ func (s *Store) summary(name string) (domain.AvdSummary, error) {
 		DeviceProfileID: config["hw.device.name"],
 		State:           domain.AvdStopped,
 		// 硬件参数：供设备卡片直接展示当前生效值（缺省时为零值，界面不显示）。
-		RAMMB:      atoi(config["hw.ramSize"]),
+		// 容量类键可能是 "2G" 这种带单位的写法（见 size.go），必须按容量解析。
+		RAMMB:      parseSizeMB(config["hw.ramSize"]),
 		CPUCores:   atoi(config["hw.cpu.ncore"]),
 		LCDWidth:   atoi(config["hw.lcd.width"]),
 		LCDHeight:  atoi(config["hw.lcd.height"]),

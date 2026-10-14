@@ -76,6 +76,69 @@ func TestDetailReadsSettingsAndRootSupport(t *testing.T) {
 	}
 }
 
+// TestDetailReadsSizeWithUnitSuffix 回归：avdmanager 写出的 "2G" / "228M" 必须按容量解析。
+//
+// 旧实现用 atoi 只读前导数字：hw.ramSize=2G 会读成 2 → 设备卡片显示「2 MB」，vm.heapSize=228M
+// 读成 228（恰好正确，掩盖了同一个 bug）。这里同时核对读取与「保存后归一化」。
+func TestDetailReadsSizeWithUnitSuffix(t *testing.T) {
+	const unitConfig = `AvdId=Dev1
+PlayStore.enabled=no
+abi.type=x86_64
+hw.cpu.ncore=4
+hw.lcd.density=420
+hw.lcd.height=2400
+hw.lcd.width=1080
+hw.ramSize=2G
+image.sysdir.1=system-images/android-34/google_apis/x86_64/
+tag.id=google_apis
+target=android-34
+vm.heapSize=228M
+`
+	s, _ := settingsStore(t, "Dev1", unitConfig)
+
+	detail, err := s.Detail("Dev1")
+	if err != nil {
+		t.Fatalf("Detail 失败: %v", err)
+	}
+	if detail.Settings.RAMMB != 2048 {
+		t.Errorf("hw.ramSize=2G 应读成 2048 MB，实际 %d", detail.Settings.RAMMB)
+	}
+	if detail.Settings.VMHeapMB != 228 {
+		t.Errorf("vm.heapSize=228M 应读成 228 MB，实际 %d", detail.Settings.VMHeapMB)
+	}
+
+	// 设备列表用同一套解析（卡片上的内存 chip 直接取这个值）
+	items, err := s.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].RAMMB != 2048 {
+		t.Fatalf("列表内存应为 2048 MB，实际 %+v", items)
+	}
+
+	// 保存内存后写成纯数字 MB（模拟器两种写法都认，纯数字是 avdmanager 旧格式的约定）
+	if _, err := s.UpdateSettings(domain.AvdSettingsUpdate{Name: "Dev1", RAMMB: 2048}); err != nil {
+		t.Fatalf("UpdateSettings 失败: %v", err)
+	}
+	if got := mustReadConfig(t, s, "Dev1")["hw.ramSize"]; got != "2048" {
+		t.Fatalf("保存后 hw.ramSize 应为 2048，实际 %q", got)
+	}
+}
+
+// TestDetailIgnoresUnparsableSize 无法解析的容量值按「未设置」处理，不做猜测。
+func TestDetailIgnoresUnparsableSize(t *testing.T) {
+	s, _ := settingsStore(t, "Dev1", "hw.ramSize=auto\nvm.heapSize=?\ntarget=android-34\n"+
+		"image.sysdir.1=system-images/android-34/google_apis/x86_64/\n")
+
+	detail, err := s.Detail("Dev1")
+	if err != nil {
+		t.Fatalf("Detail 失败: %v", err)
+	}
+	if detail.Settings.RAMMB != 0 || detail.Settings.VMHeapMB != 0 {
+		t.Fatalf("无法解析的容量应为 0（界面按跟随设备档案展示），实际 %+v", detail.Settings)
+	}
+}
+
 func TestUpdateSettingsWritesConfigAndState(t *testing.T) {
 	s, dir := settingsStore(t, "Dev1", fullConfig)
 	keyboard := true
