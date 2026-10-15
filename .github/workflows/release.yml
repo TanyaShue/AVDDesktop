@@ -17,6 +17,12 @@
 # 基线仅从“当前 tag 的父提交可达”的标签中选取，非 SemVer 的标签一律忽略；
 # 若是仓库的第一个版本，则回退为输出全部提交历史。
 #
+# 版本号注入（两处，缺一不可）：
+#   1) -ldflags -X main.AppVersion=<ver>：写进二进制，运行时读到的版本（app.go 的 AppVersion）
+#   2) 同步 wails.json 的 info.productVersion：写进系统级元数据，即 macOS 的
+#      CFBundleVersion / CFBundleShortVersionString 与 Windows 文件属性里的版本号。
+#      该字段缺失时 wails 会默认成 1.0.0，导致「关于本机」里看到的版本与标签不一致。
+#
 # 产物命名（wails build 的默认输出，位于 build/bin/）：
 #   Windows : AVDDesktop.exe    → AVDDesktop-<ver>-windows-amd64.zip
 #   Linux   : AVDDesktop        → AVDDesktop-<ver>-linux-amd64.tar.gz
@@ -181,6 +187,17 @@ jobs:
           echo "安装 Wails CLI ${WAILS_VERSION}"
           go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}"
           wails version
+
+      - name: 同步版本号到系统元数据
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          # wails 用 info.productVersion 填充 macOS plist 与 Windows 版本资源；
+          # 缺失时默认 1.0.0，所以这里用标签版本覆盖它。
+          node -e "const fs=require('fs');const f='wails.json';const c=JSON.parse(fs.readFileSync(f,'utf8'));c.info=Object.assign({},c.info,{productVersion:process.env.VERSION});fs.writeFileSync(f,JSON.stringify(c,null,2)+'\n');console.log('wails.json info.productVersion ->',c.info.productVersion)"
+          git --no-pager diff --stat -- wails.json
 
       - name: 编译打包（wails build）
         shell: bash
