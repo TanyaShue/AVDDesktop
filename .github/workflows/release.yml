@@ -18,9 +18,12 @@
 # 若是仓库的第一个版本，则回退为输出全部提交历史。
 #
 # 产物命名（wails build 的默认输出，位于 build/bin/）：
-#   Windows : AVDDesktop.exe            → AVDDesktop-<ver>-windows-amd64.zip
-#   Linux   : AVDDesktop-linux-amd64    → AVDDesktop-<ver>-linux-amd64.tar.gz
-#   macOS   : AVDDesktop.app            → AVDDesktop-<ver>-macos-universal.zip
+#   Windows : AVDDesktop.exe    → AVDDesktop-<ver>-windows-amd64.zip
+#   Linux   : AVDDesktop        → AVDDesktop-<ver>-linux-amd64.tar.gz
+#   macOS   : AVDDesktop.app    → AVDDesktop-<ver>-macos-universal.zip
+# 注意：wails 仅在一次构建多个平台（-platform a,b）时才给产物加 -<os>-<arch> 后缀；
+# 本工作流每个任务只构建一个平台，所以名称就是 wails.json 的 outputfilename，
+# 只有 Windows 会被无条件加上 .exe。macOS 的 .app 包名固定取 wails.json 的 name。
 #
 # 注意：请勿给 `wails build` 传 `-o AVDDesktop`。wails 会把 -o 的值原样交给 go build，
 # 而显式 -o 不会自动补 .exe，Windows 上会产出无扩展名、无法直接运行的二进制。
@@ -106,10 +109,10 @@ jobs:
             platform: windows/amd64
             binary: build/bin/AVDDesktop.exe
           - target: linux-amd64
-            os: ubuntu-latest
+            os: ubuntu-24.04
             platform: linux/amd64
-            # 未指定 -o 时，linux 产物名带平台/架构后缀
-            binary: build/bin/AVDDesktop-linux-amd64
+            # 单平台构建不带 -linux-amd64 后缀，就是 wails.json 的 outputfilename
+            binary: build/bin/AVDDesktop
           - target: macos-universal
             os: macos-latest
             platform: darwin/universal
@@ -149,17 +152,22 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          DISTRO="$(lsb_release -rs)"
-          echo "检测到 Ubuntu ${DISTRO}"
 
-          # Wails v2 在 Ubuntu 24.04+ 需要 webkit2gtk-4.1 与 webkit2_41 构建标签
-          if dpkg --compare-versions "${DISTRO}" ge "24.04"; then
+          # 直接问 apt 哪个 webkit2gtk 开发包可用，比比较发行版号更可靠：
+          # Wails v2 从 webkit2gtk-4.1 起需要配套的 webkit2_41 构建标签。
+          if apt-cache show libwebkit2gtk-4.1-dev >/dev/null 2>&1; then
             WEBKIT_PKG="libwebkit2gtk-4.1-dev"
-            echo "tags=webkit2_41" >> "${GITHUB_OUTPUT}"
-          else
+            BUILD_TAGS="webkit2_41"
+          elif apt-cache show libwebkit2gtk-4.0-dev >/dev/null 2>&1; then
             WEBKIT_PKG="libwebkit2gtk-4.0-dev"
-            echo "tags=" >> "${GITHUB_OUTPUT}"
+            BUILD_TAGS=""
+          else
+            echo "::error::apt 源里既没有 libwebkit2gtk-4.1-dev 也没有 libwebkit2gtk-4.0-dev"
+            exit 1
           fi
+
+          echo "使用 ${WEBKIT_PKG}（构建标签：${BUILD_TAGS:-<无>}）"
+          echo "tags=${BUILD_TAGS}" >> "${GITHUB_OUTPUT}"
 
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libgtk-3-dev "${WEBKIT_PKG}"
