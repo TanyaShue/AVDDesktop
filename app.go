@@ -6,10 +6,12 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"strings"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"AVDDesktop/internal/config"
+	"AVDDesktop/internal/domain"
 	"AVDDesktop/internal/logging"
 	"AVDDesktop/internal/platform"
 	"AVDDesktop/internal/service"
@@ -135,31 +137,93 @@ func (a *App) shutdown(ctx context.Context) {
 	_ = a.log.Close()
 }
 
+// 退出确认框的按钮文案。
+//
+// 注意：Wails v2 在 Windows / Linux 上使用原生“是/否”对话框并忽略 Buttons，
+// 只有 macOS 会使用自定义文案并原样返回（详见 quitSelectionConfirmed）。
+const (
+	quitButtonConfirm = "全部关闭并退出"
+	quitButtonCancel  = "取消"
+)
+
 // beforeClose 用于确认是否存在运行中的模拟器。
 func (a *App) beforeClose(ctx context.Context) bool {
-	running := a.Emulator.ListRunning()
-	active := 0
-	for _, inst := range running {
-		if inst.State == "starting" || inst.State == "booting" || inst.State == "running" {
-			active++
-		}
-	}
+	active := activeEmulatorCount(a.Emulator.ListRunning())
 	if active == 0 {
 		return false // 允许关闭
 	}
-	selection, err := wailsruntime.MessageDialog(ctx, wailsruntime.MessageDialogOptions{
+	selection, err := wailsruntime.MessageDialog(ctx, quitConfirmDialogOptions(active))
+	if err != nil {
+		a.log.Warn("app", "退出确认框不可用，已取消本次关闭: %v", err)
+		return true // 阻止关闭
+	}
+	if !quitSelectionConfirmed(selection) {
+		a.log.Info("app", "退出已取消（确认框返回 %q），保留运行中的模拟器", selection)
+		return true // 阻止关闭
+	}
+	a.log.Info("app", "用户确认退出：停止 %d 个运行中的模拟器实例", active)
+	// 同步等待优雅停止（adb emu kill）完成：返回 false 后 Wails 会立即走
+	// OnShutdown → Runtime.Shutdown 的强制 StopAll，改成异步会被强杀覆盖。
+	a.Emulator.Shutdown(false)
+	return false
+}
+
+// activeEmulatorCount 统计运行中的实例数量（含启动中与引导中）。
+func activeEmulatorCount(instances []domain.EmulatorInstance) int {
+	active := 0
+	for _, inst := range instances {
+		switch inst.State {
+		case domain.AvdStarting, domain.AvdBooting, domain.AvdRunning:
+			active++
+		}
+	}
+	return active
+}
+
+// quitConfirmDialogOptions 构造退出确认框参数。
+func quitConfirmDialogOptions(active int) wailsruntime.MessageDialogOptions {
+	return wailsruntime.MessageDialogOptions{
 		Type:          wailsruntime.QuestionDialog,
 		Title:         "仍有模拟器在运行",
 		Message:       fmt.Sprintf("当前有 %d 个模拟器实例正在运行。要一并关闭它们并退出吗？", active),
-		Buttons:       []string{"全部关闭并退出", "取消"},
-		DefaultButton: "取消",
-		CancelButton:  "取消",
-	})
-	if err != nil || selection != "全部关闭并退出" {
-		return true // 阻止关闭
+		Buttons:       []string{quitButtonConfirm, quitButtonCancel},
+		DefaultButton: quitDialogDefaultButton(),
+		CancelButton:  quitButtonCancel,
 	}
-	a.Emulator.Shutdown(false)
-	return false
+}
+
+// quitDialogDefaultButton 返回确认框默认（回车）按钮的文案。
+//
+// Wails 各平台对 DefaultButton 的处理并不一致：Linux 的 GTK 对话框完全忽略该字段；
+// macOS 按文案匹配 Buttons 中的按钮；Windows 只识别英文 "No"（忽略大小写与首尾空白）
+// 来设置 MB_DEFBUTTON2。因此在 Windows 上必须传 "No"，否则“是”会成为默认按钮，
+// 误按一次回车就会关闭全部模拟器；Linux / macOS 继续使用中文文案以与 Buttons 一致。
+func quitDialogDefaultButton() string {
+	if runtime.GOOS == "windows" {
+		return "No"
+	}
+	return quitButtonCancel
+}
+
+// quitSelectionConfirmed 判断确认框返回值是否表示“连同运行中的模拟器一起退出”。
+//
+// Wails v2.16.0 各平台的 QuestionDialog 返回值不同（已核对 Wails 源码）：
+//   - Windows（internal/frontend/desktop/windows/dialog.go）：固定 MB_YESNO，
+//     忽略 Buttons，返回 "Yes" / "No"；
+//   - Linux（internal/frontend/desktop/linux/window.c）：固定 GTK_BUTTONS_YES_NO，
+//     忽略 Buttons，确认返回 "Yes"，取消返回 "No"，Esc / 关闭窗口返回空串；
+//   - macOS（internal/frontend/desktop/darwin/dialog.go）：使用自定义 Buttons，
+//     原样返回被点击按钮的文案。
+//
+// 仅把明确的肯定结果视为确认，其余（含空串与未知文案）一律按取消处理，
+// 以免在无法确定用户意图时误停模拟器。
+func quitSelectionConfirmed(selection string) bool {
+	switch strings.ToLower(strings.TrimSpace(selection)) {
+	case "yes", strings.ToLower(quitButtonConfirm):
+		return true
+	default:
+		return false
+	}
 }
 
 // GetVersion 返回版本号。
