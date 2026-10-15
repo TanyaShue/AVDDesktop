@@ -2341,6 +2341,35 @@ body.modal-open .pagecontent {
   gap: 6px;
 }
 
+.table-filter__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.table-filter__help {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-full);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: help;
+}
+
+.table-filter__help:focus-visible {
+  border-color: var(--primary);
+  outline: none;
+}
+
 .table-filter__select {
   width: 100%;
   height: 30px;

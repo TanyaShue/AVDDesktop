@@ -30,6 +30,24 @@ interface Props {
   onReload?: () => void;
 }
 
+const IMAGE_TYPE_TIP = [
+  "默认（AOSP）：",
+  "纯 AOSP，无 Google 服务；支持 root。",
+  "Google APIs：",
+  "含 Google 服务，无商店；适合 GMS 测试，支持 root。",
+  "Google Play：",
+  "含 Play 商店；系统受限，不支持 root。",
+  "AOSP ATD：",
+  "精简测试镜像，启动快、占用低。",
+  "Google APIs ATD：",
+  "带 Google 服务的自动化测试镜像。",
+  "Android Desktop：",
+  "适合桌面与大屏体验。",
+  "名字带 (16 KB) 的镜像：",
+  "使用 16 KB 内存页，测试兼容性。",
+  "选择建议：",
+  "GMS 选 APIs；商店选 Play；自动化选 ATD。",
+].join("\n");
 export function SystemImageModal({
   mode,
   images,
@@ -181,7 +199,7 @@ export function SystemImageModal({
                       </option>
                     ))}
                   </FilterHeader>
-                  <FilterHeader label="类型" value={tagFilter} onChange={setTagFilter}>
+                  <FilterHeader label="类型" value={tagFilter} onChange={setTagFilter} help={IMAGE_TYPE_TIP}>
                     <option value="">全部类型</option>
                     {tags.map(([tag, label]) => (
                       <option key={tag} value={tag}>
@@ -272,17 +290,32 @@ function FilterHeader({
   label,
   value,
   onChange,
+  help,
   children,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  help?: string;
   children: ReactNode;
 }) {
   return (
     <th>
       <div className="table-filter">
-        <span>{label}</span>
+        <span className="table-filter__label">
+          {label}
+          {help ? (
+            <span
+              className="table-filter__help"
+              title={help}
+              tabIndex={0}
+              role="note"
+              aria-label={`${label}说明：${help}`}
+            >
+              ?
+            </span>
+          ) : null}
+        </span>
         <select
           className="select table-filter__select"
           value={value}
