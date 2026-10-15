@@ -1,0 +1,359 @@
+# 发布流水线
+#
+# 触发条件：推送 `v` 前缀的 SemVer 标签，例如
+#   v1.2.3            → 正式版 Release
+#   v1.2.3-rc.1       → 预发布 Release（prerelease）
+#   v1.2.3+build.5    → 正式版 Release（+ 之后的构建元数据不参与版本号）
+#
+# 流程：校验标签 → 矩阵打包（Windows / Linux / macOS）→ 汇总产物 → 生成 changelog → 创建 Release 并上传。
+#
+# changelog 由 git 提交历史生成（见 release 任务的“生成变更日志”步骤）：
+#   正式版   → 对比基线取“上一个正式版 tag”，即跳过 v1.2.3-rc.1 这类预发布 tag
+#   预发布版 → 对比基线取“上一个任意 tag”（无论是正式版还是更早的预发布版）
+# 例：v1.0.0 → v1.1.0-rc.1 → v1.1.0-rc.2 → v1.1.0
+#   v1.1.0-rc.1 的日志 = v1.0.0..v1.1.0-rc.1
+#   v1.1.0-rc.2 的日志 = v1.1.0-rc.1..v1.1.0-rc.2
+#   v1.1.0       的日志 = v1.0.0..v1.1.0（跨过两个 rc，覆盖整个 1.1.0 开发周期）
+# 基线仅从“当前 tag 的父提交可达”的标签中选取，非 SemVer 的标签一律忽略；
+# 若是仓库的第一个版本，则回退为输出全部提交历史。
+#
+# 产物命名（wails build 的默认输出，位于 build/bin/）：
+#   Windows : AVDDesktop.exe            → AVDDesktop-<ver>-windows-amd64.zip
+#   Linux   : AVDDesktop-linux-amd64    → AVDDesktop-<ver>-linux-amd64.tar.gz
+#   macOS   : AVDDesktop.app            → AVDDesktop-<ver>-macos-universal.zip
+#
+# 注意：请勿给 `wails build` 传 `-o AVDDesktop`。wails 会把 -o 的值原样交给 go build，
+# 而显式 -o 不会自动补 .exe，Windows 上会产出无扩展名、无法直接运行的二进制。
+name: Release
+
+on:
+  push:
+    tags:
+      # GitHub 过滤器语法：[0-9]+ = 一位或多位数字，末尾 * = 允许 -rc.1 / +build.5 等后缀
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+
+# 创建 Release / 上传 asset 需要仓库写权限
+permissions:
+  contents: write
+
+env:
+  # 官方建议：避免前端打包阶段 OOM
+  NODE_OPTIONS: '--max-old-space-size=4096'
+
+jobs:
+  # ------------------------------------------------------------------
+  # 1. 校验标签并解析版本号
+  # ------------------------------------------------------------------
+  prepare:
+    name: 校验标签 / 解析版本
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.semver.outputs.version }}
+      prerelease: ${{ steps.semver.outputs.prerelease }}
+    steps:
+      - name: 校验 SemVer 标签
+        id: semver
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+
+          # SemVer 2.0.0 严格校验（ERE 正则，要求 v 前缀；bash =~ 不支持 (?:...)，故用捕获组）
+          RE='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\+([0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*))?$'
+          if [[ ! "${TAG}" =~ ${RE} ]]; then
+            echo "::error::标签 '${TAG}' 不是合法的 v 前缀 SemVer，已终止发布。"
+            echo "合法示例：v1.2.3 / v1.2.3-rc.1 / v1.2.3+build.5"
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
+          CORE="${VERSION%%+*}" # 去掉 +build 元数据后再判断是否为预发布
+          if [[ "${CORE}" == *-* ]]; then
+            PRERELEASE=true
+          else
+            PRERELEASE=false
+          fi
+
+          echo "version=${VERSION}"       >> "${GITHUB_OUTPUT}"
+          echo "prerelease=${PRERELEASE}" >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "## 发布 ${TAG}"
+            echo
+            echo "| 项 | 值 |"
+            echo "| --- | --- |"
+            echo "| 标签 | \`${TAG}\` |"
+            echo "| 注入二进制的版本号 | \`${VERSION}\` |"
+            echo "| 预发布 | \`${PRERELEASE}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  # ------------------------------------------------------------------
+  # 2. 矩阵打包：三个平台并行构建
+  # ------------------------------------------------------------------
+  build:
+    name: 打包 ${{ matrix.target }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      # 单个平台失败不取消其它平台，便于一次看到全部问题
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-amd64
+            os: windows-latest
+            platform: windows/amd64
+            binary: build/bin/AVDDesktop.exe
+          - target: linux-amd64
+            os: ubuntu-latest
+            platform: linux/amd64
+            # 未指定 -o 时，linux 产物名带平台/架构后缀
+            binary: build/bin/AVDDesktop-linux-amd64
+          - target: macos-universal
+            os: macos-latest
+            platform: darwin/universal
+            # macOS 产出 .app 包，名称取自 wails.json 的 name
+            binary: build/bin/AVDDesktop.app
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+        with:
+          # 生成 release notes 需要完整历史与 tag
+          fetch-depth: 0
+
+      - name: 安装 Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # 仓库里提交了 frontend/package.json.md5 且与 package.json 一致，wails 可能跳过
+      # npm install；但 CI 没有 node_modules，必须自己先装依赖。
+      - name: 安装前端依赖
+        working-directory: frontend
+        run: npm ci
+
+      - name: 安装 Linux 构建依赖
+        if: runner.os == 'Linux'
+        id: linux_deps
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          DISTRO="$(lsb_release -rs)"
+          echo "检测到 Ubuntu ${DISTRO}"
+
+          # Wails v2 在 Ubuntu 24.04+ 需要 webkit2gtk-4.1 与 webkit2_41 构建标签
+          if dpkg --compare-versions "${DISTRO}" ge "24.04"; then
+            WEBKIT_PKG="libwebkit2gtk-4.1-dev"
+            echo "tags=webkit2_41" >> "${GITHUB_OUTPUT}"
+          else
+            WEBKIT_PKG="libwebkit2gtk-4.0-dev"
+            echo "tags=" >> "${GITHUB_OUTPUT}"
+          fi
+
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libgtk-3-dev "${WEBKIT_PKG}"
+
+      - name: 安装 Wails CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 版本直接取自 go.mod，避免 CLI 与依赖的 wails 版本漂移
+          WAILS_VERSION="$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)"
+          echo "安装 Wails CLI ${WAILS_VERSION}"
+          go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}"
+          wails version
+
+      - name: 编译打包（wails build）
+        shell: bash
+        env:
+          BUILD_TAGS: ${{ steps.linux_deps.outputs.tags }}
+        run: |
+          set -euo pipefail
+          ARGS=(build -clean -platform "${{ matrix.platform }}"
+                -ldflags "-X main.AppVersion=${{ needs.prepare.outputs.version }}")
+          if [[ -n "${BUILD_TAGS:-}" ]]; then
+            ARGS+=(-tags "${BUILD_TAGS}")
+          fi
+
+          echo "执行：wails ${ARGS[*]}"
+          wails "${ARGS[@]}"
+
+          # 产物名由 wails.json 的 outputfilename 与平台推导，这里提前校验，报错更直观
+          if [[ ! -e "${{ matrix.binary }}" ]]; then
+            echo "::error::未找到构建产物：${{ matrix.binary }}"
+            ls -R build/bin || true
+            exit 1
+          fi
+
+      - name: 打包压缩包（Windows）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ver   = '${{ needs.prepare.outputs.version }}'
+          $stage = "dist/AVDDesktop-$ver-windows-amd64"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item '${{ matrix.binary }}' $stage
+          Copy-Item README.md, LICENSE $stage
+          Compress-Archive -Path "$stage/*" -DestinationPath "dist/AVDDesktop-$ver-windows-amd64.zip" -Force
+          Get-ChildItem dist | Select-Object Name, Length
+
+      - name: 打包压缩包（Linux）
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="${{ needs.prepare.outputs.version }}"
+          STAGE="dist/AVDDesktop-${VER}-linux-amd64"
+          mkdir -p "${STAGE}"
+          install -m 0755 '${{ matrix.binary }}' "${STAGE}/AVDDesktop"
+          cp README.md LICENSE "${STAGE}/"
+          # 打成 tar.gz 以保留可执行权限
+          tar -C dist -czf "dist/AVDDesktop-${VER}-linux-amd64.tar.gz" "AVDDesktop-${VER}-linux-amd64"
+          ls -lh dist
+
+      - name: 打包压缩包（macOS）
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="${{ needs.prepare.outputs.version }}"
+          APP='${{ matrix.binary }}'
+          chmod +x "${APP}/Contents/MacOS/AVDDesktop"
+          # 未签名构建：清理扩展属性，减少用户侧 Gatekeeper 拦截
+          xattr -cr "${APP}" || true
+          mkdir -p dist
+          # ditto 可保留 .app 内的符号链接与权限位（zip 命令会破坏包结构）
+          ditto -c -k --sequesterRsrc --keepParent "${APP}" "dist/AVDDesktop-${VER}-macos-universal.zip"
+          ls -lh dist
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # ------------------------------------------------------------------
+  # 3. 汇总产物、生成 changelog 并创建 Release
+  # ------------------------------------------------------------------
+  release:
+    name: 发布 Release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+        with:
+          # 生成 changelog 需要完整提交历史与全部 tag，不能用默认的浅克隆
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: 下载全部构建产物
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 生成变更日志
+        shell: bash
+        env:
+          # 决定对比基线：正式版取上一个正式版 tag，预发布版取上一个任意 tag
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+
+          # 严格 SemVer 校验，与 prepare 任务保持一致
+          SEMVER_RE='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\+([0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*))?$'
+          # 正式版：MAJOR.MINOR.PATCH，既无预发布标识也无构建元数据
+          STABLE_RE='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+
+          # ---------- 1. 选取对比基线 ----------
+          PREV=""
+          if git rev-parse -q --verify "${TAG}^" >/dev/null 2>&1; then
+            # --merged "${TAG}^"：只看当前 tag 父提交可达的标签，天然排除当前 tag 本身
+            # --sort=-v:refname：按版本号从大到小，取最近的基线
+            while IFS= read -r candidate; do
+              [[ -z "${candidate}" || "${candidate}" == "${TAG}" ]] && continue
+              [[ "${candidate}" =~ ${SEMVER_RE} ]] || continue
+              # 正式版跳过预发布标签；预发布版不限制，取任意标签
+              if [[ "${PRERELEASE}" != "true" && ! "${candidate}" =~ ${STABLE_RE} ]]; then
+                continue
+              fi
+              PREV="${candidate}"
+              break
+            done < <(git tag --merged "${TAG}^" --sort=-v:refname)
+          fi
+
+          RANGE="${TAG}"
+          if [[ -n "${PREV}" ]]; then
+            RANGE="${PREV}..${TAG}"
+            echo "对比基线：${PREV}"
+          else
+            echo "未找到上一个标签，输出全部提交历史"
+          fi
+
+          # ---------- 2. 由提交历史生成 changelog ----------
+          {
+            echo "## 变更日志"
+            echo
+            if [[ -n "${PREV}" ]]; then
+              echo "对比范围：\`${PREV}\` → \`${TAG}\`"
+            else
+              echo "首个版本，以下为全部提交历史。"
+            fi
+            echo
+          } > changelog.md
+
+          if [[ "$(git rev-list --count --no-merges "${RANGE}")" -eq 0 ]]; then
+            echo "- 本次发布不包含新的提交。" >> changelog.md
+          else
+            # --no-merges：跳过 "Merge pull request ..." 之类的自动合并提交
+            git log --no-merges --pretty=format:'- %s (%h)' "${RANGE}" >> changelog.md
+            echo >> changelog.md
+          fi
+
+          # ---------- 3. 附上完整对比链接 ----------
+          REPO_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          echo >> changelog.md
+          if [[ -n "${PREV}" ]]; then
+            echo "**完整对比**：${REPO_URL}/compare/${PREV}...${TAG}" >> changelog.md
+          else
+            echo "**仓库**：${REPO_URL}" >> changelog.md
+          fi
+
+          echo "----- changelog.md -----"
+          cat changelog.md
+
+      - name: 列出待上传文件
+        run: ls -lh dist
+
+      - name: 创建 / 更新 Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          # 用提交历史生成的 changelog 作为 Release 正文
+          body_path: changelog.md
+          files: dist/*
+          # 形如 v1.2.3-rc.1 的标签：Release 上打预发布标记（prerelease）
+          prerelease: ${{ needs.prepare.outputs.prerelease }}
+          # 不要设置 draft：正式版会被自动创建为草稿并在产物上传完成后发布，
+          # 显式 draft: true 会让 Release 永久停留在草稿状态。
+          # 也不要开 generate_release_notes：它会再追加一份基于 PR 的说明，
+          # 与上面的提交列表重复；如需 GitHub 自动说明，把它设为 true 即可。
+          fail_on_unmatched_files: true
