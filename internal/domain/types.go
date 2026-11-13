@@ -281,6 +281,7 @@ type AvdSpec struct {
 //	LCDDensity ↔ hw.lcd.density
 //	VMHeapMB   ↔ vm.heapSize
 //	Keyboard   ↔ hw.keyboard（yes/no）
+//	QuickBoot  ↔ fastboot.forceColdBoot / fastboot.forceFastBoot（快照快速启动）
 //	Root       ↔ 软件自有标记（启动时附加 -writable-system，并在开机后自动 adb root）
 //
 // 零值表示「该项在 config.ini 中未设置」，界面按「跟随设备档案」展示。
@@ -292,6 +293,7 @@ type AvdSettings struct {
 	LCDDensity int  `json:"lcdDensity,omitempty"`
 	VMHeapMB   int  `json:"vmHeapMb,omitempty"`
 	Keyboard   bool `json:"keyboard,omitempty"`
+	QuickBoot  bool `json:"quickBoot"`
 	Root       bool `json:"root,omitempty"`
 }
 
@@ -308,6 +310,7 @@ type AvdSettingsUpdate struct {
 	LCDDensity int    `json:"lcdDensity,omitempty"`
 	VMHeapMB   int    `json:"vmHeapMb,omitempty"`
 	Keyboard   *bool  `json:"keyboard,omitempty"`
+	QuickBoot  *bool  `json:"quickBoot,omitempty"`
 	Root       *bool  `json:"root,omitempty"`
 }
 
@@ -352,6 +355,9 @@ type NameValidation struct {
 // LaunchOptions 是启动参数（界面只暴露冷启动；端口由启动器内部决定）。
 type LaunchOptions struct {
 	ColdBoot bool `json:"coldBoot"`
+	// NoSnapshot 表示本次启动既不读取也不保存快照。设备关闭快速启动时会设置该字段，
+	// 避免“冷启动”只跳过读取、退出时仍然写出快照文件。
+	NoSnapshot bool `json:"noSnapshot,omitempty"`
 	// WritableSystem 表示设备已开启 root：附加 -writable-system，并在开机完成后
 	// 自动执行 adb root / remount，使 /system 可写。
 	WritableSystem bool `json:"writableSystem,omitempty"`

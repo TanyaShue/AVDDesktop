@@ -218,6 +218,58 @@ func TestUpdateSettingsWritesConfigAndState(t *testing.T) {
 	}
 }
 
+// TestQuickBootSetting 覆盖快速启动的读取、开启和关闭。
+func TestQuickBootSetting(t *testing.T) {
+	s, _ := settingsStore(t, "Dev1", fullConfig)
+
+	detail, err := s.Detail("Dev1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Settings.QuickBoot {
+		t.Fatal("缺少 fastboot 键时应按不使用快照处理")
+	}
+	if s.QuickBootEnabled("Dev1") {
+		t.Fatal("QuickBootEnabled 应与 Detail 保持一致")
+	}
+
+	on := true
+	detail, err = s.UpdateSettings(domain.AvdSettingsUpdate{Name: "Dev1", QuickBoot: &on})
+	if err != nil {
+		t.Fatalf("开启快速启动失败: %v", err)
+	}
+	if !detail.Settings.QuickBoot || !s.QuickBootEnabled("Dev1") {
+		t.Fatalf("开启后应返回 QuickBoot=true: %+v", detail.Settings)
+	}
+	for key, want := range map[string]string{
+		"fastboot.forceColdBoot":           "no",
+		"fastboot.forceFastBoot":           "yes",
+		"fastboot.forceChosenSnapshotBoot": "no",
+	} {
+		if got := mustReadConfig(t, s, "Dev1")[key]; got != want {
+			t.Errorf("开启后 config[%q] = %q，期望 %q", key, got, want)
+		}
+	}
+
+	off := false
+	detail, err = s.UpdateSettings(domain.AvdSettingsUpdate{Name: "Dev1", QuickBoot: &off})
+	if err != nil {
+		t.Fatalf("关闭快速启动失败: %v", err)
+	}
+	if detail.Settings.QuickBoot || s.QuickBootEnabled("Dev1") {
+		t.Fatalf("关闭后应返回 QuickBoot=false: %+v", detail.Settings)
+	}
+	for key, want := range map[string]string{
+		"fastboot.forceColdBoot":           "yes",
+		"fastboot.forceFastBoot":           "no",
+		"fastboot.forceChosenSnapshotBoot": "no",
+	} {
+		if got := mustReadConfig(t, s, "Dev1")[key]; got != want {
+			t.Errorf("关闭后 config[%q] = %q，期望 %q", key, got, want)
+		}
+	}
+}
+
 // TestUpdateSettingsPartial 只提交改动项时不应影响其它配置。
 func TestUpdateSettingsPartial(t *testing.T) {
 	s, _ := settingsStore(t, "Dev1", fullConfig)

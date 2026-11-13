@@ -106,6 +106,7 @@ export namespace domain {
 	    lcdDensity?: number;
 	    vmHeapMb?: number;
 	    keyboard?: boolean;
+	    quickBoot: boolean;
 	    root?: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -121,6 +122,7 @@ export namespace domain {
 	        this.lcdDensity = source["lcdDensity"];
 	        this.vmHeapMb = source["vmHeapMb"];
 	        this.keyboard = source["keyboard"];
+	        this.quickBoot = source["quickBoot"];
 	        this.root = source["root"];
 	    }
 	}
@@ -208,6 +210,7 @@ export namespace domain {
 	    lcdDensity?: number;
 	    vmHeapMb?: number;
 	    keyboard?: boolean;
+	    quickBoot?: boolean;
 	    root?: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -224,6 +227,7 @@ export namespace domain {
 	        this.lcdDensity = source["lcdDensity"];
 	        this.vmHeapMb = source["vmHeapMb"];
 	        this.keyboard = source["keyboard"];
+	        this.quickBoot = source["quickBoot"];
 	        this.root = source["root"];
 	    }
 	}

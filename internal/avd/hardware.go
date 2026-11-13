@@ -154,6 +154,25 @@ func (s *Store) EnsureGPUDefaults(name string) error {
 	return nil
 }
 
+// EnsureSnapshotDefaults 关闭新建 AVD 的快照快速启动。
+//
+// avdmanager 生成的配置默认偏向快速启动；产品约定新设备首次启动必须冷启动，
+// 用户需要快照时再在设备设置里主动开启「快速启动」。
+func (s *Store) EnsureSnapshotDefaults(name string) error {
+	l := s.Resolve(name)
+	if !l.Exists {
+		return domain.Err(domain.CodeAvdNotFound, "设备不存在: "+name)
+	}
+	data, err := os.ReadFile(l.ConfigIni)
+	if err != nil {
+		return domain.Wrap(domain.CodePathNotFound, "无法读取 config.ini", err)
+	}
+	if err := writeFileAtomic(l.ConfigIni, []byte(applyIniChanges(string(data), quickBootChanges(false)))); err != nil {
+		return domain.Wrap(domain.CodePermissionDenied, "无法关闭新设备的快照快速启动", err)
+	}
+	return nil
+}
+
 // hardwareChanges 返回覆盖项对应的 config.ini 键值（不含分辨率相关的皮肤键）。
 func hardwareChanges(hw *domain.AvdHardware) []iniChange {
 	if hw == nil {

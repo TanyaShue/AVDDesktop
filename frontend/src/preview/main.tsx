@@ -5,6 +5,7 @@
 //   page   devices | settings
 //   dialog wizard | env | mirror | images | devset（设备设置；配 dev=<序号> 选设备）
 //   dev    设备设置的设备序号（0 = 第一台，默认 1）
+//   panel  设备设置分类：性能 | 显示 | 启动与快照 | 权限与输入
 //   drawer 1 展开底部任务面板
 //   view   compact（切换为紧凑列表视图）
 //   sort   1 展开排序浮层
@@ -129,6 +130,8 @@ function applyPreviewState(): void {
   if (dialog === "devset") {
     const index = Number(params.get("dev") ?? "1");
     clickNthWhenReady('[aria-label^="设备设置"]', Number.isFinite(index) ? index : 1);
+    const panel = params.get("panel");
+    if (panel) clickWhenReady(panel, ".devset__nav-item");
     // custom=1：把设置面板里的下拉框全部切到「自定义…」，核对自定义输入框布局
     if (params.get("custom") === "1") selectDevsetCustomWhenReady();
   }

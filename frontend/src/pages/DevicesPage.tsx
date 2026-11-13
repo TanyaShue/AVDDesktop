@@ -407,7 +407,7 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                         <div className="menu__sep" />
                         <MenuItem
                           icon="snowflake"
-                          label="冷启动（不使用快照）"
+                          label="本次冷启动（不载入快照）"
                           onClick={() => void startDevice(device, { coldBoot: true })}
                         />
                         <MenuItem

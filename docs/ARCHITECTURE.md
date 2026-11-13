@@ -79,12 +79,19 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
 - 自定义分辨率会同时更新 `hw.lcd.width/height`，并让皮肤尺寸不再覆盖（`skin.path` 指向真实皮肤
   或另一组数值尺寸时改为 `_no_skin`；`skin.name` 仅在已有该键时同步）。依据：模拟器实际使用
   `skin.path`，`skin.name` 只供工具展示。
+- 新建设备默认关闭快照：创建成功后写入 `fastboot.forceColdBoot=yes`、`fastboot.forceFastBoot=no`、
+  `fastboot.forceChosenSnapshotBoot=no`。启动器对关闭快速启动的设备额外附加
+  `-no-snapshot-load -no-snapshot-save`，确保既不读取旧快照，也不在退出时写出新快照。
+  该默认值只应用于新建设备；已有设备保留原配置，由用户在「启动与快照」页主动切换。
 - 删除前校验目标路径确实位于 AVD 根目录内，避免误删。
 - **设备设置（每台设备独立）**：设备卡片的齿轮按钮 / 「更多操作 → 设备设置」打开设置面板，
   数据源是 `AvdService.Detail`，保存走 `AvdService.UpdateSettings`（同步方法，不注册任务：
   只写一份 `config.ini` 与一个状态文件，界面需要立刻拿到结果与错误）。
-  设备运行中直接拒绝（`FILE_IN_USE`）：`config.ini` 只在模拟器启动时读取，改完不会生效，
-  还可能与其退出时的配置回写互相覆盖。取键口径与创建向导一致，写入沿用同一套定点修正。
+  面板按「性能 / 显示 / 启动与快照 / 权限与输入」四页组织，左侧导航会标记有未保存改动的分类。
+  运行中的设备不允许直接调用 `UpdateSettings`：`config.ini` 只在启动时读取，还可能与其退出时
+  的配置回写互相覆盖；界面改为「保存并重启」流程，先停止实例、保存配置，再执行一次冷启动。
+  冷启动是刻意选择：Quick Boot 快照可能携带旧硬件状态，直接恢复会让刚保存的内存 / 分辨率等配置失效。
+  取键口径与创建向导一致，写入沿用同一套定点修正。
 
 | 设置项 | 存储 | 允许区间（防呆） |
 |---|---|---|
@@ -94,6 +101,7 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
 | 分辨率 | `hw.lcd.width` / `hw.lcd.height` | 240–7680 px（需成对给出） |
 | 像素密度 | `hw.lcd.density` | 72–720 dpi（未指定时按最短边推荐 160/240/320/420/480/560） |
 | 物理键盘 | `hw.keyboard` | yes / no |
+| 快速启动（快照） | `fastboot.forceColdBoot` / `fastboot.forceFastBoot` / `fastboot.forceChosenSnapshotBoot` | yes / no |
 | Root 权限 | `<avd 目录>/.avddesktop.json` | 开关（软件自有标记，不写进 config.ini） |
 
 - root 的落地方式是「启动时附加 `-writable-system` + 开机后 `adb root` / `adb remount`」
@@ -124,7 +132,8 @@ internal/e2e        端到端测试（build tag `e2e`，需要真实网络/SDK/A
 
 - 启动命令保持 `emulator -avd <name> -port <port>`，由 Android Emulator 创建并管理设备窗口。
 - 应用不附加 `-no-window`，不开启 gRPC 画面通道，也不提供独立的设备画面、触摸或工具栏窗口。
-- 冷启动仅追加 `-no-snapshot-load`；开启 root 的设备按需追加 `-writable-system`。
+- 普通冷启动追加 `-no-snapshot-load`；关闭快速启动的设备追加
+  `-no-snapshot-load -no-snapshot-save`；开启 root 的设备按需追加 `-writable-system`。
 
 ## 跨平台注意
 

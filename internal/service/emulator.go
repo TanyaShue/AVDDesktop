@@ -36,7 +36,13 @@ func (s *EmulatorService) Start(req StartRequest) (*domain.EmulatorInstance, err
 		return nil, domain.Err(domain.CodeToolMissing, "尚未安装模拟器（emulator）").
 			WithAction("install", "安装模拟器", "emulator")
 	}
-	opts := domain.LaunchOptions{ColdBoot: req.ColdBoot}
+	// 关闭快速启动的设备每次都冷启动，并且不读也不写快照；开启后才允许模拟器
+	// 使用自己的 Quick Boot 快照。显式冷启动仍然可以覆盖开启快速启动的设备一次。
+	quickBoot := comp.Store != nil && comp.Store.QuickBootEnabled(req.AvdName)
+	opts := domain.LaunchOptions{
+		ColdBoot:   req.ColdBoot || !quickBoot,
+		NoSnapshot: !quickBoot,
+	}
 	// 设备设置里的 root 开关决定是否附加 -writable-system（开机后由启动器 adb root / remount）。
 	if comp.Store != nil && comp.Store.RootEnabled(req.AvdName) {
 		opts.WritableSystem = true

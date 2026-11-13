@@ -74,7 +74,8 @@ func newTestLauncher() *Launcher {
 	return NewLauncher(platform.Tools{}, nil, nil, nil, nil, logging.Nop())
 }
 
-// TestBuildArgs 验证启动参数：默认直接使用模拟器原生窗口，仅追加冷启动与 root 参数。
+// TestBuildArgs 验证启动参数：默认直接使用模拟器原生窗口，按需追加冷启动、
+// 禁用快照与 root 参数。
 func TestBuildArgs(t *testing.T) {
 	cases := []struct {
 		name string
@@ -84,6 +85,8 @@ func TestBuildArgs(t *testing.T) {
 	}{
 		{"默认（原生窗口）", domain.LaunchOptions{}, 5554, []string{"-avd", "Dev1", "-port", "5554"}},
 		{"冷启动", domain.LaunchOptions{ColdBoot: true}, 5556, []string{"-avd", "Dev1", "-port", "5556", "-no-snapshot-load"}},
+		{"禁用快照", domain.LaunchOptions{NoSnapshot: true}, 5558,
+			[]string{"-avd", "Dev1", "-port", "5558", "-no-snapshot-load", "-no-snapshot-save"}},
 		{"root（-writable-system）", domain.LaunchOptions{WritableSystem: true}, 5576,
 			[]string{"-avd", "Dev1", "-port", "5576", "-writable-system"}},
 		{"冷启动+root", domain.LaunchOptions{ColdBoot: true, WritableSystem: true}, 5578,

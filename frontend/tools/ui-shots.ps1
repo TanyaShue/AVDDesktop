@@ -48,6 +48,8 @@ $states = @(
     @{ name = "wizard";               query = "?dialog=wizard&noanim=1" },
     # 设备设置：dev 是设备在列表中的序号（列表按名称排序：Broken / Nexus / Pixel / Tablet）
     @{ name = "devset";               query = "?dialog=devset&dev=3&noanim=1" },
+    @{ name = "devset-startup";       query = "?dialog=devset&dev=3&panel=启动与快照&noanim=1" },
+    @{ name = "devset-access";        query = "?dialog=devset&dev=3&panel=权限与输入&noanim=1" },
     @{ name = "devset-running";       query = "?dialog=devset&dev=2&noanim=1" },
     @{ name = "devset-custom";        query = "?dialog=devset&dev=1&custom=1&noanim=1" },
     @{ name = "devset-broken";        query = "?dialog=devset&dev=0&noanim=1" },

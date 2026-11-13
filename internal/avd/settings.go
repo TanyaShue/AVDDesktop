@@ -78,6 +78,18 @@ func (s *Store) ReadAppState(name string) appState {
 // RootEnabled 返回设备是否已开启 root。
 func (s *Store) RootEnabled(name string) bool { return s.ReadAppState(name).Root }
 
+// QuickBootEnabled 返回设备是否启用快照快速启动。
+//
+// 缺失这两个键的旧设备按「未启用」处理：这样即使 avdmanager 的默认值发生变化，
+// 软件新建或首次打开的设备也不会悄悄使用快照。
+func (s *Store) QuickBootEnabled(name string) bool {
+	config, err := s.ReadConfig(name)
+	if err != nil {
+		return false
+	}
+	return quickBootFromConfig(config)
+}
+
 // writeAppState 原子写入软件自有的设备状态。
 func (s *Store) writeAppState(name string, state appState) error {
 	path := s.appStatePath(name)
@@ -234,7 +246,34 @@ func settingsChanges(req domain.AvdSettingsUpdate) []iniChange {
 	if req.Keyboard != nil {
 		out = append(out, iniChange{key: "hw.keyboard", value: yesNo(*req.Keyboard)})
 	}
+	if req.QuickBoot != nil {
+		out = append(out, quickBootChanges(*req.QuickBoot)...)
+	}
 	return out
+}
+
+// quickBootChanges 返回快速启动开关对应的 fastboot 键。
+//
+// Android Emulator 的 Quick Boot 本质是读写默认快照；关闭时同时禁用快速启动和
+// 强制冷启动，避免只关闭其中一个键时仍沿用旧的启动路径。
+func quickBootChanges(enabled bool) []iniChange {
+	coldBoot, fastBoot := "yes", "no"
+	if enabled {
+		coldBoot, fastBoot = "no", "yes"
+	}
+	return []iniChange{
+		{key: "fastboot.forceColdBoot", value: coldBoot},
+		{key: "fastboot.forceFastBoot", value: fastBoot},
+		{key: "fastboot.forceChosenSnapshotBoot", value: "no"},
+	}
+}
+
+// quickBootFromConfig 把 fastboot 键折成一个可编辑的布尔设置。
+func quickBootFromConfig(config map[string]string) bool {
+	if isYes(config["fastboot.forceColdBoot"]) {
+		return false
+	}
+	return isYes(config["fastboot.forceFastBoot"]) || isYes(config["fastboot.forceChosenSnapshotBoot"])
 }
 
 // settingsFromConfig 从 config.ini 与软件状态里取出设置值。
@@ -250,6 +289,7 @@ func settingsFromConfig(config map[string]string, root bool) domain.AvdSettings 
 		LCDDensity: atoi(config["hw.lcd.density"]),
 		VMHeapMB:   parseSizeMB(config["vm.heapSize"]),
 		Keyboard:   isYes(config["hw.keyboard"]),
+		QuickBoot:  quickBootFromConfig(config),
 		Root:       root,
 	}
 	return settings
@@ -275,6 +315,11 @@ func DescribeSettings(settings domain.AvdSettings) string {
 	}
 	if settings.Keyboard {
 		parts = append(parts, "物理键盘")
+	}
+	if settings.QuickBoot {
+		parts = append(parts, "快速启动")
+	} else {
+		parts = append(parts, "不使用快照")
 	}
 	if settings.Root {
 		parts = append(parts, "root")

@@ -222,6 +222,50 @@ func TestEnsureGPUDefaults(t *testing.T) {
 	}
 }
 
+// TestEnsureSnapshotDefaults 验证新建 AVD 默认关闭快照快速启动，且写入是幂等的。
+func TestEnsureSnapshotDefaults(t *testing.T) {
+	s, home, _ := newTestStore(t)
+	writeAvd(t, home, "Fast", "", "# 由 avdmanager 生成的配置\n"+
+		"fastboot.forceColdBoot=no\nfastboot.forceFastBoot=yes\nfastboot.forceChosenSnapshotBoot=yes\n"+
+		"target=android-36\n")
+
+	if err := s.EnsureSnapshotDefaults("Fast"); err != nil {
+		t.Fatalf("EnsureSnapshotDefaults 失败: %v", err)
+	}
+	config, err := s.ReadConfig("Fast")
+	if err != nil {
+		t.Fatalf("ReadConfig 失败: %v", err)
+	}
+	for key, want := range map[string]string{
+		"fastboot.forceColdBoot":           "yes",
+		"fastboot.forceFastBoot":           "no",
+		"fastboot.forceChosenSnapshotBoot": "no",
+	} {
+		if got := config[key]; got != want {
+			t.Errorf("config[%q] = %q，期望 %q", key, got, want)
+		}
+	}
+
+	raw, err := os.ReadFile(filepath.Join(home, "Fast.avd", "config.ini"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if !strings.HasPrefix(text, "# 由 avdmanager 生成的配置\n") || !strings.Contains(text, "target=android-36\n") {
+		t.Fatalf("关闭快照不应破坏其它配置:\n%s", text)
+	}
+	if err := s.EnsureSnapshotDefaults("Fast"); err != nil {
+		t.Fatalf("第二次 EnsureSnapshotDefaults 失败: %v", err)
+	}
+	again, err := os.ReadFile(filepath.Join(home, "Fast.avd", "config.ini"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(again) != text {
+		t.Fatalf("重复调用不应改变 config.ini:\n第一次:\n%s\n第二次:\n%s", text, string(again))
+	}
+}
+
 // TestApplyHardwareForcesNoSkin 覆盖档案自带真实皮肤时的处理：
 // 模拟器使用 skin.path，不改它的话请求的分辨率不会生效。
 func TestApplyHardwareForcesNoSkin(t *testing.T) {

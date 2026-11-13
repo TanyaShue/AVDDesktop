@@ -50,7 +50,7 @@ function detailFor(name: string) {
     api: device?.api ?? "",
     tag: device?.tag ?? "",
     abi: device?.abi ?? "",
-    settings: { keyboard: false, root: false },
+    settings: { keyboard: false, quickBoot: false, root: false },
     rootSupported: true,
     state: device?.state ?? "stopped",
     broken: device?.broken,
@@ -106,6 +106,7 @@ function makeServices(
           lcdDensity?: number;
           vmHeapMb?: number;
           keyboard?: boolean;
+          quickBoot?: boolean;
           root?: boolean;
         };
         const base = detailFor(update.name);
@@ -118,6 +119,7 @@ function makeServices(
           ...(update.lcdDensity ? { lcdDensity: update.lcdDensity } : {}),
           ...(update.vmHeapMb ? { vmHeapMb: update.vmHeapMb } : {}),
           ...(typeof update.keyboard === "boolean" ? { keyboard: update.keyboard } : {}),
+          ...(typeof update.quickBoot === "boolean" ? { quickBoot: update.quickBoot } : {}),
           ...(typeof update.root === "boolean" ? { root: update.root } : {}),
         };
         const next = { ...base, settings };

@@ -104,11 +104,15 @@ func NewLauncher(tools platform.Tools, env []string, store *Store, adbClient adb
 
 // BuildArgs 组装 emulator 命令行参数（纯函数，便于测试与"查看等效命令"）。
 //
-// 顺序固定：-avd <name> -port <port> [-no-snapshot-load] [-writable-system]。
+// 顺序固定：-avd <name> -port <port> [-no-snapshot-load] [-no-snapshot-save]
+// [-writable-system]。
 func BuildArgs(avdName string, opts domain.LaunchOptions, port int) []string {
 	args := []string{"-avd", avdName, "-port", strconv.Itoa(port)}
-	if opts.ColdBoot {
+	if opts.ColdBoot || opts.NoSnapshot {
 		args = append(args, "-no-snapshot-load")
+	}
+	if opts.NoSnapshot {
+		args = append(args, "-no-snapshot-save")
 	}
 	if opts.WritableSystem {
 		// 开启 root 的设备：让 /system 以可写方式挂载（配合开机后的 adb root / remount）。

@@ -87,5 +87,17 @@ func (s *Store) Create(ctx context.Context, tools platform.Tools, env []string, 
 		return domain.AvdSummary{}, domain.ErrDetail(domain.CodeProcessFailed, message, detail).
 			WithHint("请确认 AVD 目录可写后重试")
 	}
+	// 新设备默认不使用快照：配置和启动参数都会明确关闭快照，
+	// 用户需要快速启动时必须在设备设置里主动开启。
+	if err := s.EnsureSnapshotDefaults(spec.Name); err != nil {
+		message := "写入默认快照配置失败，设备已回滚"
+		detail := err.Error()
+		if rollbackErr := s.Delete(spec.Name); rollbackErr != nil {
+			message = "写入默认快照配置失败，且回滚未完成"
+			detail += "；回滚失败：" + rollbackErr.Error()
+		}
+		return domain.AvdSummary{}, domain.ErrDetail(domain.CodeProcessFailed, message, detail).
+			WithHint("请确认 AVD 目录可写后重试")
+	}
 	return s.summary(spec.Name)
 }
