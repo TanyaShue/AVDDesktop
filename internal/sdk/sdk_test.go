@@ -146,23 +146,32 @@ func TestSplitImageAndDir(t *testing.T) {
 	}
 }
 
-func TestCLIPackageArgsNormalizeSemicolonPaths(t *testing.T) {
-	got := cliPackageArgs([]string{
+func TestSdkmanagerPackageFilePreservesSDKPaths(t *testing.T) {
+	tools := platform.NewTools(t.TempDir())
+	args, cleanup, err := sdkmanagerPackageArgs(tools, []string{
 		"system-images;android-36.1;google_apis;arm64-v8a",
 		" platform-tools ",
+		"system-images;android-36.1;google_apis;arm64-v8a",
 		"",
 	})
-	want := []string{
-		"system-images/android-36.1/google_apis/arm64-v8a",
-		"platform-tools",
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(got) != len(want) {
-		t.Fatalf("clI 包参数数量 = %d，期望 %d: %#v", len(got), len(want), got)
+	if len(args) != 1 || !strings.HasPrefix(args[0], "--package_file=") {
+		t.Fatalf("sdkmanager 参数错误: %#v", args)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("clI 包参数[%d] = %q，期望 %q", i, got[i], want[i])
-		}
+	path := strings.TrimPrefix(args[0], "--package_file=")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "system-images;android-36.1;google_apis;arm64-v8a\nplatform-tools\n"
+	if string(data) != want {
+		t.Fatalf("package_file 内容 = %q，期望 %q", data, want)
+	}
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("临时 package_file 未删除: %v", err)
 	}
 }
 
@@ -190,17 +199,18 @@ func indexOf(s, sub string) int {
 
 func contains(s, sub string) bool { return indexOf(s, sub) >= 0 }
 
-func TestUninstallCommandUsesSlashPaths(t *testing.T) {
+func TestSDKCommandsUseSemicolonPackagePaths(t *testing.T) {
 	tools := platform.NewTools(filepath.Join("C:", "sdk"))
 	got := UninstallCommand(tools, []string{"system-images;android-36;google_apis;x86_64"})
 	if !strings.Contains(got, "--uninstall") {
 		t.Fatalf("命令行缺少 --uninstall: %q", got)
 	}
-	if !strings.Contains(got, "system-images/android-36/google_apis/x86_64") {
-		t.Fatalf("命令行未使用斜杠形式的包路径: %q", got)
+	if !strings.Contains(got, "system-images;android-36;google_apis;x86_64") {
+		t.Fatalf("命令行未使用 SDK 风格的分号包路径: %q", got)
 	}
-	if strings.Contains(got, ";") {
-		t.Fatalf("命令行仍包含分号（Windows 批处理会拆参数）: %q", got)
+	install := InstallCommand(tools, []string{"system-images;android-36.1;google_apis;arm64-v8a"})
+	if !strings.Contains(install, "system-images;android-36.1;google_apis;arm64-v8a") {
+		t.Fatalf("安装命令未使用 SDK 风格的分号包路径: %q", install)
 	}
 }
 

@@ -243,7 +243,7 @@ func RepairPackages(ctx context.Context, tools platform.Tools, env []string, pac
 
 // UninstallPackages 删除 SDK 目录里已安装的组件（当前只有系统镜像走这条链路）。
 //
-// 与安装一样把包路径转成斜杠形式，避免 Windows 批处理把分号当参数分隔符；
+// 包路径通过临时 package_file 传给 sdkmanager，避免 Windows 批处理把分号当参数分隔符；
 // 最终判据是「组件目录是否真的消失」而不是退出码：官方脚本在遥测上传失败时
 // 可能返回非零退出码，也可能只删掉内容留下空目录，因此这里失败后还会再兜底清理一次。
 func UninstallPackages(ctx context.Context, tools platform.Tools, env []string, packages []string, onLine LineFunc) error {
@@ -251,8 +251,13 @@ func UninstallPackages(ctx context.Context, tools platform.Tools, env []string, 
 	if len(cleaned) == 0 {
 		return domain.Err(domain.CodeInvalidArgument, "未指定要删除的 SDK 组件")
 	}
+	packageArgs, cleanup, err := sdkmanagerPackageArgs(tools, cleaned)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 
-	args := append([]string{"--verbose", "--sdk_root=" + tools.SdkRoot, "--uninstall"}, cliPackageArgs(cleaned)...)
+	args := append([]string{"--verbose", "--sdk_root=" + tools.SdkRoot, "--uninstall"}, packageArgs...)
 	res, runErr := runSdkmanager(ctx, tools, env, args, uninstallTimeout, onLine, yesLines(licenseFeed))
 	if remaining := remainingPackageDirs(tools, cleaned); len(remaining) > 0 {
 		// sdkmanager 可能只清理了内容：把残留目录一并删掉，避免残骸被本地扫描当成已安装包。
@@ -307,6 +312,10 @@ func remainingPackageDirs(tools platform.Tools, packages []string) []string {
 }
 
 func installPackages(ctx context.Context, tools platform.Tools, env []string, packages []string, force bool, onLine LineFunc) error {
+	packages = normalizePackagePaths(packages)
+	if len(packages) == 0 {
+		return domain.Err(domain.CodeInvalidArgument, "未指定要安装的 SDK 组件")
+	}
 	staged, err := stagePackages(tools, packages, force)
 	if err != nil {
 		return err
@@ -319,9 +328,15 @@ func installPackages(ctx context.Context, tools platform.Tools, env []string, pa
 
 	// 必须加 --verbose：默认情况下 sdkmanager 安装过程一言不发（实测连 TTY 下也没有
 	// 进度条），任务日志会长时间空着；加了之后至少能看到 Preparing/Installing/complete 阶段。
-	// 新版 Windows sdkmanager.bat 会把包路径分号当成参数分隔符；统一用 Android CLI
-	// 支持的斜杠形式传递，避免 system-images;android-X;tag;abi 被拆成多个包名。
-	args := append([]string{"--verbose", "--sdk_root=" + tools.SdkRoot}, cliPackageArgs(packages)...)
+	// 包路径必须保持 sdkmanager 的 SDK 风格分号形式。通过 --package_file 传递，
+	// 既避免新版 Windows sdkmanager.bat 拆分分号参数，也避免把包名误写成文件路径。
+	packageArgs, cleanup, err := sdkmanagerPackageArgs(tools, packages)
+	if err != nil {
+		restoreStaged(staged)
+		return err
+	}
+	defer cleanup()
+	args := append([]string{"--verbose", "--sdk_root=" + tools.SdkRoot}, packageArgs...)
 	res, err := runSdkmanager(ctx, tools, env, args, installTimeout, onLine, yesLines(licenseFeed))
 	if err != nil {
 		restoreStaged(staged)
@@ -431,29 +446,40 @@ func itoa(n int) string {
 
 // InstallCommand 返回可复制执行的等价命令行（供界面展示）。
 func InstallCommand(tools platform.Tools, packages []string) string {
-	return tools.Sdkmanager + " --sdk_root=" + tools.SdkRoot + " " + strings.Join(cliPackageArgs(packages), " ")
+	return tools.Sdkmanager + " --sdk_root=" + tools.SdkRoot + " " + strings.Join(normalizePackagePaths(packages), " ")
 }
 
 // UninstallCommand 返回删除本地组件的等价命令行（供界面展示）。
 func UninstallCommand(tools platform.Tools, packages []string) string {
 	return tools.Sdkmanager + " --sdk_root=" + tools.SdkRoot + " --uninstall " +
-		strings.Join(cliPackageArgs(packages), " ")
+		strings.Join(normalizePackagePaths(packages), " ")
 }
 
-// cliPackageArgs 把 sdkmanager 的 SDK 路径转换为 Android CLI 的斜杠形式。
+// sdkmanagerPackageArgs 把包路径写入临时 package_file，并返回传给 sdkmanager 的参数。
 //
-// 新版 Windows sdkmanager.bat 用 cmd.exe 批处理转发参数，分号会被当成 token
-// 分隔符，导致 system-images;android-36.1;google_apis;arm64-v8a 变成四个包名。
-func cliPackageArgs(packages []string) []string {
-	out := make([]string, 0, len(packages))
-	for _, pkgPath := range packages {
-		pkgPath = strings.TrimSpace(pkgPath)
-		if pkgPath == "" {
-			continue
-		}
-		out = append(out, strings.ReplaceAll(pkgPath, ";", "/"))
+// sdkmanager 只接受 SDK 风格的分号包路径；斜杠形式仅适合表示安装目录，不能用于定位仓库包。
+// --package_file 同时规避 Windows 批处理对分号参数的分割。
+func sdkmanagerPackageArgs(tools platform.Tools, packages []string) ([]string, func(), error) {
+	cleaned := normalizePackagePaths(packages)
+	if len(cleaned) == 0 {
+		return nil, nil, domain.Err(domain.CodeInvalidArgument, "未指定 SDK 组件")
 	}
-	return out
+	file, err := os.CreateTemp(tools.SdkRoot, ".sdkmanager-packages-*.txt")
+	if err != nil {
+		return nil, nil, domain.Wrap(domain.CodePermissionDenied,
+			"无法在 SDK 目录创建 sdkmanager 包列表文件", err)
+	}
+	cleanup := func() { _ = os.Remove(file.Name()) }
+	if _, err := file.WriteString(strings.Join(cleaned, "\n") + "\n"); err != nil {
+		_ = file.Close()
+		cleanup()
+		return nil, nil, domain.Wrap(domain.CodeProcessFailed, "写入 sdkmanager 包列表失败", err)
+	}
+	if err := file.Close(); err != nil {
+		cleanup()
+		return nil, nil, domain.Wrap(domain.CodeProcessFailed, "关闭 sdkmanager 包列表失败", err)
+	}
+	return []string{"--package_file=" + file.Name()}, cleanup, nil
 }
 
 // ListPackages 调用官方 sdkmanager 列出包；installedOnly 为 true 时只扫描本地目录。
