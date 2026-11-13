@@ -132,16 +132,6 @@ function makeServices(
       StopByAvd: ok(undefined),
       Shutdown: ok(undefined),
     },
-    DisplayService: {
-      WindowSupported: ok(false),
-      Active: ok([]),
-      Open: ok({}),
-      OpenWindow: ok(undefined),
-      Close: ok(undefined),
-      SendKey: ok(undefined),
-      SendTouch: ok(undefined),
-      Shutdown: ok(undefined),
-    },
     JobService: {
       List: ok(JOBS),
       Logs: ok(LOG_LINES),

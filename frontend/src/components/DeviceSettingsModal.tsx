@@ -756,7 +756,7 @@ export function DeviceSettingsModal({ device, instance, onClose, onSaved, onToas
               />
               <Switch
                 label="物理键盘输入"
-                description="让设备接受宿主键盘输入（在设备窗口里直接打字时建议开启）"
+                description="让设备接受宿主键盘输入（在模拟器窗口中直接打字时建议开启）"
                 checked={form.keyboard}
                 onChange={(next) => patch({ keyboard: next })}
               />

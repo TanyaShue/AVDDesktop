@@ -165,9 +165,7 @@ export const INSTANCES: Plain<EmulatorInstance>[] = [
     pid: 21344,
     state: "running",
     startedAt: now - 128_000,
-    args: ["-avd", "Pixel_8_API_34", "-no-window"],
-    customUI: true,
-    grpcPort: 8554,
+    args: ["-avd", "Pixel_8_API_34", "-port", "5554"],
   },
 ];
 
@@ -357,7 +355,6 @@ export const SETTINGS: AppSettings = {
   showTaskDrawer: false,
   logLevel: "info",
   keepLogDays: 14,
-  displayQuality: "smooth",
   mirrorSourceId: "google",
   jdkMirrorSourceId: "nju",
 };

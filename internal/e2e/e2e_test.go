@@ -310,7 +310,7 @@ func TestE2E_AvdCreate(t *testing.T) {
 }
 
 // TestE2E_EmulatorBoot 验证 Phase 3 的验收链路：
-// 复用/创建 AVD → 记录 emulator -accel-check 原始输出 → service 启动（无窗口）→
+// 复用/创建 AVD → 记录 emulator -accel-check 原始输出 → service 启动原生模拟器窗口 →
 // 轮询等待 running（有界 ≤10 分钟）→ 用软件自带 adb 确认设备为 device 且 sys.boot_completed=1
 // → Stop → 断言 stopped。
 func TestE2E_EmulatorBoot(t *testing.T) {
@@ -346,9 +346,9 @@ func TestE2E_EmulatorBoot(t *testing.T) {
 	name, created := ensureAvdForBoot(t, rt, avdSvc)
 	t.Logf("本次使用 AVD：%s（本次新建=%v）", name, created)
 
-	// 4. 启动（无窗口），轮询等待 running（有界 ≤10 分钟）
+	// 4. 直接启动模拟器（使用 Android Emulator 原生窗口），轮询等待 running（有界 ≤10 分钟）
 	started := time.Now()
-	inst, err := emuSvc.Start(service.StartRequest{AvdName: name, NoWindow: true})
+	inst, err := emuSvc.Start(service.StartRequest{AvdName: name})
 	if err != nil {
 		t.Fatalf("启动模拟器失败（accel 输出见上）：%v", err)
 	}

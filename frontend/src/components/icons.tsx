@@ -31,8 +31,6 @@ export type IconName =
   | "stop"
   | "terminal"
   | "snowflake"
-  | "windowOff"
-  | "monitor"
   // 状态
   | "check"
   | "alert"
@@ -53,16 +51,7 @@ export type IconName =
   | "minimise"
   | "maximise"
   | "restore"
-  | "close"
-  // 设备窗口工具栏
-  | "back"
-  | "home"
-  | "recent"
-  | "volumeUp"
-  | "volumeDown"
-  | "screenshot"
-  | "pin"
-  | "stats";
+  | "close";
 
 const PATHS: Record<IconName, ReactNode> = {
   /* ------------------------------------------------------------ 导航 */
@@ -171,20 +160,6 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M9.4 5.2 12 7.8l2.6-2.6M9.4 18.8 12 16.2l2.6 2.6" />
     </>
   ),
-  windowOff: (
-    <>
-      <rect x="3.4" y="5" width="17.2" height="14" rx="2.8" />
-      <path d="M6.6 8.6h10.8" />
-      <path d="M4.6 19.4 19.4 4.6" />
-    </>
-  ),
-  monitor: (
-    <>
-      <rect x="3" y="4.4" width="18" height="12.4" rx="2.6" />
-      <path d="M9 20.4h6M12 16.8v3.6" />
-    </>
-  ),
-
   /* ------------------------------------------------------------ 状态 */
   check: <path d="M5.5 12.6 10 17.1l8.5-8.6" />,
   alert: (
@@ -272,40 +247,6 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   close: <path d="M6 6l12 12M18 6 6 18" />,
-
-  /* ------------------------------------------------------------ 设备窗口工具栏 */
-  back: <path d="M19 12H5m6 6-6-6 6-6" />,
-  home: <path d="M4 10.6 12 4l8 6.6V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z" />,
-  recent: <rect x="4" y="4" width="16" height="16" rx="3.5" />,
-  volumeUp: (
-    <>
-      <path d="M5 9.5h3L12 6v12l-4-3.5H5z" />
-      <path d="M15.5 9.5a3.5 3.5 0 0 1 0 5M18 7a7 7 0 0 1 0 10" />
-    </>
-  ),
-  volumeDown: (
-    <>
-      <path d="M5 9.5h3L12 6v12l-4-3.5H5z" />
-      <path d="M15.5 9.5a3.5 3.5 0 0 1 0 5" />
-    </>
-  ),
-  screenshot: (
-    <>
-      <path d="M4 9h3l1.6-2.2h6.8L17 9h3v10.5H4z" />
-      <circle cx="12" cy="14" r="3.2" />
-    </>
-  ),
-  pin: (
-    <>
-      <path d="M9 4h6l-1 6 3 3H7l3-3z" />
-      <path d="M12 13v7" />
-    </>
-  ),
-  stats: (
-    <>
-      <path d="M4 19.4V9.6M10 19.4V4.6M16 19.4v-6M22 19.4H2" />
-    </>
-  ),
 };
 
 export interface IconProps {

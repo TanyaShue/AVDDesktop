@@ -79,7 +79,6 @@ export namespace domain {
 	    showTaskDrawer: boolean;
 	    logLevel: string;
 	    keepLogDays: number;
-	    displayQuality: string;
 	    mirrorSourceId: string;
 	    jdkMirrorSourceId: string;
 	
@@ -95,7 +94,6 @@ export namespace domain {
 	        this.showTaskDrawer = source["showTaskDrawer"];
 	        this.logLevel = source["logLevel"];
 	        this.keepLogDays = source["keepLogDays"];
-	        this.displayQuality = source["displayQuality"];
 	        this.mirrorSourceId = source["mirrorSourceId"];
 	        this.jdkMirrorSourceId = source["jdkMirrorSourceId"];
 	    }
@@ -359,8 +357,6 @@ export namespace domain {
 	    exitCode?: number;
 	    lastError?: string;
 	    args: string[];
-	    customUI?: boolean;
-	    grpcPort?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new EmulatorInstance(source);
@@ -379,8 +375,6 @@ export namespace domain {
 	        this.exitCode = source["exitCode"];
 	        this.lastError = source["lastError"];
 	        this.args = source["args"];
-	        this.customUI = source["customUI"];
-	        this.grpcPort = source["grpcPort"];
 	    }
 	}
 	export class EnvIssue {
@@ -793,34 +787,6 @@ export namespace domain {
 
 export namespace service {
 	
-	export class DisplaySession {
-	    instanceId: string;
-	    avdName: string;
-	    serial: string;
-	    url: string;
-	    deviceWidth: number;
-	    deviceHeight: number;
-	    streamWidth: number;
-	    streamHeight: number;
-	    mode: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new DisplaySession(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.instanceId = source["instanceId"];
-	        this.avdName = source["avdName"];
-	        this.serial = source["serial"];
-	        this.url = source["url"];
-	        this.deviceWidth = source["deviceWidth"];
-	        this.deviceHeight = source["deviceHeight"];
-	        this.streamWidth = source["streamWidth"];
-	        this.streamHeight = source["streamHeight"];
-	        this.mode = source["mode"];
-	    }
-	}
 	export class ResolvedPaths {
 	    appRoot: string;
 	    jdkRoot: string;
@@ -848,8 +814,6 @@ export namespace service {
 	export class StartRequest {
 	    avdName: string;
 	    coldBoot: boolean;
-	    noWindow: boolean;
-	    customUI: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new StartRequest(source);
@@ -859,8 +823,6 @@ export namespace service {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.avdName = source["avdName"];
 	        this.coldBoot = source["coldBoot"];
-	        this.noWindow = source["noWindow"];
-	        this.customUI = source["customUI"];
 	    }
 	}
 

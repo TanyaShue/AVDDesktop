@@ -16,14 +16,7 @@
   面板直接读取该设备 `config.ini` 的当前生效值，未改动的项不会被覆盖，保存后重启设备生效。
   Root 通过「启动时附加 `-writable-system` + 开机后自动 `adb root` / `remount`」落地，
   Google Play 镜像不开放 root，面板会禁用开关并说明原因；设备运行中不允许改配置（界面提供「停止设备」入口）
-- **自定义 UI 设备窗口**：设备卡片「更多操作 → 使用自定义 UI 启动」让模拟器以无窗口方式运行；
-  画面经 MMAP 共享内存取出后，通过本机 WebSocket 以原始 RGBA 帧送到**独立 WebView 设备窗口**
-  （MuMu 风格：自绘标题栏 + 画面区 + 工具栏）的 WebGL2 画布；WebGL2 不可用时自动回落 MJPEG。
-  设置页「设备画面」提供流畅（约 360p，默认）/平衡（自适应）/清晰（540p）/超清（720p）四档。
-  工具栏提供返回 / 主页 / 多任务 / 音量 / 截图，标题栏可置顶、最小化、最大化；
-  鼠标点击 / 拖拽即设备触摸（支持下滑拉出通知栏），Escape / 方向键 / 回车 / 退格直接转发到设备；
-  截图保存在 `<Root>/screenshots`。关闭设备窗口不会停止模拟器，主窗口仍保留应用内浮层作为兜底。
-  详见 [WebView 设备窗口](docs/DEVICE_WINDOW_WEBVIEW.md)
+- **原生模拟器窗口**：设备卡片直接启动 Android Emulator，画面、输入和工具栏均使用模拟器自带 UI
 - **统一日志与任务**：底部区域显示长任务进度与日志
 
 技术栈：Wails v2 + Go + React 19 + TypeScript + Vite。
@@ -43,7 +36,6 @@
 <Root>/config    设置文件 settings.json
 <Root>/logs      应用日志（按天 + 按大小滚动）
 <Root>/cache     下载临时文件
-<Root>/screenshots 设备窗口截图
 ```
 
 ## 首次运行行为
@@ -73,11 +65,6 @@ wails build
 # 单元测试（全部 hermetic，不需要网络与本机 SDK/JDK）
 go test ./...
 
-# 设备窗口端到端测试（真实启动模拟器 + 独立 WebView 窗口；先执行 wails build）
-$env:AVDDESKTOP_E2E_HOME = (Resolve-Path "build/bin").Path
-$env:AVDDESKTOP_NATIVE_BINARY = (Resolve-Path "build/bin/AVDDesktop.exe").Path
-go test -tags e2e -count=1 -timeout 20m -run '^TestE2E_DeviceWindow$' -v ./internal/e2e
-
 # 端到端测试（真实网络 + 真实 JDK/SDK/AVD 目录，耗时较长）
 $env:AVDDESKTOP_E2E_HOME = "E:\avddesktop-e2e"
 go test -tags e2e -count=1 -timeout 300m ./internal/e2e/ -v
@@ -100,8 +87,6 @@ go test -tags e2e -count=1 -timeout 300m ./internal/e2e/ -v
 ## 文档
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：模块划分、数据流、JDK / SDK / AVD / emulator 的关键约束与超时策略。
-- [docs/DEVICE_WINDOW_WEBVIEW.md](docs/DEVICE_WINDOW_WEBVIEW.md)：自定义 UI 的 WebView 设备窗口（架构、数据面、验收记录）。
-- [docs/FRAME_RATE_OPTIMIZATION_PLAN.md](docs/FRAME_RATE_OPTIMIZATION_PLAN.md)：自定义 UI 画面的帧率优化设计（分阶段方案、决策树与验收口径）。
 
 ## 许可证
 

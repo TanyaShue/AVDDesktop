@@ -11,8 +11,7 @@ npm install                     # 首次
 npx vite --port 5199 --strictPort
 ```
 
-然后打开 <http://localhost:5199/preview.html>（主窗口）或
-<http://localhost:5199/device-preview.html>（独立设备窗口）。查询参数：
+然后打开 <http://localhost:5199/preview.html>。查询参数：
 
 | 参数 | 取值 | 说明 |
 | --- | --- | --- |
@@ -54,11 +53,9 @@ headless Edge + `--virtual-time-budget` 下，CSS 动画/过渡的时钟可能�
 
 相关文件：
 
-- `preview.html` / `device-preview.html`：两个预览入口
-- `src/preview/main.tsx`：主窗口预览入口（按 URL 参数驱动点击 / 播种输入 / 样式探针）
-- `src/preview/device.tsx`：设备窗口预览入口（打桩 `window.go.displayhost.DeviceWindow`）
+- `preview.html`：预览入口
+- `src/preview/main.tsx`：预览入口（按 URL 参数驱动点击 / 播种输入 / 样式探针）
 - `src/preview/mock.ts`：`window.go` / `window.runtime` 打桩
 - `src/preview/fixtures.ts`：假数据
-- `tools/frame-sample.svg`：设备窗口预览用的假「设备画面」
 
-两个预览入口都不在 `vite.config.ts` 的 `rollupOptions.input` 里，因此**不会进入正式构建产物**。
+预览入口不在 `vite.config.ts` 的 `rollupOptions.input` 里，因此**不会进入正式构建产物**。

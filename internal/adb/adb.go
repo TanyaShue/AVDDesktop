@@ -143,7 +143,7 @@ func (c *Client) WaitForBoot(ctx context.Context, serial string, timeout time.Du
 
 // Shell 执行 `adb -s <serial> shell <args...>` 并返回标准输出（带超时与取消）。
 //
-// 用途：无窗口模式下模拟器的 gRPC 键盘注入无效，导航键（返回/主页/多任务）只能走 adb；
+// 用途：通过 adb 向模拟器发送导航键、文本与自定义按键；
 // 单次调用约 600ms。
 func (c *Client) Shell(ctx context.Context, serial string, args ...string) (string, error) {
 	if !c.Available() {

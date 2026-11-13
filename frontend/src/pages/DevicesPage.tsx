@@ -7,7 +7,6 @@ import type { AvdState, AvdSummary, EmulatorInstance } from "../bridge/types";
 import type { EnvCheck } from "../hooks/useEnvCheck";
 import { useWailsEvent } from "../hooks/useApp";
 import { formatRam, imageTagLabel } from "../lib/imageLabels";
-import { DeviceWindow } from "../components/DeviceWindow";
 import { DeviceSettingsModal } from "../components/DeviceSettingsModal";
 import { Icon } from "../components/icons";
 import type { IconName } from "../components/icons";
@@ -32,23 +31,11 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
   const [busyNames, setBusyNames] = useState<ReadonlySet<string>>(() => new Set());
   /** 当前展开「更多操作」的设备名：同一时间只允许一个菜单展开。 */
   const [openMenu, setOpenMenu] = useState<string | null>(null);
-  /** 当前打开的设备窗口（应用内全屏浮层，同一时间只允许一个）。 */
-  const [openWindow, setOpenWindow] = useState<{ instanceId: string; avdName: string } | null>(null);
   /** 当前打开「设备设置」的设备（卡片齿轮按钮 / 更多操作菜单）。 */
   const [settingsFor, setSettingsFor] = useState<AvdSummary | null>(null);
 
   const closeMenu = useCallback(() => setOpenMenu(null), []);
   const closeSortMenu = useCallback(() => setSortMenuOpen(false), []);
-
-  /** 设备窗口只存在于设备页：切走页面时兜底关闭画面，避免后端帧循环空转（只关画面，不停模拟器）。 */
-  const openWindowRef = useRef(openWindow);
-  openWindowRef.current = openWindow;
-  useEffect(() => {
-    return () => {
-      const current = openWindowRef.current;
-      if (current) void api.Display.Close(current.instanceId).catch(() => undefined);
-    };
-  }, []);
 
   /** 标记 / 解除某台设备的操作中状态（按设备名分别管理，避免并发操作互相清除）。 */
   const setBusy = useCallback((name: string, busy: boolean) => {
@@ -118,38 +105,15 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
     });
   }, [devices, query, sortBy]);
 
-  /** 打开设备窗口：独立 WebView 窗口（MuMu 风格）；不可用时回退到应用内浮层。 */
-  const openDeviceWindow = useCallback(
-    async (instanceId: string, avdName: string) => {
-      try {
-        await api.Display.OpenWindow(instanceId);
-        onToast("info", `${avdName} 的设备窗口已打开`, "设备画面和工具栏运行在独立窗口中");
-      } catch (err) {
-        // 独立窗口不可用时退回应用内浮层：两者共用同一套画面与输入链路，
-        // 浮层里会显示具体失败原因并提供重试入口。
-        onToast("warning", "已退回应用内设备窗口", errorText(err));
-        setOpenWindow({ instanceId, avdName });
-      }
-    },
-    [onToast],
-  );
-
-  const startDevice = async (
-    device: AvdSummary,
-    opts?: { coldBoot?: boolean; noWindow?: boolean; customUI?: boolean },
-  ) => {
+  const startDevice = async (device: AvdSummary, opts?: { coldBoot?: boolean }) => {
     setBusy(device.name, true);
     try {
-      const inst = await api.Emulator.Start({
+      await api.Emulator.Start({
         avdName: device.name,
         coldBoot: opts?.coldBoot ?? false,
-        noWindow: opts?.noWindow ?? false,
-        customUI: opts?.customUI ?? false,
       });
-      onToast("info", "正在启动 " + device.name, "首次启动可能需要几分钟，进度显示在底部任务区域");
+      onToast("info", "正在启动 " + device.name, "模拟器将使用自带窗口；首次启动可能需要几分钟");
       await load();
-      // 自定义 UI 启动后优先打开独立设备窗口；失败时回退到应用内浮层。
-      if (opts?.customUI) void openDeviceWindow(inst.id, device.name);
     } catch (err) {
       onToast("danger", "启动失败", errorText(err));
     } finally {
@@ -362,7 +326,6 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                           Root
                         </span>
                       ) : null}
-                      {inst?.customUI ? <span className="chip chip--info">自定义 UI</span> : null}
                       {device.broken ? <span className="chip chip--danger">配置异常</span> : null}
                     </div>
                     <div className="device__meta nums">
@@ -448,24 +411,6 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
                           onClick={() => void startDevice(device, { coldBoot: true })}
                         />
                         <MenuItem
-                          icon="windowOff"
-                          label="无窗口启动"
-                          onClick={() => void startDevice(device, { noWindow: true })}
-                        />
-                        {inst?.customUI ? (
-                          <MenuItem
-                            icon="monitor"
-                            label="打开设备窗口"
-                            onClick={() => void openDeviceWindow(inst.id, device.name)}
-                          />
-                        ) : (
-                          <MenuItem
-                            icon="monitor"
-                            label="使用自定义 UI 启动"
-                            onClick={() => void startDevice(device, { customUI: true })}
-                          />
-                        )}
-                        <MenuItem
                           icon="copy"
                           label="复制启动命令"
                           onClick={() =>
@@ -507,16 +452,6 @@ export function DevicesPage({ onToast, env, confirmBeforeDelete }: Props) {
           onClose={() => setSettingsFor(null)}
           onSaved={() => void load()}
           onStop={() => void stopDevice(settingsFor)}
-          onToast={onToast}
-        />
-      ) : null}
-
-      {/* 设备窗口：应用内全屏浮层，浮层挂载在页面根部，覆盖侧边栏与工具栏 */}
-      {openWindow ? (
-        <DeviceWindow
-          instanceId={openWindow.instanceId}
-          avdName={openWindow.avdName}
-          onClose={() => setOpenWindow(null)}
           onToast={onToast}
         />
       ) : null}

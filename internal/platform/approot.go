@@ -120,12 +120,9 @@ func LogDir() string { return filepath.Join(Root(), "logs") }
 // CacheDir 返回下载临时目录。
 func CacheDir() string { return filepath.Join(Root(), "cache") }
 
-// ScreenshotDir 返回设备窗口截图目录。
-func ScreenshotDir() string { return filepath.Join(Root(), "screenshots") }
-
 // EnsureLayout 创建软件自有目录布局（幂等）。
 func EnsureLayout() error {
-	for _, dir := range []string{JdkRoot(), SdkRoot(), AvdHome(), filepath.Dir(SettingsPath()), LogDir(), CacheDir(), ScreenshotDir()} {
+	for _, dir := range []string{JdkRoot(), SdkRoot(), AvdHome(), filepath.Dir(SettingsPath()), LogDir(), CacheDir()} {
 		if err := EnsureDir(dir); err != nil {
 			return err
 		}

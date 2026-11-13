@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -15,22 +14,16 @@ import (
 // startTrackInterval 是启动任务跟随实例状态的轮询间隔。
 const startTrackInterval = 500 * time.Millisecond
 
-// emulatorGPUEnv 可覆盖自定义 UI 使用的模拟器图形后端。
-const emulatorGPUEnv = "AVDDESKTOP_EMULATOR_GPU"
-
 // EmulatorService 管理模拟器实例：启动、停止、列表与应用退出时的统一清理。
 type EmulatorService struct{ rt *Runtime }
 
 // NewEmulatorService 创建 EmulatorService。
 func NewEmulatorService(rt *Runtime) *EmulatorService { return &EmulatorService{rt: rt} }
 
-// StartRequest 是启动请求（只保留界面需要的三个开关）。
+// StartRequest 是启动请求。
 type StartRequest struct {
 	AvdName  string `json:"avdName"`
 	ColdBoot bool   `json:"coldBoot"`
-	NoWindow bool   `json:"noWindow"`
-	// CustomUI 表示使用应用自建窗口接管画面：不启动 Qt 窗口，并开启模拟器 gRPC 图像通道。
-	CustomUI bool `json:"customUI"`
 }
 
 // Start 启动模拟器实例。
@@ -43,26 +36,11 @@ func (s *EmulatorService) Start(req StartRequest) (*domain.EmulatorInstance, err
 		return nil, domain.Err(domain.CodeToolMissing, "尚未安装模拟器（emulator）").
 			WithAction("install", "安装模拟器", "emulator")
 	}
-	opts := domain.LaunchOptions{ColdBoot: req.ColdBoot, NoWindow: req.NoWindow, CustomUI: req.CustomUI}
+	opts := domain.LaunchOptions{ColdBoot: req.ColdBoot}
 	// 设备设置里的 root 开关决定是否附加 -writable-system（开机后由启动器 adb root / remount）。
 	if comp.Store != nil && comp.Store.RootEnabled(req.AvdName) {
 		opts.WritableSystem = true
 		s.rt.Log().Info("emulator", "%s 已开启 root：本次启动附加 -writable-system", req.AvdName)
-	}
-	if opts.CustomUI {
-		// 自定义 UI 必须无窗口：否则会出现"有 Qt 窗口 + gRPC 通道"这种无意义组合。
-		opts.NoWindow = true
-		// 自定义 UI 默认强制宿主 GPU，避免模拟器落到 SwiftShader；环境变量可用于兼容性回退。
-		gpu := strings.TrimSpace(os.Getenv(emulatorGPUEnv))
-		switch gpu {
-		case "":
-			gpu = "host"
-		case "host", "auto", "swiftshader_indirect", "angle_indirect", "guest", "off":
-		default:
-			s.rt.Log().Warn("emulator", "环境变量 %s=%q 不是合法图形后端，回退为 host", emulatorGPUEnv, gpu)
-			gpu = "host"
-		}
-		opts.GPU = gpu
 	}
 	inst, err := comp.Launcher.Start(s.rt.Context(), req.AvdName, opts)
 	if err != nil {

@@ -635,27 +635,7 @@ export function SettingsPage({ onToast, onSettingsChanged, env, jobs }: Props) {
                   <option value="system">跟随系统</option>
                 </select>
               </div>
-            </div>
-            <div className="field">
-              <div className="field__label row">
-                <Icon name="monitor" size={14} />
-                设备画面
-              </div>
-              <div className="field__control">
-                <select
-                  className="select"
-                  value={settings?.displayQuality ?? "smooth"}
-                  onChange={(e) => void patch({ displayQuality: e.target.value })}
-                >
-                  <option value="smooth">流畅优先（约 360p，推荐）</option>
-                  <option value="balanced">平衡（自适应，推荐）</option>
-                  <option value="sharp">清晰优先（540p）</option>
-                  <option value="ultra">超清（720p）</option>
-                </select>
-                <div className="field__hint">自定义 UI 独立设备窗口的画质；窗口打开时生效</div>
-              </div>
-            </div>
-            <div className="field">
+            </div>            <div className="field">
               <div className="field__label row">
                 <Icon name="terminal" size={14} />
                 日志级别

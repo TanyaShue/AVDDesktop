@@ -349,18 +349,12 @@ type NameValidation struct {
 
 // ---------------------------------------------------------------- 模拟器实例
 
-// LaunchOptions 是启动参数（界面只暴露冷启动、无窗口与自定义 UI 三个开关；端口由启动器内部决定）。
+// LaunchOptions 是启动参数（界面只暴露冷启动；端口由启动器内部决定）。
 type LaunchOptions struct {
 	ColdBoot bool `json:"coldBoot"`
-	NoWindow bool `json:"noWindow"`
 	// WritableSystem 表示设备已开启 root：附加 -writable-system，并在开机完成后
 	// 自动执行 adb root / remount，使 /system 可写。
 	WritableSystem bool `json:"writableSystem,omitempty"`
-	// CustomUI 表示使用应用自建窗口显示设备画面：不启动 Qt 窗口，并开启模拟器 gRPC 图像通道。
-	CustomUI bool `json:"customUI"`
-	// GPU 指定模拟器图形后端：host / auto / swiftshader_indirect / angle_indirect / guest / off。
-	// 空值或 off 时不追加 -gpu 参数。
-	GPU string `json:"gpu,omitempty"`
 }
 
 // EmulatorInstance 是一个模拟器实例（只保留界面展示与诊断需要的字段）。
@@ -376,9 +370,6 @@ type EmulatorInstance struct {
 	ExitCode  *int     `json:"exitCode,omitempty"`
 	LastError string   `json:"lastError,omitempty"`
 	Args      []string `json:"args"`
-	// CustomUI 表示该实例由应用自建窗口接管显示；GrpcPort 是其 gRPC 控制端口（未启用时为 0）。
-	CustomUI bool `json:"customUI,omitempty"`
-	GrpcPort int  `json:"grpcPort,omitempty"`
 }
 
 // AdbDevice 是 `adb devices -l` 中的一行。
@@ -460,10 +451,6 @@ type AppSettings struct {
 	// 日志
 	LogLevel    string `json:"logLevel"`
 	KeepLogDays int    `json:"keepLogDays"`
-
-	// DisplayQuality 是自定义 UI 设备窗口的画质档位：smooth|balanced|sharp|ultra。
-	// balanced 使用自适应宽度（性能上限 480），其余档位显式使用 360/540/720。
-	DisplayQuality string `json:"displayQuality"`
 
 	// MirrorSourceID 是 Android SDK 组件默认下载源；空值时使用内置默认源。
 	MirrorSourceID string `json:"mirrorSourceId"`

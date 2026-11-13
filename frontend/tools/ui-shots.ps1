@@ -4,7 +4,6 @@
 # 用法：
 #   pwsh -File frontend/tools/ui-shots.ps1 -Prefix after
 #   pwsh -File frontend/tools/ui-shots.ps1 -Prefix after -Sizes 1440x900,1180x760,960x640
-#   pwsh -File frontend/tools/ui-shots.ps1 -Base http://localhost:5199/device-preview.html -Prefix device -Only ""
 param(
     [string]$Base = "http://localhost:5199/preview.html",
     [string]$Out = "",
@@ -16,8 +15,7 @@ param(
     # 文件名变成 <prefix>-<W>x<H>-<state>.png。主窗口 MinWidth 是 960（main.go），
     # 所以每次改布局至少要覆盖 1440 / 1180（默认宽）/ 960（最小宽）。
     [string]$Sizes = "",
-    # 只抓指定状态，逗号分隔（留空表示全部；传 "page" 表示只抓一次无查询参数的首页，
-    # 用于设备窗口预览这类没有查询参数驱动的入口）
+    # 只抓指定状态，逗号分隔（留空表示全部；传 "page" 表示只抓一次无查询参数的首页）
     [string]$Only = ""
 )
 
