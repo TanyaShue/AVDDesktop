@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.tools/
+.avd/
+.tmp/
+gateway/.venv/
+gateway/proto/*_pb2.py
+gateway/proto/*_pb2_grpc.py
+gateway/proto/__pycache__/
+motion-app/build/
+results/*
+!results/.gitkeep

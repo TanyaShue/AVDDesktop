@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package android.emulation.v2;
+
+enum TrackType {
+  TRACK_TYPE_UNSPECIFIED = 0;
+  TRACK_TYPE_SCREEN_PRIMARY = 1;
+  TRACK_TYPE_SCREEN_SECONDARY = 2;
+  TRACK_TYPE_AUDIO_SPEAKER = 3;
+  TRACK_TYPE_AUDIO_MICROPHONE = 4;
+}
+
+enum IceTransportPolicy {
+  ICE_TRANSPORT_POLICY_UNSPECIFIED = 0;
+  ICE_TRANSPORT_POLICY_ALL = 1;
+  ICE_TRANSPORT_POLICY_RELAY = 2;
+}
+
+message IceServer {
+  repeated string urls = 1;
+  string username = 2;
+  string credential = 3;
+}
+
+message IceServerConfig {
+  repeated IceServer ice_servers = 1;
+  IceTransportPolicy ice_transport_policy = 2;
+}
+
+message RtcSession {
+  string session_id = 1;
+}
+
+message SessionDescription {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    OFFER = 1;
+    ANSWER = 2;
+    PRANSWER = 3;
+    ROLLBACK = 4;
+  }
+  Type type = 1;
+  string sdp = 2;
+}
+
+message IceCandidate {
+  string candidate = 1;
+  string sdp_mid = 2;
+  int32 sdp_m_line_index = 3;
+  optional string username_fragment = 4;
+}
+
+message JsepMessage {
+  RtcSession handle = 1;
+  oneof payload {
+    SessionDescription sdp = 2;
+    IceCandidate ice_candidate = 3;
+  }
+}
+
+message RtcStreamRequest {
+  repeated TrackType requested_tracks = 1;
+  repeated int32 secondary_display_ids = 2;
+  IceServerConfig ice_server_config = 3;
+}
+
+message RtcTrackBinding {
+  string mid = 1;
+  TrackType track_type = 2;
+  optional int32 display_id = 3;
+}
+
+message RtcStreamResponse {
+  RtcSession handle = 1;
+  repeated IceServer ice_servers = 2;
+  repeated RtcTrackBinding track_bindings = 3;
+}
+
+message SendJsepMessageResponse {}
+
+message RtcStreamUpdateRequest {
+  RtcSession handle = 1;
+  repeated TrackType added_tracks = 2;
+  repeated TrackType removed_tracks = 3;
+}
+
+message UpdateRtcStreamResponse {}
+
+message CloseRtcStreamRequest {
+  RtcSession handle = 1;
+}
+
+message CloseRtcStreamResponse {}
+
+service RtcService {
+  rpc RequestRtcStream(RtcStreamRequest) returns (RtcStreamResponse);
+  rpc UpdateRtcStream(RtcStreamUpdateRequest) returns (UpdateRtcStreamResponse);
+  rpc CloseRtcStream(CloseRtcStreamRequest) returns (CloseRtcStreamResponse);
+  rpc SendJsepMessage(JsepMessage) returns (SendJsepMessageResponse);
+  rpc ReceiveJsepMessageStream(RtcSession) returns (stream JsepMessage);
+}
